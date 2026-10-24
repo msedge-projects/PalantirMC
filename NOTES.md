@@ -3990,3 +3990,57 @@ on any machine in this session, so the request is proven against a scripted
 `MapFetch` exactly as `curseforge.rs`'s own tests are. Installing a CurseForge
 project -- resolving its file, honouring `allowModDistribution`, handing it to the
 loader -- is not built, which is why a card opens the site instead of a page here.
+## Bedrock is a place in the rail now, and it still does not install anything
+
+`crate::bedrock` has answered three questions since the Sift session -- is the
+other edition here, what worlds does the player have, which packs are installed --
+and nothing called it. It is a page now, at `/bedrock`, with its own rail slot
+beside Servers, and what it does **not** do is the design: no download, no version
+picker, no write of any kind. The Store package is licensed per account, so a
+launcher that fetched it would be redistributing somebody's licence; the page's one
+action opens the Store.
+
+**A page rather than a shelf on Home.** A Bedrock world is not a Java instance:
+nothing in the home list can launch it, and a row without a Play button in a list
+where every other row has one reads as a broken row. The rail entry is what makes
+it a place, and it is the one slot the reference does not have -- six places now
+instead of five, with the two buttons still on the floor where they were.
+
+**The scan is a request, answered by the shell.** A directory walk on the frame
+thread is the defect `crate::scale` measured for the Files tab, so `opening` asks
+once, the shell runs `bedrock::scan` through `store::off_thread`, and the page
+draws what came back. It cannot fail in a way worth reporting -- a missing folder
+is an empty shelf, which the module already documents -- but the crossing still
+carries a `Result` and the page's `Load` has its failed arm either way.
+
+**What the page draws**, in the order a reader meets it: the title; one card for
+the presence, which is `Installed` with the game folder's path, or the Store
+button, or "Windows-only", or the reason the folder could not be located; then the
+worlds and the two pack shelves, each a heading with its count and either rows or
+a sentence naming the folder it would have read (`games/com.mojang/worlds`,
+`resource_packs`, `behavior_packs`). Nothing is drawn behind three empty lists when
+there is no folder: three empty states under a Store button would read as three
+failures rather than one absence.
+
+**The Store needed a third scheme.** `crate::open` allowed `http` and `https`
+because everything it opened was a stranger's link; the Store's deep link is
+`ms-windows-store://`, so the allow-list grew by exactly that scheme and the test
+now asserts both directions -- the launcher's own `bedrock::STORE_URL` opens, and a
+look-alike (`ms-windows-store2://`) does not. The rule that made the list narrow
+still holds: the only string that ever travels under that scheme is this
+launcher's constant.
+
+**What was measured.** Four tests on the page -- the scan is asked once from
+`Idle` and not again, the Store button is a navigation to `STORE_URL`, every
+theme draws in every presence state, and a source scan that the page's own code
+contains no write call (the strings are written in that test, so it scans the file
+up to `#[cfg(test)]` rather than the whole of it). `cargo test -p
+palantir-desktop --locked` on `sift-launcher`: **902 passed / 0 failed** and 4
+native passed, the 898 after the CurseForge switch plus the four.
+
+**What this cannot say.** No Windows machine has drawn it, so the installed state
+-- a real `LocalState` folder, a world with an icon, a pack with a manifest -- has
+only been exercised through `bedrock`'s own unit tests against temp folders, never
+through the page. The rail's sixth slot has not been captured against the
+reference, because the reference has no sixth slot to capture; what is checked is
+that the slot is a route and that every page still draws in every theme.

@@ -99,15 +99,26 @@ What is **not** built, and is the next slice in this area:
   proven against a scripted fetch. The first session with a key should run one
   search and compare it with what `curseforge.rs`'s parser expects.
 
-### 3b. Bedrock is a module, not a section
+### 3b. Bedrock is a page now, and it still installs nothing
 
-`bedrock.rs` compiles and is tested by 6 cases; nothing calls it. What is
-missing is entirely presentation and routing: a route/rail entry, a page that
-draws `Presence` (installed vs. the Store link), the worlds list and the two
-packs shelves (`PackKind::Resource` / `Behavior`), with the empty state that
-says where the folder is. `crate::bedrock` is `pub` inside the binary, so a page
-can call it directly; no store plumbing is needed, because every read is local
-and cheap.
+**Settled on 2026-10-24.** `/bedrock` is a route, the rail carries a sixth place
+beside Servers, and `pages/bedrock.rs` draws what `crate::bedrock` reads: the
+presence (installed with the game folder's path, the Store button, Windows-only, or
+the reason the folder could not be located), the worlds, and the two pack shelves,
+each with the empty sentence that names the folder it would have read. The scan is
+a request like every other read: `State::opening` asks once, the shell runs
+`bedrock::scan` off-thread, and the page draws the answer.
+
+The design constraint stands and is why there is nothing else: this is a **shelf
+beside the Java shelf**, not a second launcher. No download, no version picker, no
+write. `crate::open` grew its third allowed scheme (`ms-windows-store`) for the
+Store button, and only for the launcher's own constant.
+
+What is **not** proven: no Windows machine has drawn the page, so the installed
+state has only been exercised through `bedrock`'s own unit tests against temp
+folders. The rail's sixth slot has no reference capture to compare with -- the
+reference has five -- so what is checked is that the slot is a route and that
+every page still draws in every theme. See section 6 for the Windows checklist.
 
 The design constraint worth restating: this is a **shelf beside the Java
 shelf**, not a second launcher. No download, no version picker, no write.

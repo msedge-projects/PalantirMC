@@ -365,6 +365,14 @@ pub enum Route {
     Discover { project_type: ProjectType },
     /// `/skins`
     Skins,
+    /// `/bedrock` -- the shelf beside the Java one.
+    ///
+    /// The reference has no such page, because the reference does not read the
+    /// other edition's data at all. It is a route rather than a section of Home
+    /// because a Bedrock world is not a Java instance: nothing on Home's list can
+    /// launch it, and a row without a Play button in a list where every other row
+    /// has one is a row that reads as broken.
+    Bedrock,
     /// `/screenshots`
     Screenshots,
     /// `/user/:user/:projectType?`
@@ -401,6 +409,7 @@ impl Route {
             },
             Route::Discover { .. } => "Discover content",
             Route::Skins => "Skin selector",
+            Route::Bedrock => "Bedrock",
             Route::Screenshots => "Screenshots",
             Route::User { .. } => "User",
             Route::Project { tab, .. } => match tab {
@@ -476,6 +485,7 @@ impl Route {
         }
         match segments {
             [one] if one == "skins" => Some(Route::Skins),
+            [one] if one == "bedrock" => Some(Route::Bedrock),
             [one] if one == "screenshots" => Some(Route::Screenshots),
             [hosting, manage] if hosting == "hosting" && manage == "manage" => Some(Route::Servers),
             [hosting, manage, id] if hosting == "hosting" && manage == "manage" => {
@@ -703,6 +713,7 @@ impl Address {
             Route::Servers => vec![(Rail::Servers, Mark::Primary)],
             Route::Server { .. } => vec![(Rail::Servers, Mark::Subpage)],
             Route::Skins => vec![(Rail::Skins, Mark::Primary)],
+            Route::Bedrock => vec![(Rail::Bedrock, Mark::Primary)],
             Route::Screenshots => vec![(Rail::Screenshots, Mark::Primary)],
             // An instance page marks nothing at all, which looks like an
             // oversight upstream and is reproduced anyway: `App.vue` gives
@@ -733,6 +744,13 @@ pub enum Rail {
     Screenshots,
     /// `ServerStackIcon` -- `/hosting/manage`
     Servers,
+    /// `BoxIcon` -- `/bedrock`, this launcher's own slot.
+    ///
+    /// The one slot the reference does not have, beside Servers rather than after
+    /// the settings button: it is a place in the library, not an action, and the
+    /// rail's own shape -- five places, the quick-instance switcher, then the two
+    /// buttons on the floor -- is what decides where a place can go.
+    Bedrock,
     /// `PlusIcon` -- opens the creation flow; not addressable
     CreateInstance,
     /// `SettingsIcon` -- opens `AppSettingsModal`; not addressable
@@ -749,6 +767,7 @@ impl Rail {
         Rail::Skins,
         Rail::Screenshots,
         Rail::Servers,
+        Rail::Bedrock,
         Rail::CreateInstance,
         Rail::Settings,
         Rail::Profile,
@@ -763,6 +782,7 @@ impl fmt::Display for Rail {
             Rail::Skins => "skins",
             Rail::Screenshots => "screenshots",
             Rail::Servers => "servers",
+            Rail::Bedrock => "bedrock",
             Rail::CreateInstance => "create",
             Rail::Settings => "settings",
             Rail::Profile => "profile",
@@ -905,6 +925,7 @@ mod tests {
             },
             Route::Skins,
             Route::Screenshots,
+            Route::Bedrock,
             Route::User {
                 user: "jelly".into(),
                 project_type: None,
@@ -1154,8 +1175,10 @@ mod tests {
     }
 
     #[test]
-    fn the_rail_has_eight_slots_and_three_of_them_are_not_routes() {
-        assert_eq!(Rail::ALL.len(), 8);
+    fn the_rail_has_nine_slots_and_three_of_them_are_not_routes() {
+        // Eight of the reference's slots plus Bedrock, which is this launcher's
+        // own place in the library.
+        assert_eq!(Rail::ALL.len(), 9);
         let addressable: Vec<Rail> = sample()
             .iter()
             .flat_map(|route| Address::at(route.clone()).marks())
@@ -1167,6 +1190,10 @@ mod tests {
                 "{slot} is a button in the reference, not a route"
             );
         }
+        assert!(
+            addressable.contains(&Rail::Bedrock),
+            "the shelf is a place, and a place lights its slot"
+        );
     }
 
     #[test]

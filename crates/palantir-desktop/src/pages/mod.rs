@@ -11,6 +11,7 @@
 //! here is answerable on its own -- its states, its filtering, its keys -- and the
 //! shell's own file stays the size of the frame it draws.
 
+pub mod bedrock;
 pub mod discover;
 pub mod home;
 pub mod instance;
@@ -49,6 +50,8 @@ pub enum Screen {
     Skins(skins::State),
     /// The screenshot library.
     Screenshots(screenshots::State),
+    /// The Bedrock shelf, at `/bedrock`.
+    Bedrock(bedrock::State),
     /// Modrinth Hosting.
     Servers(servers::State),
     /// A user's profile.
@@ -74,6 +77,8 @@ pub enum Message {
     Skins(skins::Message),
     /// The screenshots.
     Screenshots(screenshots::Message),
+    /// The Bedrock shelf.
+    Bedrock(bedrock::Message),
     /// Modrinth Hosting.
     Servers(servers::Message),
     /// A profile.
@@ -154,6 +159,13 @@ pub enum Ask {
     /// `opening` hands back one request at a time, and these are the ones whose
     /// answer the page cannot draw anything without.
     Tags,
+    /// Ask the machine, not the network, for the Bedrock shelf: where the game's
+    /// data folder is, and what is in it.
+    ///
+    /// A request all the same, because it is a directory walk and the shell is the
+    /// one that runs those off the frame thread ([`crate::pages::bedrock::scan`]).
+    /// The one ask here whose answer needs no engine.
+    Bedrock,
     /// Ask the store, through the engine, for one project: its own document, the
     /// people on its team, and its version list.
     ///
@@ -298,6 +310,14 @@ impl Message {
         Message::Discover(discover::Message::Tags { result })
     }
 
+    /// The message that carries the Bedrock scan back to its page.
+    ///
+    /// The answer's type is the page's, as with every other result here: the shell
+    /// runs the walk and has no opinion about worlds or packs.
+    pub fn bedrock(scan: Result<bedrock::Scan, String>) -> Message {
+        Message::Bedrock(bedrock::Message::Scanned(scan))
+    }
+
     /// The message that carries one tab's listing back to the instance page.
     ///
     /// The same seam as [`Message::search_result`], and the answer's own type is
@@ -440,6 +460,7 @@ impl Screen {
             }
             Route::Skins => Screen::Skins(skins::State::default()),
             Route::Screenshots => Screen::Screenshots(screenshots::State::default()),
+            Route::Bedrock => Screen::Bedrock(bedrock::State::new()),
             Route::Servers | Route::Server { .. } => Screen::Servers(servers::State::default()),
             // The two parts of a profile's address are the page's own state rather
             // than something the shell hands it at drawing time: a page that could
@@ -472,6 +493,7 @@ impl Screen {
             (Screen::Discover(_), Route::Discover { .. }) => true,
             (Screen::Skins(_), Route::Skins) => true,
             (Screen::Screenshots(_), Route::Screenshots) => true,
+            (Screen::Bedrock(_), Route::Bedrock) => true,
             (Screen::Servers(_), Route::Servers) => true,
             (Screen::Project(state), Route::Project { id, .. }) => state.id == *id,
             (Screen::Instance(state), Route::Instance { id, .. }) => state.id == *id,
@@ -624,6 +646,11 @@ impl Screen {
                 }
             }
             (Screen::Screenshots(state), Message::Screenshots(message)) => state.update(message),
+            (Screen::Bedrock(state), Message::Bedrock(message)) => {
+                if let Some(asked) = state.update(message) {
+                    return Some(asked);
+                }
+            }
             (Screen::Servers(state), Message::Servers(message)) => state.update(message),
             // A message for a page that is not on screen is dropped rather than
             // applied to the wrong one: the shell routes by what it is showing.
@@ -655,6 +682,10 @@ impl Screen {
             // idle and the shell asks on the same turn -- which is why this is the
             // page's own `opening` rather than a request the tab press sends.
             Screen::Instance(state) => state.opening().map(Ask::Instance),
+            // The shelf is a folder on this machine, not a document: it is owed a
+            // scan on arrival, and only one -- the page asks from `Idle` and the
+            // answer is what fills it.
+            Screen::Bedrock(state) => state.opening(),
             _ => None,
         }
     }
@@ -740,6 +771,9 @@ impl Screen {
                 screenshots::view(theme, state, store).map(Message::Screenshots)
             }
             Screen::Servers(state) => servers::view(theme, state, store).map(Message::Servers),
+            // The page reads nothing from the store: its scan is its own, and the
+            // shelf needs no engine to say where a folder is.
+            Screen::Bedrock(state) => state.view(theme).map(Message::Bedrock),
             Screen::User(state) => user::view(theme, state, store).map(Message::User),
         }
     }

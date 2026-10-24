@@ -9,10 +9,16 @@
 //! It is also the only place this launcher starts a program that is not Minecraft
 //! or Java, so the rules are stated here rather than at each call site:
 //!
-//! * **Two schemes, not every scheme.** `http` and `https` are opened. The feed is
-//!   a stranger's JSON, and `file:///...` would hand the operating system a local
-//!   file while a Windows `cmd:`-style scheme would hand it a command; neither is
-//!   a link, and a scheme this module does not know is refused with a sentence.
+//! * **Three schemes, not every scheme.** `http` and `https` are opened, and so is
+//!   `ms-windows-store` -- the Store's deep link, which is the one address a
+//!   launcher is allowed to hand the OS on purpose (the Bedrock shelf uses it,
+//!   because the game's package is licensed per account and cannot be fetched).
+//!   The feed is a stranger's JSON, and `file:///...` would hand the operating
+//!   system a local file while a Windows `cmd:`-style scheme would hand it a
+//!   command; neither is a link, and a scheme this module does not know is refused
+//!   with a sentence. The Store scheme is only ever passed
+//!   [`crate::bedrock::STORE_URL`], this launcher's own constant, never a string a
+//!   page or a service supplied.
 //! * **The command is a value**, built per platform by [`command_for`], so the
 //!   tests assert what *would* be run. A command that is only ever built is
 //!   exactly the kind of thing that is wrong until somebody runs it, and only one
@@ -25,6 +31,14 @@
 
 use std::process::Command;
 
+/// The Store's own scheme, which is the third link this launcher opens and the
+/// only one that is not the web.
+///
+/// Named here rather than spelled at the call site so the allow-list and the URL
+/// cannot drift: [`crate::bedrock::STORE_URL`] is the only string that ever
+/// travels under it, and the tests hold the two together.
+pub const STORE_SCHEME: &str = "ms-windows-store";
+
 /// Whether this launcher will hand `url` to the operating system.
 ///
 /// The scheme has to be one of two, and it has to be followed by `//`: a link
@@ -34,7 +48,11 @@ pub fn is_openable(url: &str) -> bool {
     let Some((scheme, rest)) = url.split_once(':') else {
         return false;
     };
-    rest.starts_with("//") && matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https")
+    rest.starts_with("//")
+        && matches!(
+            scheme.to_ascii_lowercase().as_str(),
+            "http" | "https" | STORE_SCHEME
+        )
 }
 
 /// The program and arguments that open `url` on `platform`, or `None` when this
@@ -102,12 +120,25 @@ mod tests {
             is_openable("HTTPS://MODRINTH.COM/news"),
             "a scheme is case-insensitive"
         );
+        // The Store's deep link is the third, and it is this launcher's own.
+        assert!(
+            is_openable(crate::bedrock::STORE_URL),
+            "the one address the Bedrock shelf opens"
+        );
+        assert_eq!(
+            crate::bedrock::STORE_URL.split(':').next(),
+            Some(STORE_SCHEME),
+            "the allow-list's name and the constant's scheme are one string"
+        );
         // The feed is a stranger's JSON: a local file, a Windows command handler
         // and a `javascript:` URL all arrive as strings and none of them is a link.
         assert!(!is_openable("file:///C:/Windows/System32/cmd.exe"));
         assert!(!is_openable("cmd://whatever"));
         assert!(!is_openable("javascript://alert(1)"));
         assert!(!is_openable("ms-settings://privacy"));
+        // Including another Store-shaped scheme: the allow-list is a list, not a
+        // rule about schemes that look official.
+        assert!(!is_openable("ms-windows-store2://pdp/"));
         // And neither is something that only looks like one.
         assert!(
             !is_openable("https:modrinth.com/news"),

@@ -167,6 +167,12 @@ enum Asked {
     /// the product's directory and therefore the shell's -- the reference reaches
     /// the same write through its own store's `set_custom_skin_order`.
     Reorder(skins::Reorder),
+    /// Read the Bedrock shelf's folder and what is in it.
+    ///
+    /// The one ask answered from this machine rather than a service: the page is
+    /// owed a scan when it opens, and the walk happens on a thread of its own like
+    /// every other read that touches a disk.
+    Bedrock,
 }
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -187,15 +193,20 @@ pub const RAIL_PAD: f32 = 8.0;
 pub const RAIL_GAP: f32 = 4.0;
 /// `h-px w-8` on the switcher's separator rule.
 pub const RAIL_RULE: f32 = 32.0;
-/// The rail's link group, in `App.vue`'s order: the five slots above the
+/// The rail's link group, in `App.vue`'s order: the slots above the
 /// quick-instance switcher. The two conditional ones are listed here anyway and
 /// left out when the settings turn them off; see [`Shell::nav_slots`].
-pub const RAIL_NAV: [Rail; 5] = [
+///
+/// Six rather than the reference's five: Bedrock is this launcher's own place in
+/// the library, and a place belongs in the group the other places are in. The two
+/// buttons on the floor are not places and stay where they are.
+pub const RAIL_NAV: [Rail; 6] = [
     Rail::Home,
     Rail::Discover,
     Rail::Skins,
     Rail::Screenshots,
     Rail::Servers,
+    Rail::Bedrock,
 ];
 /// The rail's foot, in `App.vue`'s order. The switcher's growth is what holds
 /// these two on the rail's floor; see [`Shell::rail`].
@@ -2133,6 +2144,7 @@ impl Shell {
             Rail::Skins => Some("/skins"),
             Rail::Screenshots => Some("/screenshots"),
             Rail::Servers => Some("/hosting/manage/"),
+            Rail::Bedrock => Some("/bedrock"),
             Rail::CreateInstance | Rail::Settings | Rail::Profile => None,
         }
     }
@@ -2542,6 +2554,7 @@ impl Shell {
                 Asked::Search(asked) => self.search(asked),
                 Asked::Icons(asked) => self.icons(asked),
                 Asked::Tags => self.tags(),
+                Asked::Bedrock => self.bedrock(),
                 Asked::Instance(asked) => self.instance(asked),
                 Asked::Project(asked) => self.project(asked),
                 Asked::User(asked) => self.user(asked),
@@ -3201,6 +3214,7 @@ impl Shell {
                     Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
                     Some(pages::Ask::Icons(asked)) => Some(Asked::Icons(asked)),
                     Some(pages::Ask::Tags) => Some(Asked::Tags),
+                    Some(pages::Ask::Bedrock) => Some(Asked::Bedrock),
                     Some(pages::Ask::Instance(asked)) => Some(Asked::Instance(asked)),
                     Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
                     Some(pages::Ask::User(asked)) => Some(Asked::User(asked)),
@@ -3998,6 +4012,9 @@ impl Shell {
             // made it is the message that delivered them.
             Some(pages::Ask::Icons(_)) => iced::Command::none(),
             Some(pages::Ask::Tags) => self.tags(),
+            // The shelf's scan *is* owed by arrival, like the tag lists: the page
+            // has nothing to draw until it answers.
+            Some(pages::Ask::Bedrock) => self.bedrock(),
             Some(pages::Ask::Instance(asked)) => self.instance(asked),
             Some(pages::Ask::Project(asked)) => self.project(asked),
             Some(pages::Ask::User(asked)) => self.user(asked),
@@ -4366,6 +4383,26 @@ impl Shell {
         iced::Command::perform(crate::store::off_thread(move || store.tags()), |result| {
             Message::Screen(pages::Message::tags(result))
         })
+    }
+
+    /// Read the Bedrock shelf off this machine.
+    ///
+    /// A directory walk and a handful of small files per world and pack, and it
+    /// goes off the frame thread for the reason every other read here does: the
+    /// shelf is a visit, and the walk is the cost the page would otherwise pay
+    /// every frame it was drawn ([`crate::scale`] measured that on the Files tab).
+    /// No engine: the store is not involved, and a machine with no Bedrock simply
+    /// answers with the presence that says so.
+    fn bedrock(&self) -> iced::Command<Message> {
+        iced::Command::perform(
+            // Infallible on purpose: a missing folder is an empty shelf, and the
+            // presence is the answer to "where is it" rather than an error about
+            // it. The crossing still carries a `Result` because that is what it
+            // hands back for every other read, and the page's `Load` has a failed
+            // arm either way.
+            crate::store::off_thread(|| Ok::<_, String>(crate::pages::bedrock::scan())),
+            |scan| Message::Screen(pages::Message::bedrock(scan)),
+        )
     }
 
     /// The same search with the projects this launcher already has taken out.
@@ -10068,6 +10105,9 @@ fn rail_glyph(slot: Rail) -> Glyph {
         Rail::Skins => Glyph::Shirt,
         Rail::Screenshots => Glyph::Image,
         Rail::Servers => Glyph::ServerStack,
+        // The crate the game ships as, which is also what `Glyph::Box` is in the
+        // icon set: a shelf for the other edition rather than a symbol for it.
+        Rail::Bedrock => Glyph::Box,
         Rail::CreateInstance => Glyph::Plus,
         Rail::Settings => Glyph::Settings,
         Rail::Profile => Glyph::LogIn,
@@ -10161,6 +10201,10 @@ fn crumbs(address: &Address, instance_name: Option<&str>) -> Vec<Crumb> {
         }
         // `Servers.vue`, which spells its own name "Hosting".
         route::Route::Servers => vec![Crumb::with_icon(Glyph::ServerStack, "Hosting")],
+        // The shelf's own name. The reference has no such page and so has no
+        // message for it: one literal here, beside the two the skins and hosting
+        // pages already carry for the same reason.
+        route::Route::Bedrock => vec![Crumb::with_icon(Glyph::Box, "Bedrock")],
         // `hosting/manage/Index.vue`: the server's own name, pushed under the
         // servers root. The name is the only part this route does not have; the
         // reference reads it from the server it loaded.
