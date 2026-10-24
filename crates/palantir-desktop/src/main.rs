@@ -21,6 +21,11 @@ mod anim;
 /// The reference's `Avatar`: a project's own icon, decoded and rounded to the
 /// share of its size the reference's own stylesheet rounds it by.
 mod avatar;
+/// Keeping the machine awake for the work a reader is waiting on: an install and
+/// a launch both look like idleness to Windows, and a suspended laptop takes the
+/// download's process with it. See the module for why this is a per-thread
+/// request and why the screen is left alone.
+mod awake;
 /// Bedrock: what this launcher may do with the edition it did not install --
 /// find the player's own copy, list its worlds and packs, and offer the Store
 /// link instead of a download. See the module for why there is no pipeline.

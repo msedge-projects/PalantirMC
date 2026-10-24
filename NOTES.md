@@ -3769,3 +3769,49 @@ once, on the VM with Noto installed, as `Content::Color`. A Windows run of the
 probe would close that gap and needs a host; until then the claim is "the face
 Windows ships is reached second, before its symbol face", which is readable from
 the tree and is what the gate holds.
+## A machine that is allowed to sleep in the middle of a download
+
+An install is hundreds of megabytes arriving over a home connection and a first
+launch downloads its assets before any game window exists; neither produces input
+for minutes at a time, so Windows reads both as idleness. On a laptop with the
+default power plan that is a suspend in the middle of one, and a suspended
+machine takes the process with it -- the 900 MB install that dies at 80%. The
+reference has no equivalent to copy: its Electron main process never calls
+`powerSaveBlocker`, which is why this is a decision rather than a port.
+
+**The request is a guard, because the API is per thread.** `SetThreadExecutionState`
+sets a *thread's* execution requirements, and `ES_CONTINUOUS` keeps them until that
+thread changes them or exits. So `crate::awake::Awake` is begun and dropped inside
+the worker thread that does the work -- which is what covers the paths a
+hand-written `release()` at the end of a function would miss: an early return, a
+`?`, a panic. Two places hold one: `install::run`, which every install goes
+through (a launch's own preparation, a project install, a modpack, a repair), and
+`run_launch_worker`, which then sits on the child's output for the length of the
+session.
+
+**The display is deliberately not required.** `ES_DISPLAY_REQUIRED` would hold the
+panel lit for the whole of a multi-gigabyte install. Burning a laptop's screen to
+finish a download trades one annoyance for a worse one, so the request is
+`ES_CONTINUOUS | ES_SYSTEM_REQUIRED` and nothing else -- and the gate says so by
+naming the display flag and asserting its bit is absent.
+
+**Nesting is counted, because a launch installs inside its own guard.**
+`ES_CONTINUOUS` on the inner release would clear the outer request outright, so
+the thread keeps a depth in a `Cell` and only the outermost guard talks to the OS.
+Measured: two guards produce one request; dropping the inner one asks nothing and
+leaves the request in force; the outer drop releases it.
+
+**What was measured.** Four tests -- the flag bits, one guard's ask/release, the
+nested pair, and a source gate that the install runner and the launch worker each
+still hold a guard (neither can be run in a test: an install needs a wire and a
+plan, a launch needs a game). `cargo test -p palantir-desktop --locked` on
+`sift-launcher`: **880 passed / 0 failed** and 4 native passed, the 876 slice B
+left plus the four.
+
+**What this cannot say.** The build VM is Linux, where `Awake` is a no-op by
+design, so what ran there is the counting and the flags, not the call: the FFI
+line is compiled only by CI's two Windows exe jobs and has not been *executed*
+anywhere. The constants are the SDK header's (`ES_CONTINUOUS` `0x80000000`,
+`ES_SYSTEM_REQUIRED` `0x1`), and the claim "the machine stayed awake through a real
+install" needs a Windows host with a power plan that would otherwise sleep --
+which no machine in this session has.

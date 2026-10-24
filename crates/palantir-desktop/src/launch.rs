@@ -1701,6 +1701,12 @@ pub fn online_backend(paths: &PalantirPaths, instance_id: &str) -> (PublisherMet
 /// child with piped output, stream batches + a final done message through the
 /// subscription sender. Never reports success it did not observe.
 pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<LaunchEvent>) {
+    // A launch is the other thing a machine must not sleep through: the first
+    // start of a pack downloads its assets for minutes before any game window
+    // exists, and the worker then sits on the child's output for the length of
+    // the session. Held for the whole of it, on this thread, released when the
+    // worker returns.
+    let _awake = crate::awake::Awake::begin();
     let paths = PalantirPaths::at(&params.data_root);
     let run_id = params.run_id;
     let mut sender = sender;

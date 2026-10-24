@@ -719,6 +719,12 @@ pub fn run(
     threads: usize,
     reporter: &mut Reporter,
 ) -> InstallReport {
+    // An install is idle as far as Windows is concerned -- no input, only bytes
+    // arriving -- so the machine is asked to stay up for as long as this call
+    // runs. The guard is per thread, and this is the thread doing the work; a
+    // launch's own install nests inside the launch's guard, which the counter in
+    // `crate::awake` handles.
+    let _awake = crate::awake::Awake::begin();
     let mut report = InstallReport {
         present: plan.present,
         problems: plan.problems.clone(),

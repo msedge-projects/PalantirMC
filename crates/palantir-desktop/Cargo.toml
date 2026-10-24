@@ -61,12 +61,13 @@ tempfile = "3"
 # in, so this adds nothing to the build.
 zip = "0.6"
 
-# The shell needs two Win32 calls iced 0.12 does not expose: the monitor work
-# area (so the window opens at a size the screen can actually hold) and the OS
-# resize loop. iced wraps winit's `drag_window` but has no equivalent of
-# `drag_resize_window`, so an undecorated window cannot be resized from its
-# edges without this. Already in the workspace lock file via winit 0.29, so it
-# costs no new download; the feature list is deliberately just these modules.
+# The shell needs three Win32 things iced 0.12 does not expose: the monitor work
+# area (so the window opens at a size the screen can actually hold), the OS
+# resize loop, and the power request below. iced wraps winit's `drag_window` but
+# has no equivalent of `drag_resize_window`, so an undecorated window cannot be
+# resized from its edges without this. Already in the workspace lock file via
+# winit 0.29, so it costs no new download; the feature list is deliberately just
+# these modules.
 [target.'cfg(windows)'.dependencies]
 # `Win32_System_Registry` is read-only use rather than another call into the
 # window: the shell asks Windows for the system light/dark preference (so the
@@ -78,9 +79,14 @@ zip = "0.6"
 # a crate already linked above, where the modern picker would mean the COM
 # features and the object lifetime that comes with them -- the trade is written
 # out in that module's documentation rather than left to be discovered.
+#
+# `Win32_System_Power` is `SetThreadExecutionState` (`crate::awake`): an install
+# and a launch are both minutes of no input, and the one call that keeps the
+# machine from suspending through them lives in this module.
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_System_Power",
     "Win32_System_Registry",
     "Win32_UI_Controls_Dialogs",
     "Win32_UI_HiDpi",
