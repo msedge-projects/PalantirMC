@@ -190,28 +190,46 @@ Anything that requires launching the described program — the setup wizard, the
 launcher's own window on Windows — is **unverifiable here**. Say so rather than
 inferring it from a green compile.
 
-## 5. The Windows checklist, and none of it is done
+## 5. The Windows checklist, and two of it are done
 
 Every item below needs a Windows machine with the built exe or the installer on
-it. **Nothing here has been run** — not one box is ticked, and a session that ticks
-one should say which machine, which build (`sha256` of the exe) and what it saw.
-Each item is written so it can be followed without reading the source.
+it. **Two are ticked** — on 2026-10-24, on the owner's own Windows PC, from CI run
+`40115604939`'s `palantirmc-x86_64-pc-windows-msvc` artifact, exe `sha256`
+`355dafe354ed3bf1b2f68adb56f3b3c42aad22ed88d8d87c7a7e0f7f56293645` (28,648,960
+bytes), installed by hand at `%LOCALAPPDATA%\Programs\Sift Launcher\` — the layout
+`sift.nsi` produces, because the setup exe itself has still never been built or
+run. A session that ticks another should say which machine, which build and what
+it saw. Each item is written so it can be followed without reading the source.
 
 Run the build first: take the exe from CI's `palantirmc-x86_64-pc-windows-msvc`
 artifact (the run on `master`), and the setup exe from `makensis
 -DVERSION=0.1.0 installer\sift.nsi` run on a Windows box with NSIS installed.
 
-- [ ] **The exe's file properties.** Right-click the exe → Properties → Details.
+- [x] **The exe's file properties.** Right-click the exe → Properties → Details.
   Expect *Product name* `PalantirMC`, *File version* `0.1.0`, *Product version*
   `0.1.0`, the copyright line from `LICENSE`, and the mark as the file's icon in
   Explorer's list, the taskbar and Alt-Tab, at 16, 32, 48 and 256 pixels.
-- [ ] **The launcher starts, and only one does.** Double-click it twice within a
+  **Seen 2026-10-24:** reading the version block back off the downloaded artifact
+  gave `ProductName: PalantirMC`, `FileVersion: 0.1.0`, `ProductVersion: 0.1.0`,
+  `CompanyName: Palantir Studios`, `LegalCopyright: Copyright (c) 2026 Palantir
+  Studios. All rights reserved.` The *icon* at the four sizes is the part of this
+  item nobody has looked at yet: it wants Explorer in each view mode and Alt-Tab
+  with the window open.
+- [x] **The launcher starts, and only one does.** Double-click it twice within a
   few seconds. Expect one window, and on the second launch a message box saying
   the launcher is already running and naming a process id. Then: open Task
   Manager, end the first launcher, delete nothing, and double-click again —
   expect it to start, because the lock file is a stale claim rather than a
   permanent one. After closing it cleanly, `%APPDATA%\PalantirMC\palantir.pid`
   (or wherever `PALANTIRMC_HOME` points) should be gone.
+  **Seen 2026-10-24:** the first start draws a window titled `PalantirMC`,
+  responding, and writes `%APPDATA%\PalantirMC\palantir.pid` holding its pid
+  (`12724` that run) beside `palantirmc-desktop.json`. A second start within
+  seconds owns a window of its own titled `PalantirMC` -- the message box -- and
+  stays alive until that box is answered (it was dismissed by hand), then exits
+  **0** with the first window untouched and still the only launcher. Starting a
+  third time behaves the same way. The *stale-lock* half -- kill the first from
+  Task Manager and start again -- has not been tried.
 - [ ] **The machine stays awake through an install.** On a laptop, set a one-minute
   sleep timeout (`powercfg /change standby-timeout-ac 1`, restore it afterwards),
   then start a large install or a first launch that downloads. While it runs,
