@@ -1158,8 +1158,7 @@ impl Store {
     }
 
     /// One page of CurseForge's catalogue, read with the key this launcher
-    /// holds.
-    ///
+    /// holds.    ///
     /// **Blocking**, like every engine call, so the shell runs it off the frame
     /// thread. Uncached as well, and that is not an omission: Overwolf's terms
     /// forbid storing what the API answers, so this goes to `Fetch` directly
@@ -1167,11 +1166,9 @@ impl Store {
     /// does (`palantir_net::curseforge`'s module documentation has the two
     /// clauses).
     ///
-    /// Nothing calls this yet: Discover still searches one catalogue, and the
-    /// source switch ships only when both catalogues read. The door is here
-    /// because the key's home has to hand it to something -- this is the request
-    /// that switch makes first, and a key with no reader is a preference nobody
-    /// can tell is working (`HANDOFF.md` §3a).
+    /// Discover calls this through [`Store::search_any`], the branch that picks a
+    /// catalogue, rather than reaching for it directly -- the switch that chooses
+    /// the source is the page's, and the store's part is to ask the one named.
     pub fn curseforge_search(
         &self,
         query: &palantir_net::curseforge::CfQuery,
@@ -1182,6 +1179,31 @@ impl Store {
         let key = self.curseforge_key()?;
         palantir_net::curseforge::fetch_search(engine.fetch().as_ref(), &key, query)
             .map_err(|error| error.to_string())
+    }
+
+    /// One search, run through whichever catalogue its question names.
+    ///
+    /// The branch the shell would otherwise carry in a closure, and here for two
+    /// reasons: [`Store::search`] and [`Store::curseforge_search`] answer in their
+    /// own catalogues' types, and a caller that had to map one of them would be a
+    /// caller that could map it wrong. Everything above this line -- which source
+    /// the page chose, what the query holds -- is decided by the page; the store's
+    /// part is only "ask the one that was named".
+    ///
+    /// A store with no engine answers with the sentence for the catalogue that was
+    /// asked, so a CurseForge search in a test with no engine says CurseForge
+    /// rather than "Discover's search".
+    pub fn search_any(
+        &self,
+        query: &crate::pages::discover::CatalogQuery,
+    ) -> Result<Vec<Hit>, String> {
+        use crate::pages::discover::CatalogQuery;
+        match query {
+            CatalogQuery::Modrinth(api) => self.search(api),
+            CatalogQuery::CurseForge(cf) => self
+                .curseforge_search(cf)
+                .map(|page| page.data.iter().map(Hit::from_cf).collect()),
+        }
     }
 
     /// Modrinth's news feed, for the panel's news section.
@@ -3282,7 +3304,7 @@ mod tests {
         assert_eq!(hits[0].author, "jellysquid");
         assert_eq!(hits[0].summary, "Modern rendering engine");
         assert_eq!(hits[0].downloads, 41_000_000);
-        assert_eq!(hits[0].follows, 9_000);
+        assert_eq!(hits[0].follows, Some(9_000));
         // The tags come from the hit itself: no second request per card.
         assert_eq!(hits[0].game_versions, vec!["1.21.4"]);
         assert_eq!(hits[0].loaders, vec!["fabric", "optimization"]);
@@ -3408,6 +3430,93 @@ mod tests {
             store
                 .curseforge_search(&palantir_net::curseforge::CfQuery::new(
                     palantir_net::curseforge::CfClass::Mod
+                ))
+                .expect_err("no engine"),
+            not_implemented("CurseForge's catalogue")
+        );
+    }
+
+    /// The branch a search takes is the one its question names, and both arms go
+    /// through their own catalogue's door.
+    ///
+    /// A gate rather than a line of trust: the shell used to hold this `match` in
+    /// a closure, where the only way to see it was to run a window. One store, two
+    /// scripted routes -- a Modrinth `hits` body and a CurseForge `data` body --
+    /// and the two answers carry the shapes each catalogue publishes.
+    #[test]
+    fn a_search_goes_through_the_catalogue_its_question_names() {
+        use crate::pages::discover::{CatalogQuery, Source};
+
+        std::env::set_var(crate::prefs::CURSEFORGE_KEY_ENV, "");
+        let paths = PalantirPaths::at(scratch("two-catalogues"));
+        let mut prefs = crate::prefs::load(&paths);
+        prefs.curseforge_api_key = "$2a$10$test-key".into();
+        crate::prefs::save(&paths, &prefs).unwrap();
+        let fetch = Arc::new(MapFetch::new());
+        let store = Store::load(&paths).with_engine(Engine::over(paths.meta_dir(), fetch.clone()));
+
+        let api = ApiSearch::new("sodium");
+        fetch.set_route(&api.url(), Route::text(SEARCH_BODY));
+        let cf = palantir_net::curseforge::CfQuery::new(palantir_net::curseforge::CfClass::Mod)
+            .text("jei");
+        fetch.set_route(&cf.url(), Route::text(CF_SEARCH_BODY));
+
+        let modrinth = store
+            .search_any(&CatalogQuery::Modrinth(api))
+            .expect("Modrinth answered");
+        assert_eq!(modrinth.len(), 1);
+        assert_eq!(modrinth[0].title, "Sodium");
+        assert_eq!(modrinth[0].follows, Some(9_000));
+        assert_eq!(
+            modrinth[0].web, None,
+            "a Modrinth project is a route here, not an address"
+        );
+
+        let curseforge = store
+            .search_any(&CatalogQuery::CurseForge(cf))
+            .expect("CurseForge answered");
+        assert_eq!(curseforge.len(), 1);
+        assert_eq!(curseforge[0].title, "Just Enough Items");
+        assert_eq!(
+            curseforge[0].follows, None,
+            "CurseForge publishes no follower count"
+        );
+        assert_eq!(
+            curseforge[0].web.as_deref(),
+            Some("https://www.curseforge.com/projects/238222"),
+            "and pressing it opens the project's own page"
+        );
+        // Each arm asked its own catalogue exactly once: two questions, two
+        // requests, and the CurseForge one carried the key.
+        assert_eq!(fetch.count(), 2);
+        assert_eq!(
+            CatalogQuery::CurseForge(
+                palantir_net::curseforge::CfQuery::new(palantir_net::curseforge::CfClass::Mod)
+            )
+            .source(),
+            Source::CurseForge
+        );
+    }
+
+    /// A store with no engine names the catalogue that was asked, not Discover's
+    /// own: the sentence a reader sees has to be true about the thing that is
+    /// missing.
+    #[test]
+    fn a_search_with_no_engine_names_the_catalogue_in_the_question() {
+        use crate::pages::discover::CatalogQuery;
+        let store = Store::default();
+        assert_eq!(
+            store
+                .search_any(&CatalogQuery::Modrinth(ApiSearch::new("sodium")))
+                .expect_err("no engine"),
+            not_implemented("Discover's search")
+        );
+        assert_eq!(
+            store
+                .search_any(&CatalogQuery::CurseForge(
+                    palantir_net::curseforge::CfQuery::new(
+                        palantir_net::curseforge::CfClass::Mod
+                    )
                 ))
                 .expect_err("no engine"),
             not_implemented("CurseForge's catalogue")

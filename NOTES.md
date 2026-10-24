@@ -3923,3 +3923,70 @@ been executed anywhere here: CI's two exe jobs are the first place it compiles, 
 nothing in this session has opened the built exe's properties sheet. "Explorer
 shows the mark and the sheet shows 0.1.0" needs a Windows look, and the About page
 the version was meant to feed does not exist to look at.
+## The second catalogue is in Discover, and it stops where CurseForge stops
+
+Discover had one catalogue and `HANDOFF.md` §3a named the switch as the next
+change: the client, the key's row and the store door had all been built without a
+page asking. The switch is in now, and what it deliberately cannot do is as much
+of the design as what it can.
+
+**A third combobox, not a chip.** The reference has no source control at all, so
+whatever this is, it is this launcher's own surface -- and the smallest honest one
+is the control the reference already uses for a query parameter: the row that
+holds *Sort* and *View* holds *Source* too, in the same `ButtonFrame` trigger, its
+own panel, and a globe prefix (the two catalogue names are product names, not
+locale keys). Its x is the row's own arithmetic, `SORT_WIDTH + GAP + VIEW_WIDTH +
+GAP`, so neither of the reference's two triggers moves. A chip in a new shape
+would have been a control the stylesheet was never measured against, and the
+column's four boundaries are gated.
+
+**Four of the six tabs, and the other two fall back.** `cf_class` maps Modpack,
+Mod, ResourcePack and Shader; `Datapack`, `Plugin` and `Server` have no class id
+in this client, because the module does not guess ids it never measured. The
+source menu lists only what the tab can search, and a tab press onto one of the
+three returns the page to Modrinth -- the tab is the newer instruction, and a tab
+that searched nothing would be exactly the chip-that-does-not-work the handoff
+warned about.
+
+**What CurseForge cannot express is not sent.** Its search takes one
+`gameVersion` and one `modLoaderType`; the sidebar's versions and loaders are OR
+lists. So a version or a loader travels only when the reader chose exactly one,
+and two choices send neither rather than the first of them -- "the first of a set
+the reader built" is a filter nobody asked for. Categories, the licence, the
+environment and *hide already installed* are Modrinth facets with no CurseForge
+equivalent (the switch is `project_id NOT IN [...]`, and no id this launcher holds
+is a CurseForge id), so they are kept in the sidebar and simply not sent. Two of
+the five orders have no field either: **Relevance** is answered with CurseForge's
+own default (`sortField=2`, its *Popularity*, which is what it sorts a text search
+by) and **Followers** -- a count its search does not even publish -- with the same.
+The other three map exactly.
+
+**A card from CurseForge opens its own page.** Nothing in this launcher reads a
+CurseForge project by id, and installing from that catalogue is not built, so a
+card press carries `Hit::web` and the shell opens `curseforge.com/projects/<id>`
+through the same `crate::open` door the news links use -- the canonical id address,
+which redirects to whatever slug the author uses today. That is a new
+`pages::Open::Url`, the one "opening" that is not a route. A Modrinth press is
+unchanged. `Hit::follows` became `Option<u64>` for the same honesty: CurseForge
+publishes no follower count, and the card now draws one stat instead of a zero it
+would have been claiming.
+
+**The branch lives in the store, where a test can see it.** `Store::search_any`
+takes the page's `CatalogQuery` and calls the catalogue it names, so the shell's
+part is one call rather than a `match` inside a closure only a window could
+exercise. Measured on `sift-launcher` with `cargo test -p palantir-desktop
+--locked`: **898 passed / 0 failed** and 4 native passed. The gates that matter:
+one store with two scripted routes answers both catalogues and asserts each
+answer's own shape (a follower count from Modrinth, none and a web address from
+CurseForge); the page's source change asks with the tab's class, the text, the
+order and the page (which resets to one); a version or loader pair is sent only
+when the reader chose one; a tab press onto a class-less tab returns the source;
+a stale answer to the *other* catalogue's question is dropped by the round; and
+`pages` maps a CurseForge press to `Open::Url` and a Modrinth one to the project
+route.
+
+**What this cannot say.** No live CurseForge search has been made: there is no key
+on any machine in this session, so the request is proven against a scripted
+`MapFetch` exactly as `curseforge.rs`'s own tests are. Installing a CurseForge
+project -- resolving its file, honouring `allowModDistribution`, handing it to the
+loader -- is not built, which is why a card opens the site instead of a page here.

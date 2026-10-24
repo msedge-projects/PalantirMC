@@ -64,36 +64,40 @@ been run.
 
 ## 3. What is not done — the next three things, in this order
 
-### 3a. CurseForge is not in Discover (highest value, smallest surface)
+### 3a. CurseForge is in Discover now; installing from it is not
 
-The client and the manifest parser are ready; the page was not touched. The
-seams, by name:
+**Settled on 2026-10-24.** Discover's controls row carries a third combobox --
+*Source*, with Modrinth and CurseForge -- and both catalogues read. What the
+switch does, in the order a reader meets it:
 
-- `pages/discover.rs` → `Asked { round, query: palantir_net::engine::Search,
-  hide_installed }`. `Search` is Modrinth's query type, so a second catalogue
-  needs either a source on `Asked` or a `CfQuery` arm; a source enum is the
-  smaller change and keeps `round` meaning one thing.
-- `store.rs` → `Store::search(&ApiSearch)` is the single engine door.
-  `Store::curseforge_search(&CfQuery)` is the sibling that landed on 2026-10-24:
-  blocking, `not_implemented` when there is no engine, and uncached because
-  Overwolf's terms forbid storing an answer. It resolves the key itself through
-  `Store::curseforge_key()` rather than taking it as a parameter, so the shell
-  calls it exactly as it calls `search` and there is one answer about where the
-  key comes from.
-- `shell.rs` → a `Request` variant beside the existing search request, with the
-  same round-based staleness rule, plus the icon fetch the cards already use.
-- **The API key has a home now** (2026-10-24). `Prefs::curseforge_api_key` is a
-  row in this launcher's own preferences file, shaped like
-  `Prefs::microsoft_client_id`: skipped when empty, trimmed, and overridden by
-  `PALANTIRMC_CURSEFORGE_API_KEY` for one run. It is **not** a shipped key and
-  **not** in an OS keychain — Overwolf issues one per developer account, and
-  `accounts.json` keeps its tokens inline for Prism compatibility, so the key
-  lives where the launcher's other settings live. A request without one answers
-  `store::no_curseforge_key()`, which names both places a key can be.
-  `NOTES.md` has the reasoning and the measured tests.
+- `pages/discover.rs` → `Source`, `cf_class`, `CatalogQuery`, and
+  `State::curseforge_request`. The source menu offers only the tabs CurseForge has
+  a class for (**Modpack, Mod, ResourcePack, Shader**); a tab press onto
+  `Datapack`, `Plugin` or `Server` returns the page to Modrinth.
+- `store.rs` → `Store::search_any(&CatalogQuery)` is the one door the shell calls;
+  it dispatches to `Store::search` or `Store::curseforge_search`, and the key comes
+  from `Store::curseforge_key()` (environment, then the prefs row).
+- The CurseForge question carries the text, the class, the order and the page; a
+  game version and a loader only when the reader chose **exactly one** of each,
+  because its API takes a single value and the sidebar's sets are OR lists.
+  Categories, licence, environment and *hide already installed* are Modrinth
+  facets and are not sent. Relevance and Followers both map to CurseForge's
+  *Popularity* order, its own default.
+- A CurseForge card press opens `curseforge.com/projects/<id>` through
+  `pages::Open::Url` -- the canonical address, and the one place this launcher
+  navigates outside itself on purpose.
 
-A source chip that does not work is worse than no chip: ship the switch only
-with both catalogues reading.
+What is **not** built, and is the next slice in this area:
+
+- **Installing from CurseForge.** No project page, no file rows, no
+  `resolve_download`, no loader hand-off. That is why a card opens the site.
+  `CfMod::distribution_refusal()` is the sentence a refusal will use when a file
+  row exists to refuse.
+- **A CurseForge project page.** `Route::Project` reads Modrinth by id; a
+  CurseForge id in that route would be an empty page.
+- **A live request.** No machine in this session had a key, so the whole path is
+  proven against a scripted fetch. The first session with a key should run one
+  search and compare it with what `curseforge.rs`'s parser expects.
 
 ### 3b. Bedrock is a module, not a section
 

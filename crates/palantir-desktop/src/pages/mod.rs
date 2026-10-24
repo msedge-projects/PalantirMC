@@ -92,6 +92,15 @@ pub enum Open {
     Instance(String),
     /// Show a project, at `/project/:id`.
     Project(String),
+    /// Open an address outside the launcher.
+    ///
+    /// The one "opening" that is not a route, and it exists because not every
+    /// catalogue has a page here: pressing a CurseForge result opens the project's
+    /// own page on curseforge.com, which is where a reader can install from until
+    /// this launcher can read that catalogue's files (see
+    /// [`discover::Hit::web`]). The shell hands it to `crate::open`, the same door
+    /// the news feed's links and the Store button use.
+    Url(String),
     /// Show a profile, at `/user/:user/:projectType?`.
     ///
     /// The only navigation whose *address* carries a choice rather than a name: a
@@ -528,8 +537,13 @@ impl Screen {
             (Screen::Home(_), Message::Home(home::Message::Open(id))) => {
                 return Some(Ask::Open(Open::Instance(id)))
             }
-            (Screen::Discover(_), Message::Discover(discover::Message::Open(id))) => {
-                return Some(Ask::Open(Open::Project(id)))
+            (Screen::Discover(_), Message::Discover(discover::Message::Open { project, web })) => {
+                // A hit from a catalogue this launcher has no page for carries the
+                // address to open instead; everything else is the project route.
+                return Some(Ask::Open(match web {
+                    Some(url) => Open::Url(url),
+                    None => Open::Project(project),
+                }));
             }
             // The library's create button is reported rather than applied: what
             // makes an instance is the store, and where the flow goes afterwards
@@ -768,6 +782,37 @@ mod tests {
     }
 
     #[test]
+    fn a_discover_card_press_routes_here_or_opens_there() {
+        // The page reports the press and this is where the report becomes a
+        // navigation. A Modrinth hit names a route; a CurseForge hit carries the
+        // address of its own page, because this launcher has no page for it.
+        let address = Address::parse("/browse/mod").expect("a route");
+        let mut screen = Screen::at(&address);
+        assert_eq!(
+            screen.update(
+                Message::Discover(discover::Message::Open {
+                    project: "AANobbMI".to_string(),
+                    web: None,
+                }),
+                &Store::default(),
+            ),
+            Some(Ask::Open(Open::Project("AANobbMI".to_string())))
+        );
+        assert_eq!(
+            screen.update(
+                Message::Discover(discover::Message::Open {
+                    project: "238222".to_string(),
+                    web: Some("https://www.curseforge.com/projects/238222".to_string()),
+                }),
+                &Store::default(),
+            ),
+            Some(Ask::Open(Open::Url(
+                "https://www.curseforge.com/projects/238222".to_string()
+            )))
+        );
+    }
+
+    #[test]
     fn every_route_builds_a_page_and_that_page_draws() {
         // The gate that makes "there is a page for every route" a fact rather than
         // an intention: an address the route table knows and the dispatcher does
@@ -886,7 +931,10 @@ mod tests {
         let mut discover = Screen::at(&Address::parse("/browse/modpack").expect("browse"));
         assert_eq!(
             discover.update(
-                Message::Discover(discover::Message::Open("sodium".to_string())),
+                Message::Discover(discover::Message::Open {
+                    project: "sodium".to_string(),
+                    web: None,
+                }),
                 &store
             ),
             Some(Ask::Open(Open::Project("sodium".to_string())))
@@ -964,12 +1012,13 @@ mod tests {
             author: "jellysquid".to_string(),
             summary: "Modern rendering engine".to_string(),
             downloads: 1,
-            follows: 1,
+            follows: Some(1),
             // No icon: this test is about the request being routed, and the card's
             // icon is a request of its own (`Message::search_icons`).
             icon_url: String::new(),
             game_versions: Vec::new(),
             loaders: Vec::new(),
+            web: None,
         }];
         let answer = Message::search_result(&second, Ok(hits.clone()));
         assert_eq!(screen.update(answer, &store), None);

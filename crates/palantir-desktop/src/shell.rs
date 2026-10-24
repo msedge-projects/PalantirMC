@@ -3175,6 +3175,15 @@ impl Shell {
                         let path = match open {
                             pages::Open::Instance(id) => format!("/instance/{id}"),
                             pages::Open::Project(id) => format!("/project/{id}"),
+                            // Not a navigation at all: an address outside the
+                            // launcher, opened in the browser through the same door
+                            // the news feed's links and the Store button use. A
+                            // refusal is kept where that button keeps it, so a reader
+                            // who is told the browser could not be opened can see it.
+                            pages::Open::Url(url) => {
+                                self.link_note = crate::open::url(&url).err();
+                                return None;
+                            }
                             // The one navigation that can carry a choice as well as
                             // a name: a profile's filter strip is links in the
                             // reference, so a chosen tab is a different address
@@ -4329,13 +4338,18 @@ impl Shell {
         let store = self.store.clone();
         // Cloned rather than borrowed: the worker takes the query, and the answer
         // still needs the round it came with.
-        let query = if asked.hide_installed {
-            self.without_installed(asked.query.clone())
-        } else {
-            asked.query.clone()
+        //
+        // *Hide already installed* is a Modrinth facet, so it is applied to a
+        // Modrinth question only; a CurseForge answer carries no ids this launcher
+        // has installed, which is why the flag has nothing to hide there.
+        let query = match asked.query.clone() {
+            discover::CatalogQuery::Modrinth(api) if asked.hide_installed => {
+                discover::CatalogQuery::Modrinth(self.without_installed(api))
+            }
+            other => other,
         };
         iced::Command::perform(
-            crate::store::off_thread(move || store.search(&query)),
+            crate::store::off_thread(move || store.search_any(&query)),
             move |result| Message::Screen(pages::Message::search_result(&asked, result)),
         )
     }

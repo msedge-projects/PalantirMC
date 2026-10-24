@@ -51,6 +51,7 @@ use std::collections::{BTreeSet, HashMap};
 use iced::mouse::Interaction;
 use iced::widget::{column, container, mouse_area, row, Space};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
+use palantir_net::curseforge::{CfClass, CfLoader, CfMod, CfQuery, CfSort};
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::ModrinthSearchHit;
 
@@ -89,8 +90,13 @@ pub struct Hit {
     pub summary: String,
     /// Total downloads.
     pub downloads: u64,
-    /// Followers.
-    pub follows: u64,
+    /// Followers, where the catalogue counts them.
+    ///
+    /// `None` for a CurseForge hit: its search answers with a download count and
+    /// no follower count at all, and the card's follower stat is not drawn from a
+    /// number nobody reported. The alternative -- a zero -- would be a card
+    /// claiming a project has no followers.
+    pub follows: Option<u64>,
     /// Where the project's own icon is, as the search API hands it out.
     ///
     /// Empty when a project has none, which is a state the reference draws
@@ -101,6 +107,16 @@ pub struct Hit {
     pub game_versions: Vec<String>,
     /// Its loaders or categories.
     pub loaders: Vec<String>,
+    /// Where the project's page is, when it is not a route here.
+    ///
+    /// `None` for a Modrinth hit, whose page this launcher draws at
+    /// `/project/:id`. A CurseForge hit has no page in this launcher -- nothing
+    /// reads a CurseForge project by id, and installing from that catalogue is not
+    /// built -- so pressing its card opens the project's own address instead of
+    /// navigating to a page that would be empty. The refusal sentence in
+    /// `palantir_net::curseforge` says the same thing about a file that cannot be
+    /// fetched from outside CurseForge.
+    pub web: Option<String>,
 }
 
 impl Hit {
@@ -117,13 +133,126 @@ impl Hit {
             author: hit.author.clone(),
             summary: hit.description.clone(),
             downloads: hit.downloads,
-            follows: hit.follows,
+            follows: Some(hit.follows),
             // The API calls them `versions` and `categories`; the card calls them
             // the tags a reader compares against their own game (`hit_card` draws
             // the loaders first).
             game_versions: hit.versions.clone(),
             loaders: hit.categories.clone(),
             icon_url: hit.icon_url.clone(),
+            // A Modrinth project's page is this launcher's own route.
+            web: None,
+        }
+    }
+
+    /// One card, from one hit of CurseForge's search.
+    ///
+    /// The two catalogues do not publish the same facts, and the difference is
+    /// carried rather than papered over: there is no follower count, so [`follows`]
+    /// is `None` and the card draws one stat instead of two; there are no loader
+    /// tags in a search answer, so the tag row is empty as it is for a Modrinth
+    /// project that publishes none; and the card's own page is
+    /// `curseforge.com/minecraft/<kind>/<slug>`, which is where a reader can
+    /// actually open it.
+    ///
+    /// [`follows`]: Hit::follows
+    pub fn from_cf(project: &CfMod) -> Hit {
+        Hit {
+            id: project.project_ref(),
+            title: project.title().to_string(),
+            author: project.author().to_string(),
+            summary: project.summary.clone(),
+            downloads: project.download_count,
+            follows: None,
+            icon_url: project.icon_url().to_string(),
+            game_versions: Vec::new(),
+            loaders: Vec::new(),
+            web: Some(project.web_url()),
+        }
+    }
+}
+
+/// Which catalogue a page of results is read from.
+///
+/// The reference has one -- Modrinth -- so this is the launcher's own control,
+/// and it is drawn in the reference's combobox vocabulary rather than as a new
+/// chip: a source is a query parameter like the sort, so it sits in the same row
+/// and opens the same kind of panel. A chip in a new shape would be a control the
+/// reference's own stylesheet has never been measured against.
+///
+/// CurseForge serves four of the six tabs. `Datapack` and `Server` have no
+/// `classId` in this client at all -- `palantir_net::curseforge` explains why: the
+/// ids were never measured against the live service, and a wrong one is a
+/// silently empty page rather than an error -- so the source is not offered on
+/// those tabs, and a tab switch onto one of them returns the page to Modrinth
+/// rather than leaving a control that cannot answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Source {
+    /// Modrinth's search API, the reference's own.
+    #[default]
+    Modrinth,
+    /// CurseForge's Core API, whose key is a row in the preferences file.
+    CurseForge,
+}
+
+impl Source {
+    /// Every source that exists, in the order the control offers them.
+    pub const ALL: [Source; 2] = [Source::Modrinth, Source::CurseForge];
+
+    /// The name the control shows.
+    ///
+    /// A product name rather than a locale key: "Modrinth" and "CurseForge" are
+    /// names, and the reference's table has no entry for a catalogue it does not
+    /// read.
+    pub fn label(self) -> &'static str {
+        match self {
+            Source::Modrinth => "Modrinth",
+            Source::CurseForge => "CurseForge",
+        }
+    }
+
+    /// Whether this catalogue can answer for `project_type`.
+    pub fn serves(self, project_type: ProjectType) -> bool {
+        match self {
+            Source::Modrinth => true,
+            Source::CurseForge => cf_class(project_type).is_some(),
+        }
+    }
+}
+
+/// The CurseForge class a tab is searched as, when the catalogue has one.
+pub fn cf_class(project_type: ProjectType) -> Option<CfClass> {
+    match project_type {
+        ProjectType::Modpack => Some(CfClass::Modpack),
+        ProjectType::Mod => Some(CfClass::Mod),
+        ProjectType::ResourcePack => Some(CfClass::ResourcePack),
+        ProjectType::Shader => Some(CfClass::Shader),
+        // No data-pack, plugin or server class: see `palantir_net::curseforge`'s
+        // "What is deliberately absent".
+        ProjectType::Datapack | ProjectType::Plugin | ProjectType::Server => None,
+    }
+}
+
+/// The question a search asks, as the catalogue that will answer it takes it.
+///
+/// One value rather than a source beside a half-filled query, because a search
+/// *is* one question: the round an answer is checked against belongs to the
+/// question, and two fields would let a page ask Modrinth with a CurseForge class
+/// attached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CatalogQuery {
+    /// Modrinth's `Search`, as the engine takes it.
+    Modrinth(ApiSearch),
+    /// CurseForge's `CfQuery`, as its client takes it.
+    CurseForge(CfQuery),
+}
+
+impl CatalogQuery {
+    /// Which catalogue this question is for.
+    pub fn source(&self) -> Source {
+        match self {
+            CatalogQuery::Modrinth(_) => Source::Modrinth,
+            CatalogQuery::CurseForge(_) => Source::CurseForge,
         }
     }
 }
@@ -197,6 +326,31 @@ impl Sort {
             Sort::DateUpdated => "updated",
         }
     }
+
+    /// The same order as CurseForge's search sorts by.
+    ///
+    /// Two of the five have no CurseForge equivalent and are answered with the
+    /// nearest thing its API has rather than by inventing a sixth control:
+    ///
+    /// * **Relevance** is CurseForge's own default (`sortField=2`, which its site
+    ///   calls *Popularity*). It is what the API sorts a text search by when
+    ///   nothing else is asked, so it is the closest a reader can get to "best
+    ///   match".
+    /// * **Followers** has no counterpart at all -- CurseForge's search publishes
+    ///   no follower count (see [`Hit::follows`]) and cannot order by one -- so it
+    ///   lands on Popularity too. A reader who chose it gets popular projects
+    ///   first, which is what the ordering they asked for is a proxy for.
+    ///
+    /// The other three are exact: Downloads, Date published (`Released`) and Date
+    /// updated (`Updated`).
+    pub const fn curseforge(self) -> CfSort {
+        match self {
+            Sort::Relevance | Sort::Followers => CfSort::Popularity,
+            Sort::Downloads => CfSort::Downloads,
+            Sort::DatePublished => CfSort::Released,
+            Sort::DateUpdated => CfSort::Updated,
+        }
+    }
 }
 
 /// Which of the page's two comboboxes has its panel open.
@@ -210,6 +364,11 @@ pub enum Menu {
     Sort,
     /// How many results a page holds, the `!w-[9rem]` one.
     View,
+    /// Which catalogue the results come from.
+    ///
+    /// The one trigger in this row the reference does not have, in the reference's
+    /// own frame: see [`Source`].
+    Source,
 }
 
 /// How many results a page holds.
@@ -230,6 +389,11 @@ pub enum Message {
     Sort(Sort),
     /// A different view size was chosen.
     View(usize),
+    /// A different catalogue was chosen.
+    ///
+    /// A request-shaped choice like the sort: it changes what is asked, so it asks
+    /// again on the turn it changes and starts the first page over.
+    Source(Source),
     /// A later page was asked for.
     Page(usize),
     /// The sidebar's *Hide already installed* switch was pressed.
@@ -308,7 +472,16 @@ pub enum Message {
     /// One result was opened. Reported rather than applied: which page is in the
     /// pane is the shell's business, so this comes back out of
     /// [`crate::pages::Screen::update`] as an [`crate::pages::Open`].
-    Open(String),
+    ///
+    /// `web` is the address to open instead of a page here, for a hit from a
+    /// catalogue this launcher has no page for -- see [`Hit::web`]. The card knows
+    /// which it is holding; the shell is the one that can open either.
+    Open {
+        /// The project's id, as its catalogue names it.
+        project: String,
+        /// Where to go instead, when it is not a route here.
+        web: Option<String>,
+    },
     /// The answer to a request, from the shell.
     ///
     /// The round is what makes a slow answer harmless: a page that has asked
@@ -383,8 +556,8 @@ pub enum Message {
 pub struct Asked {
     /// Which search this is, counting from one.
     pub round: u64,
-    /// What was asked for, as the engine takes it.
-    pub query: ApiSearch,
+    /// What was asked for, and which catalogue will answer it.
+    pub query: CatalogQuery,
     /// Whether the sidebar's *Hide already installed* switch is on.
     ///
     /// Not a facet and not an id list: the reference's *hide installed* is a
@@ -415,6 +588,12 @@ pub struct Icons {
 pub struct State {
     /// Which tab is showing.
     pub project_type: ProjectType,
+    /// Which catalogue the results are read from.
+    ///
+    /// Modrinth on arrival, which is the reference's own catalogue and the one
+    /// that needs no key; a reader who has one can move the page to CurseForge and
+    /// the choice stays for the session.
+    pub source: Source,
     /// The query, as typed.
     pub query: String,
     /// The chosen order.
@@ -529,6 +708,7 @@ impl State {
     pub fn new(project_type: ProjectType) -> State {
         State {
             project_type,
+            source: Source::default(),
             query: String::new(),
             sort: Sort::default(),
             view: DEFAULT_VIEW,
@@ -607,6 +787,13 @@ impl State {
             Message::ProjectType(project_type) => {
                 if self.project_type != project_type {
                     self.project_type = project_type;
+                    // A tab CurseForge has no class for goes back to Modrinth
+                    // rather than leaving the page pointed at a catalogue that
+                    // cannot answer: the tab press is the newer instruction, and
+                    // the alternative is a tab that searches nothing.
+                    if !self.source.serves(project_type) {
+                        self.source = Source::Modrinth;
+                    }
                     // A different tab is a different search, and the reference
                     // resets the page rather than carrying it across. The results
                     // go back to `Idle` rather than staying: what is on screen
@@ -615,6 +802,19 @@ impl State {
                     // what `opening` is.
                     self.page = 1;
                     self.results = Load::Idle;
+                }
+            }
+            // The source is a request-shaped control like the sort: it changes what
+            // is asked, so it asks on the turn it changes and goes back to the
+            // first page, because a page number from one catalogue means nothing in
+            // the other. A source the current tab cannot use is not a state the
+            // control can produce -- the menu offers only what [`Source::serves`]
+            // allows -- so it is not accepted here either.
+            Message::Source(source) => {
+                if self.source != source && source.serves(self.project_type) {
+                    self.source = source;
+                    self.page = 1;
+                    return Some(Ask::Search(self.ask()));
                 }
             }
             // Every control that changes the request re-asks on the turn it
@@ -808,7 +1008,7 @@ impl State {
                 hover.unwrap_or_else(crate::theme::hover_brightness),
             ),
             // The shell's to do, and not this page's: see the enum.
-            Message::Open(_) => {}
+            Message::Open { .. } => {}
         }
         None
     }
@@ -879,8 +1079,86 @@ impl State {
         self.results = Load::Loading;
         Asked {
             round: self.round,
-            query: self.request(),
+            query: self.catalog_query(),
             hide_installed: self.hide_installed,
+        }
+    }
+
+    /// The question, as the catalogue this page is pointed at takes it.
+    ///
+    /// One place, so the source, the tab, the sort and the page cannot disagree
+    /// about which catalogue the answer will come from.
+    pub fn catalog_query(&self) -> CatalogQuery {
+        match self.source {
+            Source::Modrinth => CatalogQuery::Modrinth(self.request()),
+            Source::CurseForge => CatalogQuery::CurseForge(self.curseforge_request()),
+        }
+    }
+
+    /// The search this page's controls describe, for CurseForge.
+    ///
+    /// What CurseForge's search can express is narrower than Modrinth's, and the
+    /// difference is not guessed at:
+    ///
+    /// * **One game version and one loader.** `CfQuery` carries a single
+    ///   `gameVersion` and a single `modLoaderType`; the sidebar's versions are an
+    ///   OR list. So a version is sent only when exactly one is chosen, and a
+    ///   loader only when exactly one is chosen -- with more, the request carries
+    ///   none rather than the first of them, because "the first of a set the reader
+    ///   built" is a filter they did not ask for.
+    /// * **No categories, licence or environment facets.** CurseForge's search
+    ///   takes none of them; the sidebar's sections are Modrinth's, and they keep
+    ///   their choices while the source is CurseForge so that switching back does
+    ///   not lose them.
+    /// * **No *hide already installed*.** The flag is a Modrinth facet
+    ///   (`project_id NOT IN [...]`); CurseForge has no equivalent, and nothing
+    ///   installed by this launcher carries a CurseForge id to hide.
+    ///
+    /// The class is the tab's, and a tab with no class never reaches here:
+    /// [`Source::serves`] is what the control and the tab press both check.
+    pub fn curseforge_request(&self) -> CfQuery {
+        let mut query = CfQuery::new(cf_class(self.project_type).unwrap_or_default())
+            .text(self.query.trim())
+            .sorted(self.sort.curseforge())
+            .page_size(self.view as u32);
+        if let Some(version) = self.single_version() {
+            query = query.game_version(version);
+        }
+        if let Some(loader) = self.single_loader() {
+            query = query.loader(CfLoader::from_loader_name(&loader));
+        }
+        query.index = ((self.page.saturating_sub(1)) * self.view) as u32;
+        query
+    }
+
+    /// The one game version chosen, when the reader has chosen exactly one.
+    ///
+    /// `None` for none (no filter) and for more than one (a filter this catalogue
+    /// cannot express): see [`State::curseforge_request`].
+    fn single_version(&self) -> Option<&str> {
+        let mut chosen = self.versions.iter();
+        match (chosen.next(), chosen.next()) {
+            (Some(version), None) => Some(version.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The one loader chosen, when the reader has chosen exactly one.
+    ///
+    /// The loaders live in [`State::filters`](State::filters) under the three
+    /// section ids the sidebar's loader rows carry, which is also where
+    /// [`State::facet_filter`] reads them from.
+    fn single_loader(&self) -> Option<String> {
+        let mut chosen = self
+            .filters
+            .iter()
+            .filter(|(filter, _)| {
+                filter == MOD_LOADER || filter == MODPACK_LOADER || filter == SHADER_LOADER
+            })
+            .map(|(_, option)| option.clone());
+        match (chosen.next(), chosen.next()) {
+            (Some(loader), None) => Some(loader),
+            _ => None,
         }
     }
 
@@ -2611,6 +2889,19 @@ fn controls<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             state.menu == Some(Menu::View),
             Message::Toggle(Menu::View),
         ))
+        // The one trigger the reference does not have, drawn in the frame it uses
+        // for the other two: a source is a query parameter, so it belongs in this
+        // row rather than in a shape of its own. `Prefix::Glyph` because the
+        // prefix is a word the reference's locale table does not carry, and a
+        // globe says "where this comes from" without inventing copy.
+        .push(ui::select(
+            theme,
+            ui::Prefix::Glyph(Glyph::Globe),
+            state.source.label(),
+            SOURCE_WIDTH,
+            state.menu == Some(Menu::Source),
+            Message::Toggle(Menu::Source),
+        ))
         .into()
 }
 
@@ -2619,6 +2910,13 @@ const SORT_WIDTH: f32 = 256.0;
 
 /// The view trigger's width: `!w-[9rem]` on the same class.
 const VIEW_WIDTH: f32 = 144.0;
+
+/// The source trigger's width, which is this launcher's own number.
+///
+/// Wide enough for what the value can say: *CurseForge*, the longest of the two
+/// names, at the trigger's fourteen pixels semibold, beside a twenty-pixel glyph,
+/// the chevron and the frame's own padding.
+const SOURCE_WIDTH: f32 = 176.0;
 
 /// The panel one of the two comboboxes has open, under the trigger that opened it.
 ///
@@ -2653,6 +2951,20 @@ fn menu<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>> {
                 .map(|size| (size.to_string(), Message::View(*size)))
                 .collect::<Vec<_>>(),
             state.view_label(),
+        ),
+        // The third trigger, and only the sources the tab can be searched in: a
+        // menu row that would refuse to do anything is worse than a row that is
+        // not there (see [`Source`]).
+        Menu::Source => (
+            "discover:source",
+            SORT_WIDTH + ROW_GAP + VIEW_WIDTH + ROW_GAP,
+            SOURCE_WIDTH,
+            Source::ALL
+                .iter()
+                .filter(|source| source.serves(state.project_type))
+                .map(|source| (source.label().to_string(), Message::Source(*source)))
+                .collect::<Vec<_>>(),
+            state.source.label().to_string(),
         ),
     };
     Some(
@@ -2978,14 +3290,17 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a
         .size(16.0)
         .font(regular())
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT)));
-    // `ProjectCardStats`: the two counts side by side, twelve pixels apart
+    // `ProjectCardStats`: the counts side by side, twelve pixels apart
     // (`gap-3`), right-aligned because the grid's stats column is `items-end`.
-    let stats = row![
-        stat(theme, Glyph::Download, hit.downloads),
-        stat(theme, Glyph::Heart, hit.follows)
-    ]
-    .spacing(CARD_COLUMN_GAP)
-    .align_items(Alignment::Center);
+    // The follower count is drawn only when the catalogue publishes one: a card
+    // for a CurseForge hit would otherwise read "0", which is a claim its API never
+    // made ([`Hit::follows`]).
+    let mut stats = row![stat(theme, Glyph::Download, hit.downloads)]
+        .spacing(CARD_COLUMN_GAP)
+        .align_items(Alignment::Center);
+    if let Some(follows) = hit.follows {
+        stats = stats.push(stat(theme, Glyph::Heart, follows));
+    }
 
     // `ProjectCardTags`: `flex items-center gap-2` inside a `gap-3` row. The
     // reference lists a hit's own `display_categories` then its loaders, of which
@@ -3033,7 +3348,12 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_release(Message::Open(hit.id.clone()))
+        .on_release(Message::Open {
+            project: hit.id.clone(),
+            // A hit from a catalogue with no page here carries its own address;
+            // the shell opens that instead of a route.
+            web: hit.web.clone(),
+        })
         .into()
 }
 
@@ -3082,6 +3402,18 @@ mod tests {
         asked
     }
 
+    /// The Modrinth question out of a request, for the tests that read it.
+    ///
+    /// A request now carries the catalogue with the question (see
+    /// [`CatalogQuery`]), so a test that used to read `asked.query` reads through
+    /// this and fails loudly if the page asked the other catalogue.
+    fn api(asked: &Asked) -> &ApiSearch {
+        match &asked.query {
+            CatalogQuery::Modrinth(api) => api,
+            CatalogQuery::CurseForge(_) => panic!("a Modrinth page asked CurseForge"),
+        }
+    }
+
     fn hit(title: &str) -> Hit {
         Hit {
             id: title.to_lowercase(),
@@ -3089,12 +3421,13 @@ mod tests {
             author: "jelly".to_string(),
             summary: "a summary".to_string(),
             downloads: 12345,
-            follows: 678,
+            follows: Some(678),
             // No icon unless a test names one: a project that never uploaded one is
             // a state the card draws rather than an error.
             icon_url: String::new(),
             game_versions: vec!["1.21".to_string()],
             loaders: vec!["fabric".to_string()],
+            web: None,
         }
     }
 
@@ -3291,20 +3624,20 @@ mod tests {
         let Some(Ask::Search(asked)) = state.update(Message::Query("sodium".to_string())) else {
             panic!("typing asks");
         };
-        assert_eq!(asked.query.query, "sodium");
+        assert_eq!(api(&asked).query, "sodium");
         assert_eq!(state.results, Load::Loading);
         let Some(Ask::Search(asked)) = state.update(Message::Sort(Sort::Downloads)) else {
             panic!("a new order asks");
         };
-        assert_eq!(asked.query.index.as_deref(), Some("downloads"));
+        assert_eq!(api(&asked).index.as_deref(), Some("downloads"));
         let Some(Ask::Search(asked)) = state.update(Message::View(50)) else {
             panic!("a new view size asks");
         };
-        assert_eq!(asked.query.limit, 50);
+        assert_eq!(api(&asked).limit, 50);
         let Some(Ask::Search(asked)) = state.update(Message::Page(3)) else {
             panic!("a new page asks");
         };
-        assert_eq!(asked.query.offset, 100);
+        assert_eq!(api(&asked).offset, 100);
         // Choosing what is already chosen is not a change, and asking again for
         // the same request would throw the answer on screen away for nothing.
         assert_eq!(state.update(Message::Sort(Sort::Downloads)), None);
@@ -3340,7 +3673,7 @@ mod tests {
         let Some(Ask::Search(first)) = state.opening() else {
             panic!("and then the search");
         };
-        assert_eq!(first.query.project_type.as_deref(), Some("modpack"));
+        assert_eq!(api(&first).project_type.as_deref(), Some("modpack"));
 
         // A second search does not ask for it again: the document changes when
         // Modrinth ships a release, not when the reader types.
@@ -3381,7 +3714,7 @@ mod tests {
             panic!("choosing asks");
         };
         assert_eq!(
-            first.query.facets,
+            api(&first).facets,
             vec![r#"categories = "technology""#.to_string()],
             "one chosen category is one part"
         );
@@ -3393,11 +3726,11 @@ mod tests {
         else {
             panic!("the second choice asks");
         };
-        assert_eq!(second.query.facets.len(), 1, "one group, not two");
+        assert_eq!(api(&second).facets.len(), 1, "one group, not two");
         assert!(
-            second.query.facets[0].contains(" AND "),
+            api(&second).facets[0].contains(" AND "),
             "and the parts are joined with AND: {}",
-            second.query.facets[0]
+            api(&second).facets[0]
         );
         assert_eq!(
             state.page, 1,
@@ -3410,7 +3743,7 @@ mod tests {
             panic!("unchoosing asks");
         };
         assert_eq!(
-            third.query.facets,
+            api(&third).facets,
             vec![r#"categories = "technology""#.to_string()]
         );
 
@@ -3421,7 +3754,7 @@ mod tests {
         other.update(Message::Category("technology".to_string()));
         assert_eq!(
             other.request().facets,
-            second.query.facets,
+            api(&second).facets,
             "the same two categories are the same request whichever order they were pressed in"
         );
 
@@ -3492,7 +3825,7 @@ mod tests {
         };
         assert!(asked.hide_installed);
         assert!(
-            asked.query.facets.is_empty(),
+            api(&asked).facets.is_empty(),
             "the page does not name the projects"
         );
         assert_eq!(
@@ -3585,7 +3918,7 @@ mod tests {
             panic!("choosing asks");
         };
         assert_eq!(
-            one.query.facets,
+            api(&one).facets,
             vec![r#"categories = "1080p""#.to_string()]
         );
 
@@ -3596,7 +3929,7 @@ mod tests {
             panic!("the second resolution asks");
         };
         assert_eq!(
-            two.query.facets,
+            api(&two).facets,
             vec![r#"categories IN ["1080p", "16x"]"#.to_string()]
         );
 
@@ -3608,7 +3941,7 @@ mod tests {
             panic!("the other header asks");
         };
         assert_eq!(
-            three.query.facets,
+            api(&three).facets,
             vec![r#"categories = "fantasy" AND categories IN ["1080p", "16x"]"#.to_string()]
         );
 
@@ -3620,7 +3953,7 @@ mod tests {
         other.update(Message::Category("16x".to_string()));
         other.update(Message::Category("fantasy".to_string()));
         other.update(Message::Category("1080p".to_string()));
-        assert_eq!(other.request().facets, three.query.facets);
+        assert_eq!(other.request().facets, api(&three).facets);
     }
 
     #[test]
@@ -3739,7 +4072,7 @@ mod tests {
             panic!("choosing asks");
         };
         assert_eq!(
-            none.query.facets,
+            api(&none).facets,
             vec![concat!(
                 r#"(environment = "client_only" OR environment = "client_only_server_optional""#,
                 r#" OR environment = "client_or_server_prefers_both" OR environment = "client_or_server")"#
@@ -3762,12 +4095,12 @@ mod tests {
         }) else {
             panic!("the second row asks");
         };
-        assert_eq!(both.query.facets.len(), 1, "one part");
+        assert_eq!(api(&both).facets.len(), 1, "one part");
         assert_eq!(
-            both.query.facets[0].matches("environment = ").count(),
+            api(&both).facets[0].matches("environment = ").count(),
             5,
             "and it is the pair's own list: {}",
-            both.query.facets[0]
+            api(&both).facets[0]
         );
 
         // The license row and two loaders beside a category: an `'and'` part
@@ -3842,11 +4175,11 @@ mod tests {
         // limit, the page as the offset.
         let asked = opening_search(&mut state);
         assert_eq!(asked.round, 1);
-        assert_eq!(asked.query.query, "");
-        assert_eq!(asked.query.project_type.as_deref(), Some("modpack"));
-        assert_eq!(asked.query.index.as_deref(), Some("relevance"));
-        assert_eq!(asked.query.limit, 20);
-        assert_eq!(asked.query.offset, 0);
+        assert_eq!(api(&asked).query, "");
+        assert_eq!(api(&asked).project_type.as_deref(), Some("modpack"));
+        assert_eq!(api(&asked).index.as_deref(), Some("relevance"));
+        assert_eq!(api(&asked).limit, 20);
+        assert_eq!(api(&asked).offset, 0);
         assert_eq!(state.results, Load::Loading);
         // Asking is once: a page that has asked does not ask again on every
         // message the shell handles.
@@ -4044,7 +4377,7 @@ mod tests {
             panic!("the new tab asks for its own results");
         };
         assert_eq!(asked.round, 3);
-        assert_eq!(asked.query.project_type.as_deref(), Some("mod"));
+        assert_eq!(api(&asked).project_type.as_deref(), Some("mod"));
         // And the tab already on screen is not a change, so nothing is thrown away.
         state.update(Message::Found {
             round: asked.round,
@@ -4304,7 +4637,7 @@ mod tests {
             Gen::Dark,
             &Hit {
                 downloads: 0,
-                follows: 0,
+                follows: None,
                 ..hit("Empty")
             },
             None,
@@ -4609,7 +4942,7 @@ mod tests {
             panic!("the ask");
         };
         assert_eq!(
-            asked.query.facets,
+            api(&asked).facets,
             vec![r#"categories = "technology" AND categories IN ["16x", "fabric"]"#.to_string()],
             "one and-part, then the one categories group, which is the order newFilters appends them in"
         );
@@ -4651,7 +4984,7 @@ mod tests {
             panic!("excluding asks");
         };
         assert_eq!(
-            first.query.facets,
+            api(&first).facets,
             vec![r#"categories NOT IN ["technology"]"#.to_string()]
         );
 
@@ -4664,7 +4997,7 @@ mod tests {
             panic!("excluding a loader asks");
         };
         assert_eq!(
-            second.query.facets,
+            api(&second).facets,
             vec![r#"categories NOT IN ["quilt", "technology"]"#.to_string()],
             "one group, ordered by the option id so the same choices are the same string"
         );
@@ -4694,7 +5027,7 @@ mod tests {
             panic!("excluding the license asks");
         };
         assert_eq!(
-            third.query.facets,
+            api(&third).facets,
             vec![concat!(
                 r#"categories = "quilt""#,
                 " AND categories NOT IN [\"technology\"]",
@@ -4854,7 +5187,7 @@ mod tests {
             panic!("choosing a version asks");
         };
         assert_eq!(
-            asked.query.facets,
+            api(&asked).facets,
             vec![r#"game_versions IN ["1.21.4", "24w14a"]"#.to_string()],
             "two versions are one IN, and it is not mixed in with the categories group"
         );
@@ -4923,7 +5256,7 @@ mod tests {
             panic!("excluding a disclosure asks");
         };
         assert_eq!(
-            first.query.facets,
+            api(&first).facets,
             vec![r#"disclosure_types NOT IN ["telemetry"]"#.to_string()],
             "the option's own field, and a list even for one value"
         );
@@ -4938,7 +5271,7 @@ mod tests {
             panic!("excluding a category asks");
         };
         assert_eq!(
-            second.query.facets,
+            api(&second).facets,
             vec![concat!(
                 r#"categories NOT IN ["technology"]"#,
                 " AND ",
@@ -5084,5 +5417,165 @@ mod tests {
                 .collect(),
             ..palantir_net::Tags::default()
         }
+    }
+
+    /// One CurseForge row, in the API's own shape, for the tests below.
+    const CF_ROW: &str = r#"{
+        "id": 238222, "name": "Just Enough Items", "slug": "jei",
+        "summary": "View items and recipes", "downloadCount": 1234567, "classId": 6,
+        "logo": {"thumbnailUrl": "https://media.forgecdn.net/thumb.png"},
+        "authors": [{"name": "mezz"}],
+        "categories": [{"id": 423, "name": "Map and Information", "slug": "map-information"}],
+        "allowModDistribution": true
+    }"#;
+
+    #[test]
+    fn curseforge_serves_the_four_tabs_it_has_classes_for() {
+        assert_eq!(cf_class(ProjectType::Modpack), Some(CfClass::Modpack));
+        assert_eq!(cf_class(ProjectType::Mod), Some(CfClass::Mod));
+        assert_eq!(cf_class(ProjectType::ResourcePack), Some(CfClass::ResourcePack));
+        assert_eq!(cf_class(ProjectType::Shader), Some(CfClass::Shader));
+        // The two the client has no class id for, and the one that is not a tab:
+        // a wrong class id is a silently empty page, so the catalogue is not
+        // offered at all.
+        for kind in [
+            ProjectType::Datapack,
+            ProjectType::Plugin,
+            ProjectType::Server,
+        ] {
+            assert_eq!(cf_class(kind), None, "{kind:?}");
+            assert!(!Source::CurseForge.serves(kind), "{kind:?}");
+            assert!(Source::Modrinth.serves(kind), "{kind:?}");
+            // Which is what the menu is built from: one option on these tabs.
+            let offered: Vec<&str> = Source::ALL
+                .iter()
+                .filter(|source| source.serves(kind))
+                .map(|source| source.label())
+                .collect();
+            assert_eq!(offered, vec!["Modrinth"], "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn choosing_curseforge_asks_that_catalogue_with_the_controls() {
+        let mut state = State::new(ProjectType::Mod);
+        state.query = "jei".to_string();
+        state.sort = Sort::DateUpdated;
+        state.view = 50;
+        state.page = 3;
+        let Some(Ask::Search(asked)) = state.update(Message::Source(Source::CurseForge)) else {
+            panic!("choosing a source is a request");
+        };
+        let CatalogQuery::CurseForge(query) = &asked.query else {
+            panic!("the page asked {:?} after choosing CurseForge", asked.query.source());
+        };
+        assert_eq!(query.text, "jei");
+        assert_eq!(query.class, CfClass::Mod, "the tab is the class");
+        assert_eq!(query.sort, CfSort::Updated);
+        assert_eq!(query.page_size, 50);
+        // The page goes back to the first one, because a page number from one
+        // catalogue means nothing in the other -- so the index is zero here.
+        assert_eq!(state.page, 1);
+        assert_eq!(query.index, 0, "the first page of a new catalogue");
+        assert_eq!(asked.round, state.round, "and the round is the page's");
+        assert_eq!(state.results, Load::Loading);
+
+        // The index is the page's own arithmetic once there is a page to be on.
+        state.page = 3;
+        assert_eq!(state.curseforge_request().index, 100, "page three at fifty");
+    }
+
+    /// The two orders CurseForge has no field for are answered with its own
+    /// default rather than with a silent nothing, and the other three are exact.
+    #[test]
+    fn every_order_has_a_curseforge_answer() {
+        assert_eq!(Sort::Relevance.curseforge(), CfSort::Popularity);
+        assert_eq!(Sort::Followers.curseforge(), CfSort::Popularity);
+        assert_eq!(Sort::Downloads.curseforge(), CfSort::Downloads);
+        assert_eq!(Sort::DatePublished.curseforge(), CfSort::Released);
+        assert_eq!(Sort::DateUpdated.curseforge(), CfSort::Updated);
+    }
+
+    /// A version or a loader is sent only when the reader chose exactly one: the
+    /// sidebar's sets are OR lists and CurseForge takes a single value, so two
+    /// choices send neither rather than the first of them.
+    #[test]
+    fn a_curseforge_question_carries_one_version_and_one_loader_or_neither() {
+        let mut state = State::new(ProjectType::Mod);
+        state.source = Source::CurseForge;
+        state.versions.insert("1.21.1".to_string());
+        state
+            .filters
+            .insert((MOD_LOADER.to_string(), "fabric".to_string()));
+        let query = state.curseforge_request();
+        assert_eq!(query.game_version, "1.21.1");
+        assert_eq!(query.loader, CfLoader::Fabric);
+
+        state.versions.insert("1.20.1".to_string());
+        state
+            .filters
+            .insert((MOD_LOADER.to_string(), "forge".to_string()));
+        let query = state.curseforge_request();
+        assert_eq!(query.game_version, "", "two versions are not one filter");
+        assert_eq!(query.loader, CfLoader::Any, "nor two loaders");
+
+        // And the choices are kept: they are the sidebar's, and switching back to
+        // Modrinth must not lose what the reader ticked.
+        assert_eq!(state.versions.len(), 2);
+        assert_eq!(state.filters.len(), 2);
+    }
+
+    #[test]
+    fn a_tab_curseforge_cannot_search_returns_the_page_to_modrinth() {
+        let mut state = State::new(ProjectType::Mod);
+        state.source = Source::CurseForge;
+        let _ = state.update(Message::ProjectType(ProjectType::Datapack));
+        assert_eq!(state.source, Source::Modrinth);
+        // And a source the tab cannot use is not accepted either.
+        let _ = state.update(Message::Source(Source::CurseForge));
+        assert_eq!(state.source, Source::Modrinth);
+    }
+
+    #[test]
+    fn a_curseforge_row_becomes_a_card_with_its_own_address() {
+        let project: CfMod = serde_json::from_str(CF_ROW).expect("a CurseForge row");
+        let card = Hit::from_cf(&project);
+        assert_eq!(card.id, "238222", "the id its catalogue answers by");
+        assert_eq!(card.title, "Just Enough Items");
+        assert_eq!(card.author, "mezz");
+        assert_eq!(card.summary, "View items and recipes");
+        assert_eq!(card.downloads, 1_234_567);
+        assert_eq!(card.follows, None, "no follower count is published");
+        assert_eq!(card.icon_url, "https://media.forgecdn.net/thumb.png");
+        assert_eq!(
+            card.web.as_deref(),
+            Some("https://www.curseforge.com/projects/238222"),
+            "and the card's press goes there rather than to a page this launcher lacks"
+        );
+    }
+
+    /// The source is part of the question, so an answer to the other catalogue's
+    /// question is stale even when its round is the newest one seen.
+    #[test]
+    fn an_answer_is_dropped_when_the_source_moved_on() {
+        let mut state = State::new(ProjectType::Mod);
+        let Some(Ask::Search(first)) = state.update(Message::Search) else {
+            panic!("a search");
+        };
+        let Some(Ask::Search(second)) = state.update(Message::Source(Source::CurseForge)) else {
+            panic!("a second search");
+        };
+        assert!(second.round > first.round);
+        // The first question's answer arrives late and is not drawn.
+        state.update(Message::Found {
+            round: first.round,
+            result: Ok(vec![hit("Late")]),
+        });
+        assert_eq!(state.results, Load::Loading);
+        state.update(Message::Found {
+            round: second.round,
+            result: Ok(vec![hit("Current")]),
+        });
+        assert!(matches!(&state.results, Load::Ready(hits) if hits[0].title == "Current"));
     }
 }

@@ -370,6 +370,17 @@ impl CfMod {
             .unwrap_or_default()
     }
 
+    /// The project's own page on curseforge.com.
+    ///
+    /// The id form rather than `minecraft/<kind>/<slug>`: the id address is
+    /// canonical, it redirects to whatever slug the author is using today, and it
+    /// needs neither the class table nor a slug that may have been renamed. It is
+    /// the address a reader who cannot install from here should be sent to, which
+    /// is the same instruction [`CfMod::distribution_refusal`] gives.
+    pub fn web_url(&self) -> String {
+        format!("https://www.curseforge.com/projects/{}", self.id)
+    }
+
     /// Whether this project's files may be fetched by a client that is not
     /// CurseForge's own.
     ///
