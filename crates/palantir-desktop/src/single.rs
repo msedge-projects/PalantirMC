@@ -116,12 +116,7 @@ pub fn tell_the_user(pid: u32) {
     // because `HWND` is an `isize` in windows-sys 0.52, the same handle type
     // `native::own_hwnd` returns.
     unsafe {
-        MessageBoxW(
-            0,
-            text.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONINFORMATION,
-        );
+        MessageBoxW(0, text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION);
     }
 }
 

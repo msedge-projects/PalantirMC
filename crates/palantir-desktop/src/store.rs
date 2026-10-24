@@ -3490,9 +3490,9 @@ mod tests {
         // requests, and the CurseForge one carried the key.
         assert_eq!(fetch.count(), 2);
         assert_eq!(
-            CatalogQuery::CurseForge(
-                palantir_net::curseforge::CfQuery::new(palantir_net::curseforge::CfClass::Mod)
-            )
+            CatalogQuery::CurseForge(palantir_net::curseforge::CfQuery::new(
+                palantir_net::curseforge::CfClass::Mod
+            ))
             .source(),
             Source::CurseForge
         );
@@ -3514,9 +3514,7 @@ mod tests {
         assert_eq!(
             store
                 .search_any(&CatalogQuery::CurseForge(
-                    palantir_net::curseforge::CfQuery::new(
-                        palantir_net::curseforge::CfClass::Mod
-                    )
+                    palantir_net::curseforge::CfQuery::new(palantir_net::curseforge::CfClass::Mod)
                 ))
                 .expect_err("no engine"),
             not_implemented("CurseForge's catalogue")

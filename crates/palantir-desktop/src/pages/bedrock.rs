@@ -180,7 +180,10 @@ impl State {
             }
             Load::Failed(reason) => blocks.push(sentence(theme, reason)),
             Load::Empty => {
-                blocks.push(sentence(theme, "No Bedrock data was found on this machine."));
+                blocks.push(sentence(
+                    theme,
+                    "No Bedrock data was found on this machine.",
+                ));
             }
         }
         page::body(blocks, GAP, Message::Wheel)
@@ -248,10 +251,7 @@ fn presence_block<'a>(theme: Gen, presence: &Presence) -> Element<'a, Message> {
                     ui::text(root.display().to_string())
                         .size(14.0)
                         .font(regular())
-                        .style(iced::theme::Text::Color(theme_gen::ink(
-                            theme,
-                            INK_DEFAULT,
-                        ))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
                 ),
         ),
         Presence::NotInstalled => ui::card(
@@ -302,17 +302,16 @@ fn presence_block<'a>(theme: Gen, presence: &Presence) -> Element<'a, Message> {
 }
 
 /// The worlds list, or the sentence that says where they would appear.
-fn worlds_block<'a>(
-    theme: Gen,
-    worlds: &[World],
-    root: &std::path::Path,
-) -> Element<'a, Message> {
+fn worlds_block<'a>(theme: Gen, worlds: &[World], root: &std::path::Path) -> Element<'a, Message> {
     let mut card = column![].spacing(8.0);
     card = card.push(heading_line(theme, "Worlds", Some(worlds.len())));
     if worlds.is_empty() {
         card = card.push(sentence(
             theme,
-            format!("No worlds yet. They appear here from {}.", root.join("worlds").display()),
+            format!(
+                "No worlds yet. They appear here from {}.",
+                root.join("worlds").display()
+            ),
         ));
     }
     for world in worlds {
@@ -352,12 +351,12 @@ fn packs_block<'a>(
 /// launcher's own, drawn in the same card and spacing vocabulary as the rest of
 /// the shell rather than in a shape nothing has measured.
 fn row_row<'a>(theme: Gen, label: &str, has_picture: bool) -> Element<'a, Message> {
-    let mut line = row![]
-        .spacing(8.0)
-        .align_items(Alignment::Center)
-        .push(ui::text(label.to_string()).size(14.0).font(medium()).style(
-            iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT)),
-        ));
+    let mut line = row![].spacing(8.0).align_items(Alignment::Center).push(
+        ui::text(label.to_string())
+            .size(14.0)
+            .font(medium())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+    );
     if has_picture {
         line = line.push(Space::with_width(Length::Fill)).push(
             ui::text("picture".to_string())
@@ -391,7 +390,11 @@ mod tests {
     fn the_page_asks_for_its_scan_once_and_only_from_idle() {
         let mut state = State::new();
         assert_eq!(state.opening(), Some(Ask::Bedrock), "a fresh page asks");
-        assert_eq!(state.opening(), None, "and does not ask again while waiting");
+        assert_eq!(
+            state.opening(),
+            None,
+            "and does not ask again while waiting"
+        );
         let _ = state.update(Message::Scanned(Ok(bare())));
         assert_eq!(state.opening(), None, "nor once the answer is in");
     }

@@ -4224,3 +4224,20 @@ labels' residuals against the reference's own captures are **-0.206, +0.001,
 -0.004 and -0.070**. A dependency whose job is to re-derive a constant that two
 independent measurements already agree with is a dependency to add when one of
 them changes, not before.
+## Formatting is advisory because four of the files are generated
+
+The `Lint` job's `Formatting (advisory)` step reports `cargo fmt --check` and is
+allowed to fail, which is why a green run still carries an `X Process completed
+with exit code 1` annotation. The reason it can never pass is in its own diff: of
+the ten files it wants to change, four are `icons_gen.rs`, `locale_gen.rs`,
+`text_gen.rs` and `theme_gen.rs` -- emitted by `tools/gen_icons.py`,
+`gen_locale.py`, `gen_text.py` and `gen_theme.py`, and held byte-identical by their
+own `--check` gates. Running `cargo fmt` on them would fail those gates on the
+next regeneration, so the formatter and the generators would take turns undoing
+each other; the step is advisory so neither has to lose.
+
+This session's hand-written files were formatted with `rustfmt --edition 2021` on
+exactly those six (`brand.rs`, `pages/bedrock.rs`, `pages/discover.rs`, `prefs.rs`,
+`single.rs`, `store.rs`), chose no `rustfmt.toml` and touched nothing generated.
+Every change was a line wrap. What is left in that diff is the four generated
+files and nothing else, which is the closest the step can come to passing.

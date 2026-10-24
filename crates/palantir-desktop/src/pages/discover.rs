@@ -5433,7 +5433,10 @@ mod tests {
     fn curseforge_serves_the_four_tabs_it_has_classes_for() {
         assert_eq!(cf_class(ProjectType::Modpack), Some(CfClass::Modpack));
         assert_eq!(cf_class(ProjectType::Mod), Some(CfClass::Mod));
-        assert_eq!(cf_class(ProjectType::ResourcePack), Some(CfClass::ResourcePack));
+        assert_eq!(
+            cf_class(ProjectType::ResourcePack),
+            Some(CfClass::ResourcePack)
+        );
         assert_eq!(cf_class(ProjectType::Shader), Some(CfClass::Shader));
         // The two the client has no class id for, and the one that is not a tab:
         // a wrong class id is a silently empty page, so the catalogue is not
@@ -5467,7 +5470,10 @@ mod tests {
             panic!("choosing a source is a request");
         };
         let CatalogQuery::CurseForge(query) = &asked.query else {
-            panic!("the page asked {:?} after choosing CurseForge", asked.query.source());
+            panic!(
+                "the page asked {:?} after choosing CurseForge",
+                asked.query.source()
+            );
         };
         assert_eq!(query.text, "jei");
         assert_eq!(query.class, CfClass::Mod, "the tab is the class");

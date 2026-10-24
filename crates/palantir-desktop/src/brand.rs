@@ -279,9 +279,8 @@ mod tests {
     fn the_exe_icon_has_the_sizes_windows_asks_for() {
         const ICO: &[u8] = include_bytes!("../assets/brand/app.ico");
         let word = |at: usize| u16::from_le_bytes([ICO[at], ICO[at + 1]]);
-        let dword = |at: usize| {
-            u32::from_le_bytes([ICO[at], ICO[at + 1], ICO[at + 2], ICO[at + 3]])
-        };
+        let dword =
+            |at: usize| u32::from_le_bytes([ICO[at], ICO[at + 1], ICO[at + 2], ICO[at + 3]]);
         assert_eq!(word(0), 0, "ICONDIR.reserved must be zero");
         assert_eq!(word(2), 1, "ICONDIR.type must be 1 for an icon");
         let count = word(4) as usize;
@@ -291,10 +290,18 @@ mod tests {
         for entry in 0..count {
             let at = 6 + entry * 16;
             let width = if ICO[at] == 0 { 256 } else { ICO[at] as u16 };
-            let height = if ICO[at + 1] == 0 { 256 } else { ICO[at + 1] as u16 };
+            let height = if ICO[at + 1] == 0 {
+                256
+            } else {
+                ICO[at + 1] as u16
+            };
             assert_eq!(width, height, "an icon entry is square");
             assert_eq!(word(at + 4), 1, "one colour plane");
-            assert_eq!(word(at + 6), 32, "32 bits per pixel: alpha is in the pixels");
+            assert_eq!(
+                word(at + 6),
+                32,
+                "32 bits per pixel: alpha is in the pixels"
+            );
             let bytes = dword(at + 8) as usize;
             let offset = dword(at + 12) as usize;
             assert!(

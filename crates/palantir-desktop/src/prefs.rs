@@ -685,8 +685,14 @@ mod tests {
     /// no override, and the file answers when the environment does not.
     #[test]
     fn a_curseforge_key_comes_from_the_environment_then_the_file() {
-        assert_eq!(key_from("file-key", Some("env-key")), Some("env-key".into()));
-        assert_eq!(key_from("file-key", Some("  env-key  ")), Some("env-key".into()));
+        assert_eq!(
+            key_from("file-key", Some("env-key")),
+            Some("env-key".into())
+        );
+        assert_eq!(
+            key_from("file-key", Some("  env-key  ")),
+            Some("env-key".into())
+        );
         assert_eq!(key_from("  file-key  ", None), Some("file-key".into()));
         // Nothing is a key: not an empty variable, not a whitespace one, and
         // not a file field that holds only the space a hand-edit left.
