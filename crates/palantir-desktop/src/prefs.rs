@@ -56,6 +56,14 @@ pub const DEFAULT_MAX_MEM_MIB: u32 = palantir_core::settings::defaults::MAX_MEM_
 /// than a number the reference stores: see [`Prefs::quick_instance_limit`] for
 /// why the two spellings of "everything" are one value here.
 pub const QUICK_INSTANCE_LIMIT_MAX: u32 = 20;
+
+/// The environment variable that overrides [`Prefs::curseforge_api_key`].
+///
+/// Beside the field rather than at the reader, because the two are one answer:
+/// "where does this launcher's CurseForge key come from" has exactly two
+/// answers -- this variable and the file -- and they are read together.
+pub const CURSEFORGE_KEY_ENV: &str = "PALANTIRMC_CURSEFORGE_API_KEY";
+
 /// "Not changed from the default", for a bool whose default is false.
 fn is_false(value: &bool) -> bool {
     !*value
@@ -86,6 +94,27 @@ pub struct Prefs {
     /// any file.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub microsoft_client_id: String,
+    /// The CurseForge API key the catalogue is read with, when the reader has
+    /// one.
+    ///
+    /// Empty -- and therefore not written -- by default, which is the shape
+    /// [`Prefs::microsoft_client_id`] above has and for the same reason: a key
+    /// nobody has entered is not a line the file should carry. There is no
+    /// shipped fallback the way that row falls back to Prism's application id:
+    /// Overwolf issues a key per developer account, so an absent key is a real
+    /// absence and [`Prefs::curseforge_api_key`] answers `None` rather than
+    /// inventing one the service would refuse.
+    ///
+    /// The key lives here and not in an OS keychain, for the reason
+    /// `accounts.json` keeps its tokens inline: this launcher's files are the
+    /// launcher's own, and splitting one credential across two stores is how the
+    /// two answers stop agreeing.
+    ///
+    /// `PALANTIRMC_CURSEFORGE_API_KEY` overrides it for a one-off run without
+    /// editing any file, which is the allowance the client id's own variable
+    /// makes and wins for the same reason.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub curseforge_api_key: String,
 
     // ---- Display > Appearance -----------------------------------------
     /// Keep one theme on this device rather than following an account.
@@ -267,6 +296,7 @@ impl Default for Prefs {
         Prefs {
             color_theme: String::new(),
             microsoft_client_id: String::new(),
+            curseforge_api_key: String::new(),
             sync_theme_across_devices: false,
             advanced_rendering: true,
             native_decorations: false,
@@ -390,6 +420,27 @@ impl Prefs {
         }
     }
 
+    /// The CurseForge API key to read the catalogue with, if there is one.
+    ///
+    /// Order: the environment ([`CURSEFORGE_KEY_ENV`]), then the file. There is
+    /// no third answer and no shipped default, which is the one place this
+    /// differs from the client id row above it: an application id can be public
+    /// and shipped, and a per-developer API key cannot.
+    ///
+    /// Validated the way the client id is and no further: trimmed, because a
+    /// pasted key arrives with whatever the clipboard or a line of JSON added,
+    /// and whitespace is not a key. Deliberately no shape check. Overwolf's keys
+    /// are opaque strings it can reissue in another shape, so a prefix rule here
+    /// would refuse a working key the day that happened; the service is the
+    /// arbiter, and a key it rejects comes back as its own answer through the
+    /// store rather than as this launcher's guess about the string.
+    pub fn curseforge_api_key(&self) -> Option<String> {
+        key_from(
+            &self.curseforge_api_key,
+            std::env::var(CURSEFORGE_KEY_ENV).ok().as_deref(),
+        )
+    }
+
     /// Take the heap numbers from the other launcher's config, when this file
     /// has none of its own.
     ///
@@ -429,6 +480,21 @@ impl Prefs {
             self.adopted_max_mem_mib = heap(PRISM_MAX_MEM_KEY);
         }
     }
+}
+
+/// Where a CurseForge key comes from: the environment, then the file.
+///
+/// Split out of [`Prefs::curseforge_api_key`] so that the order is a function of
+/// its two inputs rather than of the process this happens to be running in: a
+/// test can hold both halves at once without mutating a variable every other
+/// test in the binary shares.
+fn key_from(file: &str, env: Option<&str>) -> Option<String> {
+    let env = env.map(str::trim).unwrap_or_default();
+    if !env.is_empty() {
+        return Some(env.to_string());
+    }
+    let file = file.trim();
+    (!file.is_empty()).then(|| file.to_string())
 }
 
 /// Where the preferences live: this product's own directory, not the data root.
@@ -582,6 +648,87 @@ mod tests {
         let back = load(&paths);
         assert_eq!(back.theme(), ColorTheme::Oled);
         assert_eq!(back.microsoft_client_id, "mine");
+    }
+
+    /// The key has no shipped fallback, so `None` is a real answer and the
+    /// catalogue says why it cannot be read rather than asking with an empty
+    /// header.
+    #[test]
+    fn a_blank_curseforge_key_is_no_key_at_all() {
+        // The accessor reads the process environment, and an empty value is "no
+        // override". Said out loud so this test does not depend on whatever
+        // variable the shell that started the suite happened to export.
+        std::env::set_var(CURSEFORGE_KEY_ENV, "");
+        let (_dir, paths) = root();
+        assert_eq!(load(&paths).curseforge_api_key(), None, "a fresh file");
+        for blank in ["", "   ", "\t\n"] {
+            let prefs = Prefs {
+                curseforge_api_key: blank.into(),
+                ..Prefs::default()
+            };
+            assert_eq!(prefs.curseforge_api_key(), None, "{blank:?} is not a key");
+        }
+        // A paste brings its own whitespace, and the trim is what makes the
+        // difference between a key the service accepts and one it does not.
+        let pasted = Prefs {
+            curseforge_api_key: "  $2a$10$abcdef  \n".into(),
+            ..Prefs::default()
+        };
+        assert_eq!(
+            pasted.curseforge_api_key().as_deref(),
+            Some("$2a$10$abcdef")
+        );
+    }
+
+    /// The order the accessor's own documentation states, held as a function of
+    /// its two inputs: the environment wins, an empty or blank environment is
+    /// no override, and the file answers when the environment does not.
+    #[test]
+    fn a_curseforge_key_comes_from_the_environment_then_the_file() {
+        assert_eq!(key_from("file-key", Some("env-key")), Some("env-key".into()));
+        assert_eq!(key_from("file-key", Some("  env-key  ")), Some("env-key".into()));
+        assert_eq!(key_from("  file-key  ", None), Some("file-key".into()));
+        // Nothing is a key: not an empty variable, not a whitespace one, and
+        // not a file field that holds only the space a hand-edit left.
+        assert_eq!(key_from("  file-key  ", Some("")), Some("file-key".into()));
+        assert_eq!(key_from("file-key", Some("   ")), Some("file-key".into()));
+        assert_eq!(key_from("", None), None);
+        assert_eq!(key_from("   ", Some("")), None);
+    }
+
+    #[test]
+    fn an_empty_curseforge_key_is_not_written_to_the_file() {
+        let (_dir, paths) = root();
+        save(&paths, &Prefs::with_theme(ColorTheme::Dark)).unwrap();
+        let text = std::fs::read_to_string(path(&paths)).unwrap();
+        assert!(!text.contains("curseforge_api_key"), "got: {text}");
+    }
+
+    /// The row is a *setting*, not a cache: a theme change rewrites the whole
+    /// struct, and a key that did not survive that would silently turn the
+    /// catalogue off the next time the reader picked a colour.
+    #[test]
+    fn changing_the_theme_keeps_a_configured_curseforge_key() {
+        // Same reason as the blank-key test: the environment is part of the
+        // answer, so it is pinned to "no override" rather than inherited.
+        std::env::set_var(CURSEFORGE_KEY_ENV, "");
+        let (_dir, paths) = root();
+        save(
+            &paths,
+            &Prefs {
+                color_theme: "dark".into(),
+                curseforge_api_key: "mine".into(),
+                ..Prefs::default()
+            },
+        )
+        .unwrap();
+        let mut prefs = load(&paths);
+        assert_eq!(prefs.curseforge_api_key().as_deref(), Some("mine"));
+        prefs.color_theme = ColorTheme::Oled.id().to_string();
+        save(&paths, &prefs).unwrap();
+        let back = load(&paths);
+        assert_eq!(back.theme(), ColorTheme::Oled);
+        assert_eq!(back.curseforge_api_key().as_deref(), Some("mine"));
     }
 
     #[test]
@@ -741,6 +888,7 @@ mod tests {
         let every = Prefs {
             color_theme: "light".into(),
             microsoft_client_id: "abc".into(),
+            curseforge_api_key: "def".into(),
             sync_theme_across_devices: true,
             advanced_rendering: false,
             native_decorations: true,

@@ -1135,6 +1135,55 @@ impl Store {
         Ok(answer.hits.iter().map(Hit::from_api).collect())
     }
 
+    /// The CurseForge API key this launcher holds, or the sentence saying where
+    /// to put one.
+    ///
+    /// One answer for every CurseForge request, resolved rather than passed in:
+    /// the environment variable first, then this launcher's own preferences
+    /// file, which is the order [`crate::prefs::Prefs::curseforge_api_key`]
+    /// states. The preferences are read here for the same reason a launch reads
+    /// them here: the launcher's settings are the store's to read, and a call
+    /// site that resolved them itself would be a second answer about where the
+    /// key comes from.
+    ///
+    /// A store with no launcher behind it -- a test over a scratch cache -- has
+    /// no preferences to read, and says so in the same sentence as one whose
+    /// file holds no key. Neither of them sends a request the service would
+    /// refuse with the same answer in a slower way.
+    pub fn curseforge_key(&self) -> Result<String, String> {
+        self.paths
+            .as_ref()
+            .and_then(|paths| crate::prefs::load(paths).curseforge_api_key())
+            .ok_or_else(no_curseforge_key)
+    }
+
+    /// One page of CurseForge's catalogue, read with the key this launcher
+    /// holds.
+    ///
+    /// **Blocking**, like every engine call, so the shell runs it off the frame
+    /// thread. Uncached as well, and that is not an omission: Overwolf's terms
+    /// forbid storing what the API answers, so this goes to `Fetch` directly
+    /// rather than through the engine's metadata cache the way [`Store::search`]
+    /// does (`palantir_net::curseforge`'s module documentation has the two
+    /// clauses).
+    ///
+    /// Nothing calls this yet: Discover still searches one catalogue, and the
+    /// source switch ships only when both catalogues read. The door is here
+    /// because the key's home has to hand it to something -- this is the request
+    /// that switch makes first, and a key with no reader is a preference nobody
+    /// can tell is working (`HANDOFF.md` §3a).
+    pub fn curseforge_search(
+        &self,
+        query: &palantir_net::curseforge::CfQuery,
+    ) -> Result<palantir_net::curseforge::CfPage<palantir_net::curseforge::CfMod>, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("CurseForge's catalogue"));
+        };
+        let key = self.curseforge_key()?;
+        palantir_net::curseforge::fetch_search(engine.fetch().as_ref(), &key, query)
+            .map_err(|error| error.to_string())
+    }
+
     /// Modrinth's news feed, for the panel's news section.
     ///
     /// **Blocking**, like every engine call, so the shell runs it off the frame
@@ -1911,6 +1960,24 @@ pub struct VersionList {
 /// whatever lands next.
 pub fn not_implemented(what: &str) -> String {
     format!("{what} is not implemented yet.")
+}
+
+/// The sentence for a CurseForge request when no API key is configured.
+///
+/// A key is the one thing this launcher cannot supply for itself: Overwolf
+/// issues one per developer account, so the catalogue is unreadable until the
+/// reader puts theirs somewhere. Saying *where* is the whole point of the
+/// sentence, and both places are named -- the field in this launcher's own
+/// preferences file, and the environment variable a one-off run can carry
+/// instead. "Go to Settings" would be worse than useless here: the reference's
+/// settings dialog has no such field, because the reference has no CurseForge.
+pub fn no_curseforge_key() -> String {
+    format!(
+        "CurseForge needs an API key and none is configured: put one in `{}` as `curseforge_api_key`, \
+         or set {} for a single run.",
+        palantir_core::paths::PREFS_FILE,
+        crate::prefs::CURSEFORGE_KEY_ENV,
+    )
 }
 
 /// The sentence for a surface this launcher does not have *on purpose*.
@@ -3225,6 +3292,126 @@ mod tests {
         let again = store.search(&query).expect("the same answer");
         assert_eq!(again, hits);
         assert_eq!(fetch.count(), 1, "a fresh search is not asked for twice");
+    }
+
+    /// One CurseForge row, in the API's own shape (`data` + `pagination`).
+    const CF_SEARCH_BODY: &str = r#"{
+        "data": [{
+            "id": 238222, "name": "Just Enough Items", "slug": "jei",
+            "summary": "View items and recipes", "downloadCount": 1234567, "classId": 6,
+            "logo": {"thumbnailUrl": "https://media.forgecdn.net/thumb.png"},
+            "authors": [{"name": "mezz"}],
+            "categories": [{"id": 423, "name": "Map and Information", "slug": "map-information"}],
+            "allowModDistribution": true
+        }],
+        "pagination": {"index": 0, "pageSize": 20, "resultCount": 1, "totalCount": 418}
+    }"#;
+
+    /// The key's home, all the way to the request: a line in this launcher's own
+    /// preferences file becomes the header CurseForge authenticates with.
+    ///
+    /// The two halves are one test on purpose. A key readable from the file but
+    /// never handed to a request is the shape of a setting that looks wired and
+    /// is not, and each end alone would pass while the pair was broken.
+    #[test]
+    fn a_curseforge_search_carries_the_key_the_preferences_hold() {
+        // Empty is "no override": the key under test is the file's, and a shell
+        // that exported one would otherwise be the thing being measured.
+        std::env::set_var(crate::prefs::CURSEFORGE_KEY_ENV, "");
+        let paths = PalantirPaths::at(scratch("curseforge-key"));
+        // Written through the public pair rather than a struct literal: two of
+        // `Prefs`' fields are the module's own, so a `..` update cannot cross
+        // the boundary and should not have to.
+        let mut prefs = crate::prefs::load(&paths);
+        prefs.curseforge_api_key = "$2a$10$test-key".into();
+        crate::prefs::save(&paths, &prefs).unwrap();
+        let fetch = Arc::new(MapFetch::new());
+        let store = Store::load(&paths).with_engine(Engine::over(paths.meta_dir(), fetch.clone()));
+        let query = palantir_net::curseforge::CfQuery::new(palantir_net::curseforge::CfClass::Mod)
+            .text("jei");
+        fetch.set_route(&query.url(), Route::text(CF_SEARCH_BODY));
+
+        assert_eq!(
+            store.curseforge_key(),
+            Ok("$2a$10$test-key".to_string()),
+            "the file's key is the key the store holds"
+        );
+        let page = store.curseforge_search(&query).expect("an answer");
+        assert_eq!(page.data.len(), 1);
+        assert_eq!(page.data[0].title(), "Just Enough Items");
+        assert_eq!(page.total(), 418, "the count the service reported");
+
+        // Uncached, which is Overwolf's terms rather than an omission: the same
+        // search twice is two requests, the opposite of `Store::search`.
+        let again = store.curseforge_search(&query).expect("the same answer");
+        assert_eq!(again.data[0].title(), "Just Enough Items");
+        let sent = fetch.requests();
+        assert_eq!(sent.len(), 2, "a CurseForge answer is never kept");
+        for request in &sent {
+            assert_eq!(
+                request.header_value(palantir_net::curseforge::API_KEY_HEADER),
+                Some("$2a$10$test-key"),
+                "the key travels on every request: {request:?}"
+            );
+        }
+    }
+
+    /// No key is a state with a sentence, not a request with an empty header:
+    /// the service would answer 403 and the reader would be told nothing about
+    /// where a key goes.
+    #[test]
+    fn a_curseforge_search_with_no_key_says_where_the_key_goes_and_asks_nothing() {
+        std::env::set_var(crate::prefs::CURSEFORGE_KEY_ENV, "");
+        let paths = PalantirPaths::at(scratch("curseforge-no-key"));
+        let fetch = Arc::new(MapFetch::new());
+        let store = Store::load(&paths).with_engine(Engine::over(paths.meta_dir(), fetch.clone()));
+
+        let reason = store
+            .curseforge_search(&palantir_net::curseforge::CfQuery::new(
+                palantir_net::curseforge::CfClass::Mod,
+            ))
+            .expect_err("no key");
+        assert_eq!(reason, no_curseforge_key());
+        assert!(
+            reason.contains(palantir_core::paths::PREFS_FILE),
+            "the file a key belongs in is named: {reason}"
+        );
+        assert!(
+            reason.contains(crate::prefs::CURSEFORGE_KEY_ENV),
+            "so is the variable a one-off run can use: {reason}"
+        );
+        assert_eq!(fetch.count(), 0, "nothing was asked of the service");
+
+        // A store with no launcher behind it has no preferences to read, and
+        // gives the same answer rather than inventing a key or a panic.
+        let bare = Store::default().with_engine(Engine::over(scratch("curseforge-bare"), fetch));
+        assert_eq!(bare.curseforge_key(), Err(no_curseforge_key()));
+        assert_eq!(
+            bare.curseforge_search(&palantir_net::curseforge::CfQuery::new(
+                palantir_net::curseforge::CfClass::Mod
+            ))
+            .expect_err("no paths"),
+            no_curseforge_key()
+        );
+    }
+
+    /// The engine is the door, and a store without one says so in the sentence
+    /// every other unbuilt read uses -- the key's row does not change that.
+    #[test]
+    fn a_curseforge_search_with_no_engine_says_the_catalogue_is_not_built() {
+        let paths = PalantirPaths::at(scratch("curseforge-no-engine"));
+        let mut prefs = crate::prefs::load(&paths);
+        prefs.curseforge_api_key = "a-key".into();
+        crate::prefs::save(&paths, &prefs).unwrap();
+        let store = Store::load(&paths);
+        assert_eq!(
+            store
+                .curseforge_search(&palantir_net::curseforge::CfQuery::new(
+                    palantir_net::curseforge::CfClass::Mod
+                ))
+                .expect_err("no engine"),
+            not_implemented("CurseForge's catalogue")
+        );
     }
 
     #[test]

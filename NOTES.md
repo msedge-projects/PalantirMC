@@ -3636,3 +3636,75 @@ window's agreement between layout and drawing comes from. Verified on the VM
 after deleting every Inter face from it -- `fc-list | grep -ci inter` reading
 **0** -- at **1,377 passed, 19 ignored, 0 failed**, the same totals the Windows
 runner reports with no Inter at all.
+
+## The CurseForge key has a home, and one request it travels on
+
+`curseforge::fetch_*` has taken `key: &str` since the module landed and refused
+an empty one by name, and nothing in the tree could supply a non-empty one:
+`HANDOFF.md` §3a recorded the key as having no home, and named the Microsoft
+client id row as the precedent this tree already had. This is that row, built to
+the same shape.
+
+**The row.** `Prefs::curseforge_api_key` is a `String` skipped when empty, so a
+reader who has never entered a key keeps a preferences file that says nothing
+about one -- the same rule `Prefs::microsoft_client_id` follows. The difference
+is the fallback: an Azure application id can be public and shipped, and that row
+falls back to Prism's, while Overwolf issues a CurseForge key per developer
+account. There is nothing to ship, so an absent key is a real absence and
+`Prefs::curseforge_api_key()` answers `None` rather than inventing a string the
+service would refuse. `PALANTIRMC_CURSEFORGE_API_KEY` overrides the file for one
+run, which is the allowance the client id's own variable makes and wins for the
+same reason.
+
+**Not a keychain, and that is a decision rather than an omission.** The tempting
+move was to put both credentials in Windows' credential store while the row was
+being touched. It is not taken: `accounts.json` stays Prism formatVersion 3 with
+its tokens inline, because Prism and MultiMC are the format this launcher reads
+and writes, and a credential split across two stores is two answers about where
+it lives -- one of which a Prism install would not have. The key is this
+launcher's own setting, so it lives in this launcher's own preferences file.
+
+**The validation is the client id's and no more.** Trimmed, because a paste
+brings whatever the clipboard or a line of JSON added; whitespace is not a key.
+No shape check. Overwolf's keys are opaque strings it can reissue in another
+shape, so a prefix rule would refuse a working key the day that happened, and
+the service is the arbiter: a key it rejects comes back as its own answer through
+the store rather than as this launcher's guess about the string.
+
+**The hand-off.** `Store::curseforge_key()` resolves the key (environment, then
+file, through `prefs::load` the way a launch reads its defaults) and
+`Store::curseforge_search()` is the request it opens:
+`curseforge::fetch_search(engine.fetch(), &key, query)`, blocking like every
+store call and uncached because Overwolf's terms forbid storing what the API
+answers. Two states answer before any request is made -- a store with no engine
+says the catalogue is not built, and one with no key gets
+`no_curseforge_key()`, which names both places a key can be. That sentence is
+the point of the row: the reference's own settings dialog has no such field
+because the reference has no CurseForge, so "go to Settings" would be worse than
+nothing.
+
+**What was measured.** Seven tests, and the pair that matters is one test rather
+than two: a key written to the preferences file arrives as the `x-api-key`
+header of every CurseForge request, and the same search twice is two requests --
+uncached, which is the opposite of `Store::search` and is the terms being obeyed
+rather than a missing cache. The no-key case asserts the sentence *and* that the
+fetch was asked nothing, so a future change cannot pass by sending the request
+anyway. `cargo test -p palantir-desktop --locked` on `sift-launcher`, the pushed
+tree plus this patch: **872 passed / 0 failed**, 4 native passed, 0 new warnings
+-- 865 before it plus the seven.
+
+One shape the implementation had to respect: two of `Prefs`' fields are the
+module's own (`adopted_min_mem_mib` and its ceiling, which exist so a number read
+out of Prism's config cannot be written back into this file), and Rust will not
+let a `..` update cross a module boundary past a private field. The store's tests
+therefore build their file through `prefs::load` + `prefs::save` and set the one
+public field, which is also closer to what a reader with a key does.
+
+**What this does not do.** Discover still searches one catalogue: the source
+switch is the next slice in that area, and `HANDOFF.md` still says to ship it only
+with both catalogues reading. There is no settings *widget* either -- the row is
+read from the file or the environment, as the client id row is, and a dialog
+field would be a surface the reference does not have. And none of this has been
+asked of the live service: there is no key on this machine, so the seam is proven
+against a scripted `MapFetch` exactly as `curseforge.rs`'s own tests are. A live
+test is owed the day a key exists to run it with.

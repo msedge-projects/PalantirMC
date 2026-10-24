@@ -73,18 +73,24 @@ seams, by name:
   hide_installed }`. `Search` is Modrinth's query type, so a second catalogue
   needs either a source on `Asked` or a `CfQuery` arm; a source enum is the
   smaller change and keeps `round` meaning one thing.
-- `store.rs` → `Store::search(&ApiSearch)` is the single engine door. A sibling
-  `Store::curseforge_search(&CfQuery, key)` following the same shape (blocking,
-  `not_implemented` sentence when there is no engine, `Cancel` per call) is what
-  the shell calls from its own thread.
+- `store.rs` → `Store::search(&ApiSearch)` is the single engine door.
+  `Store::curseforge_search(&CfQuery)` is the sibling that landed on 2026-10-24:
+  blocking, `not_implemented` when there is no engine, and uncached because
+  Overwolf's terms forbid storing an answer. It resolves the key itself through
+  `Store::curseforge_key()` rather than taking it as a parameter, so the shell
+  calls it exactly as it calls `search` and there is one answer about where the
+  key comes from.
 - `shell.rs` → a `Request` variant beside the existing search request, with the
   same round-based staleness rule, plus the icon fetch the cards already use.
-- **The API key has no home yet.** `curseforge::fetch_*` takes `key: &str` and
-  refuses an empty one by name. Where it comes from is a product decision —
-  a settings row in the same shape as the Microsoft client id
-  (`Preferences::msa_client_id` and its validation) is the precedent already in
-  this tree; an environment variable alone is the failure the sign-in row was
-  added to remove.
+- **The API key has a home now** (2026-10-24). `Prefs::curseforge_api_key` is a
+  row in this launcher's own preferences file, shaped like
+  `Prefs::microsoft_client_id`: skipped when empty, trimmed, and overridden by
+  `PALANTIRMC_CURSEFORGE_API_KEY` for one run. It is **not** a shipped key and
+  **not** in an OS keychain — Overwolf issues one per developer account, and
+  `accounts.json` keeps its tokens inline for Prism compatibility, so the key
+  lives where the launcher's other settings live. A request without one answers
+  `store::no_curseforge_key()`, which names both places a key can be.
+  `NOTES.md` has the reasoning and the measured tests.
 
 A source chip that does not work is worse than no chip: ship the switch only
 with both catalogues reading.
