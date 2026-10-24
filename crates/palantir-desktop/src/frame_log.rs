@@ -25,9 +25,9 @@ use std::time::{Duration, Instant};
 
 /// How many frames one summary covers.
 ///
-/// Sixty is about a second at the rate a smooth window runs, so a scrolling session
-/// produces a line per second and a two-second scroll produces two or three.
-pub const FLUSH_EVERY: usize = 60;
+/// Thirty is about half a second at the rate a smooth window runs, so a scrolling
+/// session produces two lines a second and even a short one produces something.
+pub const FLUSH_EVERY: usize = 30;
 
 /// The environment variable that turns this on, naming the file to append to.
 pub const PATH_ENV: &str = "PALANTIRMC_FRAME_LOG";
@@ -124,6 +124,11 @@ struct Recorder {
 
 impl Recorder {
     fn new(path: PathBuf) -> Recorder {
+        // A line the moment the recorder exists, before any frame is measured. It
+        // costs one write per process and it answers the question a silent file
+        // leaves open: whether the variable reached this process and whether this
+        // path can be written at all.
+        append(&path, "opened");
         Recorder {
             path,
             window: Window::default(),
@@ -137,19 +142,38 @@ impl Recorder {
         if !self.window.full() {
             return;
         }
+        self.flush();
+    }
+
+    /// Write the window's summary, if it has anything in it.
+    fn flush(&mut self) {
         let samples = self.window.take();
-        let Some(line) = Window::summary(&samples) else {
-            return;
-        };
-        // Append rather than truncate: a session that restarts the window keeps the
-        // earlier evidence, and the file is a scratch file by convention.
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-        {
-            let _ = writeln!(file, "{line}");
+        if let Some(line) = Window::summary(&samples) {
+            append(&self.path, &line);
         }
+    }
+}
+
+impl Drop for Recorder {
+    /// A window cut short by the launcher closing is still evidence: a scroll that
+    /// produced twenty frames says something, and dropping it because it is not
+    /// thirty would be throwing away the measurement.
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
+/// Append one line, ignoring a failure: a measurement that cannot be written must
+/// not take the launcher with it.
+fn append(path: &std::path::Path, line: &str) {
+    // Append rather than truncate: a session that restarts keeps the earlier
+    // evidence, and the file is a scratch file by convention.
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "{line}");
     }
 }
 
