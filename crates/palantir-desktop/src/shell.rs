@@ -73,8 +73,8 @@ use crate::pages::{
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
 use crate::style::{
-    disabled, heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
-    INK_PLATE_TEXT, INK_SECONDARY,
+    disabled, heading, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG,
+    INK_PLATE, INK_PLATE_TEXT, INK_SECONDARY,
 };
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Raw, Theme as Gen};
@@ -8854,6 +8854,14 @@ impl Shell {
                 Message::SettingsTab(tab),
             ));
         }
+        // `mt-auto text-secondary text-sm`: the reference's own footer at the
+        // floor of the tab column, carrying the version it is running and the
+        // platform. This launcher shows its version there and, in place of the
+        // platform line, where the notices are -- attribution is a shipping
+        // condition, and the reference's footer is the one surface it can live in
+        // without inventing a page the reference does not have.
+        nav = nav.push(Space::new(Length::Fill, Length::Fill));
+        nav = nav.push(settings_footer(theme));
         // `min-h-[min(65vh,600px)]` on the content, capped by the room the window
         // leaves: the reference's content pane grows with its content and scrolls once
         // the modal reaches the window's edge, which is this same clamp.
@@ -10783,6 +10791,51 @@ const MODAL_SCRIM_INSET: f32 = 5.0 * 16.0;
 /// a 720-pixel window, which is what makes a settings dialog 588 tall there.
 fn settings_content_min(viewport: iced::Size) -> f32 {
     (viewport.height * 0.65).min(600.0)
+}
+
+/// The notices file, as the installer copies it beside the launcher.
+///
+/// One constant because two places name it: the installer's payload and the
+/// settings footer that tells a reader where to look. A second spelling is how the
+/// two would stop agreeing.
+pub const NOTICES_FILE: &str = "THIRD_PARTY_NOTICES.md";
+
+/// The two lines the settings footer carries.
+///
+/// The first is the reference's own `app.settings.app-version` message -- `Modrinth
+/// App {version}` with this product's name -- and the second is where the notices
+/// are. Both are built here rather than written into the view so a gate can read
+/// them: the version is [`crate::brand::version`], the same `CARGO_PKG_VERSION`
+/// the exe's file properties carry, and the file name is the one above.
+///
+/// **Why a footer and not an About page.** There is no About in this launcher or
+/// in the reference -- the old shell's went with G88 -- but attribution is a
+/// shipping condition, and the reference's settings modal already draws a footer
+/// in this exact place with its version and platform. Two plain lines are that
+/// footer with the platform line replaced by the one this product owes.
+fn settings_footer_lines() -> [String; 2] {
+    [
+        format!("{} {}", crate::brand::APP_NAME, crate::brand::version()),
+        format!("Notices travel beside the launcher: {NOTICES_FILE}"),
+    ]
+}
+
+/// The footer itself: `text-secondary text-sm`, as the reference's is.
+fn settings_footer<'a>(theme: Gen) -> Element<'a, Message> {
+    let [version, notices] = settings_footer_lines();
+    let line = move |words: String, size: f32| {
+        text(words)
+            .size(size)
+            .font(regular())
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_SECONDARY,
+            )))
+    };
+    column![line(version, 14.0), line(notices, 12.0)]
+        .spacing(2.0)
+        .width(Length::Fill)
+        .into()
 }
 
 /// How many theme cards fit a row of `width`: the reference's own grid,
@@ -13345,6 +13398,35 @@ mod tests {
         );
         assert_eq!(shell.versions, Load::Empty);
         drop(shell.render());
+    }
+
+    /// The footer's two lines, and the fact that both name something real.
+    ///
+    /// This is the whole of the About decision: no About page exists in this
+    /// launcher or in the reference, so the version and the notices live in the
+    /// footer the reference's own settings modal already draws. The gate holds the
+    /// version to `brand::version()` -- one source, the same one the exe's file
+    /// properties carry -- and the notice's file name to the installer's payload,
+    /// because a line that names a file the installer does not copy is worse than
+    /// no line.
+    #[test]
+    fn the_settings_footer_names_the_product_its_version_and_the_notices() {
+        let [version, notices] = settings_footer_lines();
+        assert_eq!(
+            version,
+            format!("{} {}", crate::brand::APP_NAME, crate::brand::version())
+        );
+        assert!(notices.contains(NOTICES_FILE), "{notices}");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        assert!(
+            root.join(NOTICES_FILE).is_file(),
+            "{NOTICES_FILE} is not at the repository root"
+        );
+        let installer = include_str!("../../../installer/sift.nsi");
+        assert!(
+            installer.contains(NOTICES_FILE),
+            "the installer no longer copies {NOTICES_FILE} beside the launcher"
+        );
     }
 
     #[test]

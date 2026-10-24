@@ -142,9 +142,11 @@ Also outstanding, and lower value:
   own icon and version block come from `build.rs` (`winresource`), and that path
   is Windows-only -- it compiled first on CI's exe jobs and has not been looked at
   on a desktop, which is the check still owed.
-- The **About page does not exist**, in this launcher or in the reference: the old
-  shell's went with G88. `brand::version()` is the one source of the number the exe
-  now carries, and a surface that draws it is a change of its own.
+- **There is no About page, and that is decided** (2026-10-24): the reference has
+  none either, so the version and the notices live in the footer the reference's
+  own settings modal draws (`mt-auto text-secondary text-sm`) -- two lines, gated
+  in `shell.rs`. Attribution is a shipping condition and that footer is the
+  surface it uses; do not grow it into a dialog without the same reasoning.
 - The payload is still `PalantirMC.exe`; the installer renames it to
   `Sift Launcher.exe` at install time (`File /oname=`), while the build still
   produces the old exe name. The rename in the product itself is untouched, and

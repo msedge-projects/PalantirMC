@@ -4044,3 +4044,43 @@ only been exercised through `bedrock`'s own unit tests against temp folders, nev
 through the page. The rail's sixth slot has not been captured against the
 reference, because the reference has no sixth slot to capture; what is checked is
 that the slot is a route and that every page still draws in every theme.
+## There is no About page, and the version lives where the reference puts it
+
+The open question was whether to add an About page or to record its absence. Both
+answers were wrong as stated, because the tree already contains the reason the
+question has to be answered one way: **attribution is a shipping condition**, and
+`AGENTS.md` says art and code notices belong "in the source and in the binary's
+About page". A launcher with no such surface at all cannot meet that.
+
+There is no About page to point at. The reference has no `About.vue` -- its rail
+has five links and a settings modal -- and this shell's old one went with the
+shell itself in G88, which is why `brand.rs`'s comments still referred to one.
+
+**What the reference does have is a footer**, and that is the surface. Its
+`AppSettingsModal.vue` ends its tab column with `mt-auto text-secondary text-sm`:
+the app's version (`Modrinth App {version}`) and the platform it is running on.
+The settings dialog here now draws the same two lines in the same place, with the
+platform line replaced by the one this product owes:
+
+```
+PalantirMC 0.1.0
+Notices travel beside the launcher: THIRD_PARTY_NOTICES.md
+```
+
+**The gate is that both lines name something real.** The product and version in
+the first are `brand::APP_NAME` and `brand::version()` -- one source, the same
+`CARGO_PKG_VERSION` the exe's file properties carry since the icon slice -- so a
+release cannot show one number and carry another. The second names
+`NOTICES_FILE`, and the gate holds that constant to two facts: the file is at the
+repository root, and `installer/sift.nsi` copies it beside the launcher. A footer
+line naming a file the installer does not ship is worse than no line at all.
+
+**What this deliberately does not add:** no dialog, no route, no rail slot, no
+links to a repository or a Discord -- none of which the reference's footer has
+either -- and no platform line, because this launcher has never claimed to show
+one and a second number nobody gated would be the drift the decision is meant to
+stop.
+
+**What was measured.** `cargo test -p palantir-desktop --locked` on
+`sift-launcher`: **903 passed / 0 failed** and 4 native passed, which is the 902
+after the Bedrock shelf plus the footer's gate.
