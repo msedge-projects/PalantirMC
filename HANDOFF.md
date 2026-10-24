@@ -129,7 +129,23 @@ every page still draws in every theme. See section 6 for the Windows checklist.
 The design constraint worth restating: this is a **shelf beside the Java
 shelf**, not a second launcher. No download, no version picker, no write.
 
-### 3c. The animation has never rendered
+### 3c. A self-update checks its download and does nothing else
+
+`crates/palantir-desktop/src/update.rs` now carries the half of an updater that is
+files and arithmetic: `Offer` (version/url/sha256/size), `offer_problem` (four
+refusals -- not newer, not https, no usable digest, no size), `verify_download`
+(size first, then `palantir_net::download`'s streaming digest) and
+`install_after_verify` (verify, *then* rename, so a bad download cannot replace
+anything). Six tests hold it; `NOTES.md` has the record.
+
+What is still owed, and none of it is testable here: a signed manifest with a key
+compiled into the binary (covering version, URL and digest together), the fetch
+itself, running the installer with this launcher closed, rollback, and the
+installer's own rename -- `sift.nsi` installs `Sift Launcher.exe` from a payload
+called `PalantirMC.exe`, so an updater that looks for the payload's name replaces
+nothing.
+
+### 3d. The animation has never rendered
 
 `installer/anim/sift.avi` is valid (ffprobe reads 96×96, 24 frames, 25 fps,
 uncompressed) and `SysAnimate32` with `ACM_OPEN`/`ACM_PLAY` is the documented

@@ -4287,3 +4287,54 @@ plus this one.
 field reaching the store, not about the service answering. The field's own drawing
 is the same `text_input` the app-directory row uses with one flag changed, so it
 inherits that row's measurements rather than having its own.
+## The updater's check, and the order it has to run in
+
+The updater is still not an updater -- there is no manifest fetch, no installer
+launch, no key to sign with -- but the half of it that decides *whether a download
+may be used* is now written and tested, because that half is arithmetic and files
+rather than a Windows session.
+
+**`Offer`** is what a manifest would have to say: `version`, `url`, `sha256`,
+`size`. **`offer_problem`** refuses one for four reasons, each of which is a real
+failure rather than a missing field: a version that is not newer (re-installing the
+same release is a loop), a URL that is not `https` (a network in the middle can
+rewrite it, and a digest catches that only after fetching whatever was served), a
+digest that is not 64 hex characters (an updater with no usable digest is one that
+runs what it is handed), and a size of zero (the cheapest check there is would be
+skipped).
+
+**`verify_download` checks size first, then the digest.** One `stat` against a
+number is the check that catches a truncated transfer, which is the common way a
+download goes wrong; hashing a half file only to learn it is half a file spends the
+disk read for an answer already available. The digest itself is
+`palantir_net::download::verify_sha256` -- streaming in fixed chunks, case- and
+whitespace-insensitive -- so this slice added no dependency and no `Cargo.lock`
+change: the desktop crate already reaches that module.
+
+**`install_after_verify` verifies, then renames.** The order is the function: a
+rename first would have replaced the installed launcher with a file nobody checked,
+and the check would then be checking the wrong copy. `std::fs::rename` is atomic
+within one volume, which is why the download has to sit beside its destination
+rather than in a temp directory -- across volumes a rename is a copy, and a copy
+that fails half way leaves nothing where the launcher used to be. A refused
+download leaves the target byte-identical and the temporary file on disk for
+inspection, and both facts are tested.
+
+**What was measured.** Six tests: a complete offer has no problem; each of the four
+refusals is exercised one field at a time, including four kinds of unusable digest;
+a matching file is accepted even with the manifest's digest uppercased; a short file
+is refused *by size* with both numbers in the sentence; a same-size file with the
+wrong bytes is refused, as is a digest that is not one; and the rename test proves
+both directions -- a good download replaces the stand-in launcher and the temporary
+file is gone, a corrupt one leaves the old bytes exactly where they were. On
+`sift-launcher`: **916 passed / 0 failed** and 4 native passed, the 910 after the
+APIs tab plus these six.
+
+**What this cannot say, and what is still owed.** No signature is checked, so a
+manifest is trusted as far as its transport; the design (`NOTES.md`, "A
+self-update") wants a key compiled into the binary and a signature covering
+version, URL and digest together. Nothing fetches a manifest, nothing runs an
+installer, nothing closes the launcher first, and nothing rolls back -- and the
+installer still renames `PalantirMC.exe` to `Sift Launcher.exe` at install time,
+which an updater has to know before it can replace anything. Every one of those
+needs a Windows host with an installed copy.

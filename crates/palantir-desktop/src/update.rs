@@ -73,8 +73,7 @@ pub fn is_newer(offered: &str, current: &str) -> bool {
 ///
 /// Four fields at most: a dotted number with more of them is not a version this
 /// launcher ships, and a longer one is refused rather than half-read.
-fn parts(version: &str) -> Option<Vec<u64>> {
-    let version = version.trim();
+fn parts(version: &str) -> Option<Vec<u64>> {    let version = version.trim();
     let version = version.strip_prefix('v').unwrap_or(version);
     if version.is_empty() || version.len() > 32 {
         return None;
@@ -87,6 +86,114 @@ fn parts(version: &str) -> Option<Vec<u64>> {
         return None;
     }
     Some(fields)
+}
+
+/// One release, as a manifest would describe it.
+///
+/// Four fields and no more: what the launcher needs in order to decide whether to
+/// fetch a file, and then to check that the file it fetched is the one described.
+/// The notes a release carries are not here because nothing would draw them yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Offer {
+    /// The version the release is.
+    pub version: String,
+    /// Where its bytes are.
+    pub url: String,
+    /// The lowercase hex `sha256` of those bytes.
+    pub sha256: String,
+    /// How many bytes there are, so a truncated transfer is caught by a number
+    /// rather than by hashing half an installer.
+    pub size: u64,
+}
+
+/// Why `offer` should not be acted on, or `None` when it may be.
+///
+/// The four tests are the ones a manifest has to pass *before* the launcher fetches
+/// anything, and each one exists because of a way an updater goes wrong rather than
+/// because a field was in the way:
+///
+/// * a version that is not newer is nothing to do, and re-installing the same
+///   release would be a loop;
+/// * a URL that is not `https` is a download a network in the middle can rewrite --
+///   the digest would catch it, but only after fetching whatever was served;
+/// * a digest that is not 64 hex characters cannot catch anything, and an updater
+///   with no digest is an updater that runs whatever it was handed;
+/// * a size of zero means the manifest did not say, and the cheapest check there is
+///   -- the byte count -- would be skipped.
+pub fn offer_problem(offer: &Offer, current: &str) -> Option<String> {
+    if !is_newer(&offer.version, current) {
+        return Some(format!(
+            "{} is not newer than {current}",
+            offer.version.trim()
+        ));
+    }
+    if !offer.url.starts_with("https://") {
+        return Some(format!("{} is not an https address", offer.url));
+    }
+    let digest = offer.sha256.trim();
+    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Some("the manifest's sha256 is not 64 hex characters".to_string());
+    }
+    if offer.size == 0 {
+        return Some("the manifest gives no size for the download".to_string());
+    }
+    None
+}
+
+/// Check a downloaded file against what the manifest said: size, then digest.
+///
+/// **Size first**, because it is one `stat` and a truncated transfer is the common
+/// way a download goes wrong -- hashing a half file to discover it is half a file
+/// spends the disk read for an answer already available.
+///
+/// The digest is `palantir_net::download`'s, which streams the file in fixed chunks
+/// rather than reading it into memory, and compares case-insensitively. Nothing
+/// here writes, and nothing here runs anything: this is the check that stands
+/// between a download and the installer that would replace this launcher.
+pub fn verify_download(path: &std::path::Path, size: u64, sha256: &str) -> Result<(), String> {
+    let found = std::fs::metadata(path)
+        .map_err(|error| format!("{} could not be read: {error}", path.display()))?
+        .len();
+    if found != size {
+        return Err(format!(
+            "{} is {found} bytes where the manifest said {size}",
+            path.display()
+        ));
+    }
+    palantir_net::download::verify_sha256(path, sha256).map_err(|error| {
+        format!(
+            "{} is not the file the manifest described: {error}",
+            path.display()
+        )
+    })
+}
+
+/// Move a verified download onto `target`, or refuse and leave `target` alone.
+///
+/// The order is the whole function: **verify, then rename**. A rename that happened
+/// first would have replaced the installed launcher with a file nobody checked, and
+/// the check would then be checking the wrong copy.
+///
+/// `std::fs::rename` is atomic within one volume, which is why the download belongs
+/// beside its destination rather than in a temporary directory: a rename across
+/// volumes is a copy, and a copy that fails half way leaves a file where the
+/// launcher used to be. This function cannot promise the caller downloaded beside
+/// the target -- that is the caller's rule -- but it can promise nothing is moved
+/// before it is checked.
+pub fn install_after_verify(
+    temp: &std::path::Path,
+    target: &std::path::Path,
+    size: u64,
+    sha256: &str,
+) -> Result<(), String> {
+    verify_download(temp, size, sha256)?;
+    std::fs::rename(temp, target).map_err(|error| {
+        format!(
+            "{} was checked but could not be moved to {}: {error}",
+            temp.display(),
+            target.display()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -135,5 +242,149 @@ mod tests {
         }
         // And the length ceiling refuses a string that is all digits but absurd.
         assert!(!is_newer(&"1".repeat(33), "0.1.0"));
+    }
+
+    /// A complete manifest for a newer release, which each test then breaks once.
+    fn offer() -> Offer {
+        Offer {
+            version: "0.2.0".to_string(),
+            url: "https://example.invalid/palantirmc-setup-0.2.0.exe".to_string(),
+            sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string(),
+            size: 12_345,
+        }
+    }
+
+    #[test]
+    fn a_complete_offer_for_a_newer_release_has_no_problem() {
+        assert_eq!(offer_problem(&offer(), "0.1.0"), None);
+        // The `v` a tag carries is accepted on the manifest's side too.
+        let tagged = Offer {
+            version: "v0.2.0".to_string(),
+            ..offer()
+        };
+        assert_eq!(offer_problem(&tagged, "0.1.0"), None);
+    }
+
+    /// Each of the four refusals, one field at a time.
+    #[test]
+    fn an_offer_is_refused_for_each_thing_that_would_make_it_unsafe() {
+        let same = offer_problem(&offer(), "0.2.0").expect("the same version is nothing to do");
+        assert!(same.contains("not newer"), "{same}");
+        let older = offer_problem(&offer(), "0.3.0").expect("an older release is nothing to do");
+        assert!(older.contains("not newer"), "{older}");
+
+        let plaintext = Offer {
+            url: "http://example.invalid/x.exe".to_string(),
+            ..offer()
+        };
+        let problem = offer_problem(&plaintext, "0.1.0").expect("http is refused");
+        assert!(problem.contains("https"), "{problem}");
+
+        for digest in ["", "abc", &"z".repeat(64), &"a".repeat(63)] {
+            let bad = Offer {
+                sha256: digest.to_string(),
+                ..offer()
+            };
+            assert!(
+                offer_problem(&bad, "0.1.0").is_some(),
+                "{digest:?} must not pass as a digest"
+            );
+        }
+
+        let sizeless = Offer {
+            size: 0,
+            ..offer()
+        };
+        assert!(offer_problem(&sizeless, "0.1.0").is_some(), "no size");
+    }
+
+    /// A scratch file holding `bytes`, in a directory of its own.
+    fn scratch(name: &str, bytes: &[u8]) -> (std::path::PathBuf, std::path::PathBuf) {
+        let root = std::env::temp_dir()
+            .join("palantirmc-update-tests")
+            .join(name);
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        let path = root.join("download.exe");
+        std::fs::write(&path, bytes).expect("a scratch file");
+        (root, path)
+    }
+
+    #[test]
+    fn a_download_that_matches_its_size_and_digest_is_accepted() {
+        let bytes = b"an installer";
+        let (root, path) = scratch("verify-ok", bytes);
+        let digest = palantir_net::download::sha256_hex(bytes);
+        assert_eq!(verify_download(&path, bytes.len() as u64, &digest), Ok(()));
+        // The manifest's own case does not matter, and neither does its whitespace:
+        // `verify_sha256` trims and lowercases, and this must not undo that.
+        assert_eq!(
+            verify_download(&path, bytes.len() as u64, &digest.to_uppercase()),
+            Ok(())
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The size is checked before the digest, and its message says both numbers.
+    #[test]
+    fn a_truncated_download_is_refused_by_size_and_says_so() {
+        let bytes = b"an installer";
+        let (root, path) = scratch("verify-short", bytes);
+        let digest = palantir_net::download::sha256_hex(bytes);
+        let expected = bytes.len() as u64 + 10;
+        let problem =
+            verify_download(&path, expected, &digest).expect_err("a short file must be refused");
+        assert!(
+            problem.contains(&format!("{expected}")),
+            "the message names what the manifest said: {problem}"
+        );
+        assert!(
+            problem.contains(&format!("{} bytes", bytes.len())),
+            "and what was actually found: {problem}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_download_of_the_right_size_and_the_wrong_bytes_is_refused() {
+        let (root, path) = scratch("verify-wrong", b"an installer");
+        let other = palantir_net::download::sha256_hex(b"a different installer");
+        let problem = verify_download(&path, 12, &other).expect_err("a wrong digest must be refused");
+        assert!(problem.contains("not the file"), "{problem}");
+        // And a digest that is not a digest at all is a refusal rather than a pass.
+        assert!(verify_download(&path, 12, "not-a-digest").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Verified, then moved: the target appears only after the check, and a bad
+    /// download leaves the target exactly as it was.
+    #[test]
+    fn a_verified_download_is_moved_and_an_unverified_one_is_not() {
+        let bytes = b"an installer";
+        let digest = palantir_net::download::sha256_hex(bytes);
+        let (root, temp) = scratch("install-ok", bytes);
+        let target = root.join("PalantirMC.exe");
+        std::fs::write(&target, b"the old launcher").expect("a stand-in launcher");
+
+        install_after_verify(&temp, &target, bytes.len() as u64, &digest).expect("a good download");
+        assert_eq!(
+            std::fs::read(&target).expect("the target"),
+            bytes,
+            "the new bytes are in place"
+        );
+        assert!(!temp.exists(), "the temporary file was moved, not copied");
+
+        // The same thing with a corrupt download: the installed file is untouched.
+        let (root, temp) = scratch("install-bad", b"a corrupted installer!");
+        let target = root.join("PalantirMC.exe");
+        std::fs::write(&target, b"the old launcher").expect("a stand-in launcher");
+        assert!(install_after_verify(&temp, &target, bytes.len() as u64, &digest).is_err());
+        assert_eq!(
+            std::fs::read(&target).expect("the target"),
+            b"the old launcher",
+            "a download that fails its check must not replace anything"
+        );
+        assert!(temp.exists(), "the refused download is left for inspection");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
