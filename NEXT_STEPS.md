@@ -30,6 +30,11 @@ rows after them carry stages 2-5 to the landing, and the landing itself is the
 first `ci.yml` run a push to `master` has ever scheduled, and the rows after it are
 the changes that went on top of the landing:
 
+A push that touches only `**.md` or `tools/**` schedules **no run at all** --
+`ci.yml`'s `paths-ignore` covers exactly those -- so a documentation commit's
+absence from this table is the filter rather than the silence `AGENTS.md` §2 warns
+about. `1a5193c`, which corrected a row here, is such a push.
+
 | Run | Commit | What it proved |
 | --- | --- | --- |
 | 36020421890 | `2361cc3` | The prune builds and tests where it matters, with three workspace members gone |
