@@ -4393,3 +4393,51 @@ slow, the next levers in order are the draw cost of the page under the wheel
 needs `adopt` to be taught about commands that were never sent. The 160 ms ceiling
 is also still a constant nobody has tuned against a live window -- now it only binds
 on a flick longer than 960 px.
+## The scroll animation is gone, and so is every frame it asked for
+
+Two attempts to make the wheel feel fast by tuning the tween -- no clock restart,
+then a distance-proportional duration (G168) -- and the reader still said "scroll
+is still bad". They were right, and the lesson is the one this tree keeps relearning:
+a tween can only ever be *behind* the input. It spends frames travelling to a
+position the wheel already named, and it keeps a frame timer running while it does,
+on the same thread that draws the window. On a machine this launcher is built for,
+those frames are the jank. So the tween is deleted rather than tuned again.
+
+**What scrolling is now.** A wheel adds its notches to the region's position and
+answers with the one `scroll_to` that carries the result. That is the whole of it:
+no deadline, no easing, no `Message::Tick` owed by a scroll, no frame subscription
+started by one. `ScrollAnim` is a position and the geometry it was measured against;
+`Glides` is nine named positions and the bookkeeping that tells this shell's own
+offsets from somebody else's (a scrollbar drag, a key, iced's own `scroll_to`). The
+things that had to be right are still there and still tested: which region, how far,
+clamped to the content, and adopted rather than fought when something else moved it.
+
+**What was deleted with it**, because a reader of the diff will ask: `Glide`,
+`begin`, `tick`, `DURATION`, `GLIDE_SPEED`, `GLIDE_FLOOR`, `FRAME`, `ease_out`,
+`Glides::tick`, `Glides::animating`, `frames_to_settle`, `settle_at` and the `glide`
+test helper. The desktop crate's test count goes **918 → 893**: thirty-one of the
+tween's own tests went with the tween, and six replaced them --
+
+* `a_notch_lands_on_its_own_event` (the offset a wheel asks for is the offset the
+  command carries);
+* `however_many_events_arrive_the_notches_all_land` (two events per click, six
+  clicks, each reporting the previous command's offset: twelve notches land);
+* `a_wheel_moves_the_region_it_names_and_leaves_the_others_alone`;
+* `a_region_something_else_moved_is_taken_over_rather_than_dragged_back`;
+* `a_wheel_on_a_region_with_nothing_to_scroll_moves_nothing`;
+* and, in the shell, `a_wheel_leaves_nothing_asking_for_frames` -- the "lightweight"
+  claim stated as a fact about the shell's subscription: settle the page's own fade,
+  wheel, and the window is idle again.
+
+**What was measured.** `sift-launcher`, `cargo test -p palantir-desktop --locked`:
+**893 passed / 0 failed** and 4 native passed. The three failures on the way were all
+mine: the module docs still described a deadline (rewritten), and the shell gate
+first measured while the page was still fading in rather than after it (settled
+first, which is what the test now does).
+
+**What this cannot say.** It does not make a frame cheaper. Scrolling now costs one
+redraw per wheel event and nothing else, so if a long page still feels heavy, the
+remaining cost is the page's own draw -- which is the next lever and is measured by
+`crate::scale` per page, not by this module. It also changes a feel: no longer
+eased, a notch is a jump of sixty pixels, which is what a browser does and what the
+reference's own web view does, but it is a change a reader will notice.

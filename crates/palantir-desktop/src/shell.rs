@@ -2436,12 +2436,12 @@ impl Shell {
     /// it to where the policy says it should be.
     ///
     /// This is the whole of the scrolling the shell owns. [`crate::scroll::Glides`]
-    /// keeps one glide per named region, decides whether the offset the wheel
-    /// measured belongs to this shell or to something else that moved the region,
-    /// and eases toward the target the notches asked for. What comes back is
-    /// either the frame that starts a glide or -- on a machine measured too slow
-    /// to draw one -- the whole of the gesture.
-    fn glide(&mut self, name: &'static str, wheel: crate::scroll::Wheel) -> iced::Command<Message> {
+    /// keeps one position per named region and decides whether the offset the wheel
+    /// measured belongs to this shell or to something else that moved the region;
+    /// what comes back is the command that puts the region where the notches asked.
+    /// **No easing and no frame timer**: a scroll is one command, and iced redraws
+    /// once.
+    fn scroll(&mut self, name: &'static str, wheel: crate::scroll::Wheel) -> iced::Command<Message> {
         self.glides.wheel(name, wheel, std::time::Instant::now())
     }
 
@@ -2472,11 +2472,6 @@ impl Shell {
         // The panel toggle's arrow is mid-turn, which is the only motion the
         // reference gives the panel itself -- see [`Shell::panel_toggle`].
         if self.panel_arrow.is_running() {
-            return true;
-        }
-        // A region mid-glide is moving as well, and the frame it is waiting for is
-        // this one: without it a glide would draw its first frame and stop there.
-        if self.glides.animating() {
             return true;
         }
         anim::clock()
@@ -2593,7 +2588,7 @@ impl Shell {
             // command is this match's to return. Every shape a wheel can arrive in
             // is one of these three -- this shell's own regions, a page's, and the
             // instance-settings modal's -- and all three answer the same way.
-            Message::Wheel(name, wheel) => return self.glide(name, wheel),
+            Message::Wheel(name, wheel) => return self.scroll(name, wheel),
             Message::Screen(
                 pages::Message::Home(home::Message::Wheel(name, wheel))
                 | pages::Message::Discover(discover::Message::Wheel(name, wheel))
@@ -2603,9 +2598,9 @@ impl Shell {
                 | pages::Message::Screenshots(screenshots::Message::Wheel(name, wheel))
                 | pages::Message::Servers(servers::Message::Wheel(name, wheel))
                 | pages::Message::User(user::Message::Wheel(name, wheel)),
-            ) => return self.glide(name, wheel),
+            ) => return self.scroll(name, wheel),
             Message::InstanceSettings(crate::instance_settings::Message::Wheel(name, wheel)) => {
-                return self.glide(name, wheel)
+                return self.scroll(name, wheel)
             }
             // The frame clock, which exists only while something is moving. The
             // regions glide on it with everything else -- one clock in the window,
@@ -2617,7 +2612,10 @@ impl Shell {
                 if let Ok(mut clock) = anim::clock().lock() {
                     clock.tick(now);
                 }
-                return self.glides.tick(now);
+                // A wheel owes no frame any more: a scroll is the command that
+                // carries the new offset and nothing else. `Message::Tick` is still
+                // what the hover clock and the shell's own tweens ask for.
+                return iced::Command::none();
             }
             _ => {}
         }
@@ -12213,9 +12211,41 @@ mod tests {
         assert_eq!(Glyph::X.name(), "x");
     }
 
+    /// A wheel leaves nothing animating, which is the whole of "lightweight".
+    ///
+    /// The shell's frame timer is a subscription that exists only while
+    /// [`Shell::animating`] is true. Scrolling used to make it true for as long as a
+    /// glide ran — ten frames per gesture, on the same thread that draws the window
+    /// — and that is the cost the reader was feeling. A scroll is now one command
+    /// and no frames, so this asserts the cheapest property there is: after a wheel,
+    /// the window is idle again.
     #[test]
-    fn the_rail_offers_the_slots_the_settings_ask_for() {
-        // The reference's two conditional slots: `showSkinSelectorInSidebar` on
+    fn a_wheel_leaves_nothing_asking_for_frames() {
+        let mut shell = shell_at("/browse/modpack");
+        // Settle the page's own arrival first: the shell is legitimately busy for a
+        // few frames while a page fades in, and that is not what this measures.
+        shell.advance(Duration::from_millis(400));
+        assert!(!shell.animating(), "the window is idle before the wheel");
+        let wheel = crate::scroll::Wheel {
+            notches: -1.0,
+            content_height: 4_000.0,
+            view_height: 600.0,
+            offset: 0.0,
+        };
+        let _ = shell.handle(Message::Wheel(crate::scroll::PAGE, wheel));
+        assert!(
+            !shell.animating(),
+            "a scroll must not keep the frame clock awake"
+        );
+        assert_eq!(
+            shell.glides.offset(crate::scroll::PAGE),
+            crate::scroll::WHEEL_PIXELS_PER_NOTCH,
+            "and it lands where the notch asked, at once"
+        );
+    }
+
+    #[test]
+    fn the_rail_offers_the_slots_the_settings_ask_for() {        // The reference's two conditional slots: `showSkinSelectorInSidebar` on
         // the shirt, which its own defaults turn on, and the screenshots sync
         // option on the image, which is on too. A fresh install of the reference
         // draws all eight.
