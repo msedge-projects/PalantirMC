@@ -3815,3 +3815,56 @@ anywhere. The constants are the SDK header's (`ES_CONTINUOUS` `0x80000000`,
 `ES_SYSTEM_REQUIRED` `0x1`), and the claim "the machine stayed awake through a real
 install" needs a Windows host with a power plan that would otherwise sleep --
 which no machine in this session has.
+## Two windows on one data root, and a lock that survives being killed
+
+Two launchers write the same instance files: a create in one and a delete in the
+other, two installs into one instance, two launches appending to one log. The lock
+file is the obvious answer and the obvious version of it is a trap -- a launcher
+that is killed, panics, or is ended from the task manager leaves the file behind,
+and every later start refuses to open against a file nobody owns. A launcher that
+will not start until a file is deleted by hand is worse than two windows.
+
+`crate::single` is a **claim by process id** instead. The claim is taken with
+`create_new`, which is what decides two starts a millisecond apart -- the winner
+writes its pid, the loser reads it -- and a start that finds a claim asks the OS
+whether that process is still alive: `OpenProcess` with
+`PROCESS_QUERY_LIMITED_INFORMATION` and `GetExitCodeProcess` against
+`STILL_ACTIVE` on Windows, `/proc/<pid>` on Linux. A live one is a second window
+and this start says so and exits; a dead one is a stale file, and the new start
+removes it and takes it over. Dropping the `Lock` removes the file.
+
+**A capture does not claim.** `--shot` renders one frame and exits and touches no
+instance state, and the tools in `tools/` drive it while a launcher may well be
+open on the same desk; refusing that would break the capture loop rather than
+protect anything.
+
+**Where there is no way to ask, the file is treated as stale.** The Linux and
+macOS builds here exist to run tests and the build VM, and on a host with neither
+answer a launcher that refused to start because of a file it could not ask about
+would be the trap this module exists to avoid. Windows and Linux both answer.
+
+**What is deliberately not here: focusing the window that is already open.** That
+needs a channel between the two processes -- a named pipe, or a registered window
+message -- and is a change of its own. What a second start does is put up a
+message box naming the running process, because a `windows_subsystem = "windows"`
+build started from a shortcut has no console to write to and a silent no-op reads
+as a broken shortcut.
+
+**A test bug worth keeping.** The first version of the stale-lock test matched
+`Claim::Held(_)` and then asserted the file held this process's pid -- and failed,
+because binding nothing drops the lock and the lock's `Drop` removes the file. The
+test now holds the value across the assertion, which is also the behaviour the
+release test proves on purpose.
+
+**What was measured.** Six tests: the claim and its pid, the release on drop, a
+dead-owner takeover (`u32::MAX`, which no process table has), a pid-less file,
+a live process that is not us (a child this test really starts, then kills), and
+a source gate that `run_shell` claims before `Shell::run`. On `sift-launcher`,
+`cargo test -p palantir-desktop --locked`: **886 passed / 0 failed** and 4 native
+passed -- the 880 slice D left plus the six.
+
+**What this cannot say.** The Windows liveness path is compiled by CI's two exe
+jobs and has not been executed anywhere: the VM is Linux, so what ran is the
+`/proc` branch and the decision table around it. A real proof is two windows on
+one desktop -- close the first with the task manager and start again -- and no
+machine in this session has been able to do that.

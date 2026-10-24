@@ -83,11 +83,16 @@ zip = "0.6"
 # `Win32_System_Power` is `SetThreadExecutionState` (`crate::awake`): an install
 # and a launch are both minutes of no input, and the one call that keeps the
 # machine from suspending through them lives in this module.
+#
+# `Win32_System_Threading` is `OpenProcess`, `GetExitCodeProcess` and `CloseHandle`
+# (`crate::single`): whether the process named in the lock file is still alive is
+# the question that keeps a crashed launcher from locking the next one out.
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_System_Power",
     "Win32_System_Registry",
+    "Win32_System_Threading",
     "Win32_UI_Controls_Dialogs",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",

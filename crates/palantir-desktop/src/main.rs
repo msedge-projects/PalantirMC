@@ -188,6 +188,10 @@ mod scroll;
 /// flag and its `PalantirApp` state are gone, and the parts of it the product
 /// still needed — the native frame, and a `--shot` capture — are here.
 mod shell;
+/// One launcher at a time: a claim file naming the process that holds it, and a
+/// liveness check so a launcher that was killed does not lock the next start out
+/// of its own data root. See the module for why the file carries a pid.
+mod single;
 /// A Minecraft skin as a picture: the texture's own layout, cut into the front
 /// view the Skins page draws.
 ///
@@ -405,6 +409,26 @@ fn run_shell(args: impl Iterator<Item = String>) -> iced::Result {
     // here because they are window settings, and read before `flags` is moved
     // into them.
     let capture = flags.shot.is_some();
+    // One window per launcher, because two of them write the same instance files.
+    // A capture is exempt: it renders one frame and exits, and the tools drive it
+    // while a launcher may well be open on the same desk (see `single`).
+    let _instance = if capture {
+        None
+    } else {
+        match single::claim(&single::lock_path(
+            &palantir_core::paths::PalantirPaths::home(),
+        )) {
+            Ok(single::Claim::Held(lock)) => Some(lock),
+            Ok(single::Claim::AlreadyRunning(pid)) => {
+                single::tell_the_user(pid);
+                return Ok(());
+            }
+            // A home directory that cannot hold a lock file is not a reason to
+            // refuse to start: this guard is a courtesy, and the writes it guards
+            // report their own failures.
+            Err(_) => None,
+        }
+    };
     let mut settings = Settings::default();
     settings.window = shell_window_settings(flags.size, capture);
     settings.antialiasing = false;
