@@ -67,7 +67,7 @@ Result: **9 met, 0 unmet, 0 abandoned** for the build at `bbebaaa`, captured int
 G1--G7 were established on the build at `84d5f4a` (`.scratch/pal-final.png`) and
 still hold there and here. G9--G10 came from the reference walk recorded in
 `REFERENCE.md`, which re-measured the running app (0.204) at a pinned 1280x720
-client â€” and they *fail* on `84d5f4a`, which is the build they replace, so the
+client Ã¢â‚¬â€ and they *fail* on `84d5f4a`, which is the build they replace, so the
 control still discriminates with them in place. G8 is met by inspection.
 
 G11--G19 came after that, with the first page ported element by element, and are
@@ -78,7 +78,7 @@ with the three captures that show the oracle discriminating -- and they were the
 re-run against the exe CI built for it (run
 [35531424667](https://github.com/MSedgeMC/PalantirMC/actions/runs/35531424667),
 green in all five jobs), hash-checked against the runner's own sidecar there
-(`10b99ceaâ€¦0be1a`, and `df42046fâ€¦` for the GNU target) and staged as
+(`10b99ceaÃ¢â‚¬Â¦0be1a`, and `df42046fÃ¢â‚¬Â¦` for the GNU target) and staged as
 `dist/PalantirMC.exe`: `python tools/appshot.py --exe dist/ci-cb5a98f/msvc/PalantirMC.exe
 --page home --out .scratch/pal-home-cb5a98f.png` writes the same numbers as the debug
 build, so **12 met, 0 unmet** hold on the release build too.
@@ -94,7 +94,7 @@ build's predecessor with that path before the Home port replaced it.
       *below* its blue)
   CHECK: python tools/panel_gate.py .scratch/pal-final.png --only gutter
   EXPECT: panel gate passed [gutter]
-  EVIDENCE: `#172423` â€” green-blue +1, luminance 33.2 against chrome 40.9. The
+  EVIDENCE: `#172423` Ã¢â‚¬â€ green-blue +1, luminance 33.2 against chrome 40.9. The
       replaced build failed here by precondition: no cell in its panel margin was
       darker than the chrome, because its panel *was* the chrome's surface.
 
@@ -178,7 +178,7 @@ the rail.
 
 Result: **9 met, 0 unmet, 0 abandoned** for the build at `d23ed32`, captured at a
 1280x720 client into `.scratch/ref-pal-shots-d23ed32-1280.png` and taken from the
-exe CI built for that commit (`e424a9d6â€¦7bb0`, hash-checked against the runner's
+exe CI built for that commit (`e424a9d6Ã¢â‚¬Â¦7bb0`, hash-checked against the runner's
 own sidecar, staged as `dist/PalantirMC-msvc-d23ed32.exe`):
 
     python tools/winshot.py --launch dist/PalantirMC.exe --portable --keep \
@@ -315,7 +315,7 @@ Ours is taken by the launcher itself -- `python tools/appshot.py --page home --o
 process (`REFERENCE.md`, "How to re-measure it"). The replaced build's capture is
 `tools/winshot.py --launch dist/PalantirMC.exe --client 1280x720 --portable
 --settle 12 --park --method print`; that command returned a black image on some
-runs and left the launcher on "Loading your instancesâ€¦" on others, which is part of
+runs and left the launcher on "Loading your instancesÃ¢â‚¬Â¦" on others, which is part of
 why `--shot` exists.
 
 - [x] G20: the page column holds seven bands and nothing else -- illustration,
@@ -396,7 +396,7 @@ why `--shot` exists.
       green-tinted column, and the checklist shows a hollow ring for the
       outstanding step and green discs with checks for the two complete ones --
       the reference's own marker vocabulary. Differences that remain and are not
-      claimed by any gate above are recorded in `NEXT_STEPS.md` Â§12.
+      claimed by any gate above are recorded in `NEXT_STEPS.md` Ã‚Â§12.
 
 ## The Discover page, and the loading page
 
@@ -646,7 +646,7 @@ really the reference's?*
   EVIDENCE: the ladder parsed from `defaults.scss` is asserted to still be
       `10/12/14/16/18/20/24/32/48`, and 197 `.size()` call sites across this
       crate are read out of the sources: 195 are on that ladder or among the
-      sizes the reference writes itself (`text-[8px]`â€¦`text-[13px]`), and 2 are
+      sizes the reference writes itself (`text-[8px]`Ã¢â‚¬Â¦`text-[13px]`), and 2 are
       the declared measurements 15 and 28 with the reason each was chosen. A new
       size fails the test until it is added to `MEASURED_SIZES` with a reason; a
       `MEASURED_SIZES` entry nothing draws any more also fails, so the list
@@ -689,7 +689,7 @@ writes `crates/palantir-desktop/src/theme_tokens.rs`.
       `.app-sidebar`, the `--os-*` scrollbar knobs a combobox configures,
       `--ease-out-expo` on `:root`, the medal-promotion colours in `global.scss`,
       and the per-card hover factors (`.instance-item`, `[--hover-brightness:
-      1.1]`) that Â§27 recorded as not carried over. Those are held now, each with
+      1.1]`) that Ã‚Â§27 recorded as not carried over. Those are held now, each with
       the selector that sets it.
       What makes it a copy rather than a transcription is that the sheets are read
       a *second* time, in Rust, by parsers that share no code with the generator:
@@ -892,7 +892,7 @@ all have to draw in four themes and in every state they can be in.
       `crates/palantir-desktop/src/text_gen.rs`: 3846 messages, a `Key` enum, and
       one function per message that needs ICU. The four constructs the reference
       actually uses are compiled (a bare `{name}`, `{name, number}`,
-      `{name, plural, â€¦}`, `{name, select, â€¦}`), and the five it does not
+      `{name, plural, Ã¢â‚¬Â¦}`, `{name, select, Ã¢â‚¬Â¦}`), and the five it does not
       (`date`, `time`, `list`, `selectordinal`, an apostrophe-quoted literal) are
       *refused with the key named* rather than approximated. 353 messages carry
       ICU: 80 plural nodes, 10 selects, 32 number nodes, 56 `#` markers. The
@@ -976,7 +976,7 @@ all have to draw in four themes and in every state they can be in.
 
 G66 to G68 are the first half of stage 4. Unlike the page gates they are not
 about what a person sees: the engine is the layer whose whole job is to be
-*right* about things nobody can watch â€” how many requests are in flight, what
+*right* about things nobody can watch Ã¢â‚¬â€ how many requests are in flight, what
 happens to a half-written file when a window closes, whether "still current" was
 the service's answer or the cache's assumption. So the gates are statements about
 behaviour under conditions a test can produce and a user cannot: a server that
@@ -990,14 +990,14 @@ two chunks into a body.
   EVIDENCE: 7 tests over `crates/palantir-net/src/engine/schedule.rs`. The
       promise a progress list is a fold over: one `Started` and exactly one of
       `Finished`/`Failed`/`Cancelled` per job, asserted per id rather than by
-      counting, and `Idle` once per quiet moment â€” including a second batch
+      counting, and `Idle` once per quiet moment Ã¢â‚¬â€ including a second batch
       submitted after the first `Idle`, which is how a modpack installs its own
       dependencies. `Scheduler::cancel` on a job that is still *in the queue* is
       the case that decides whether cancelling a thousand files takes as long as
       the one in flight, and it is asserted against a queue made provable by a
       slow route: one worker, held, so the second job is certainly not started.
       `Scheduler::shutdown` cancels first and joins after, so the eight jobs in
-      that test report as cancelled without a request â€” one of them is what a
+      that test report as cancelled without a request Ã¢â‚¬â€ one of them is what a
       page folding events into a list depends on, because an entry that never
       ends is a window that will not close.
 
@@ -1009,8 +1009,8 @@ two chunks into a body.
       paths are each held: inside the TTL the answer comes off the disk and the
       `Fetch` is never called (a second lookup with an empty map would be a 404
       if a request were made), past the TTL the validator goes back as
-      `If-None-Match` and a `304` moves the stamp without moving a byte â€” which is
-      asserted by a request count of 2 and the header on the second one â€” and past
+      `If-None-Match` and a `304` moves the stamp without moving a byte Ã¢â‚¬â€ which is
+      asserted by a request count of 2 and the header on the second one Ã¢â‚¬â€ and past
       the TTL with *no* validator the body comes down again, which is the honest
       failure of a service that sends no `ETag` rather than a cache that would
       serve last week's list forever. Four rules that only bite under a condition
@@ -1019,8 +1019,8 @@ two chunks into a body.
       250 ms then 500 ms, which is `Backoff`'s own arithmetic and not a second
       policy), a cancelled lookup stores nothing and is not retried, and a `304`
       with nothing stored is a failure rather than an empty file nobody can ever
-      correct. The body file is asserted to be the bytes the service sent â€” no
-      envelope â€” because the metadata layers above this one read the cache
+      correct. The body file is asserted to be the bytes the service sent Ã¢â‚¬â€ no
+      envelope Ã¢â‚¬â€ because the metadata layers above this one read the cache
       directory directly.
 
 - [x] G68: the revalidation is the service's behaviour, not the double's
@@ -1030,12 +1030,12 @@ two chunks into a body.
       passed against the real host: `revalidated with "6ab45c1a-6bc5e", no body sent`.
       `meta.prismlauncher.org` sends an `ETag` on
       `/v1/net.minecraft/index.json` and answers `304 Not Modified` to it, so the
-      expensive half of the cache is real rather than hoped for â€” a version list
+      expensive half of the cache is real rather than hoped for Ã¢â‚¬â€ a version list
       that has not moved costs a header exchange instead of the document. The
       test does not *demand* a `304`, because whether a host sends a validator is
       not something the engine may assume, and it says which of the two happened;
       what it insists on is the same document either way, and that a second cache
-      over the same directory â€” a launcher restart â€” can read the entry the first
+      over the same directory Ã¢â‚¬â€ a launcher restart Ã¢â‚¬â€ can read the entry the first
       one wrote. That is the round trip the unit tests can only simulate.
 
 - [x] G69: a file is named by its own digest, and a download only asks for what
@@ -1744,10 +1744,10 @@ C:\PalantirMC\.scratch\shell-after-delete.png: 1280x720, written in 16.1s (launc
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
-At the time of writing, one per commit from `82232f9` onwards â€”
+At the time of writing, one per commit from `82232f9` onwards Ã¢â‚¬â€
 `36033443993`, `36038333030`, `36143868395`, `36152873678`, `36156018946`,
 `36158909795`, `36159099493`, `36162312983`, `36162426595`, `36165962973`,
-`36241262447`, `36242305444`, `36254170068`, and every push adds one â€” until
+`36241262447`, `36242305444`, `36254170068`, and every push adds one Ã¢â‚¬â€ until
 G112's push, which added nothing at all: the API reports `total_count 0` for its
 SHA, a second shape of the same block. Each died
 in three to six seconds with zero steps and
@@ -1805,8 +1805,8 @@ Re-running the push when it can is still the first thing to do with this tree.
 That is what the run looks like now; this is what it looked like before the
 engine's slices, quoted so the two can be read against each other. CI could not
 schedule stages 2 and 3 either: runs `36038333030` and `36033443993`
-both died in five seconds with zero steps â€” `recent account payments have
-failed` â€” so no job ran and there is no `test result` line from a runner to quote.
+both died in five seconds with zero steps Ã¢â‚¬â€ `recent account payments have
+failed` Ã¢â‚¬â€ so no job ran and there is no `test result` line from a runner to quote.
 The three commands `ci.yml` runs were run here instead, with the same flags, on
 the tree that was pushed:
 
@@ -2176,18 +2176,18 @@ $ cargo tree -p palantir-desktop --depth 1 -e normal --locked | grep -c reqwest
 
 $ cargo tree -p palantir-desktop --depth 1 -e normal --locked
 palantir-desktop v0.1.0 (C:\PalantirMC\crates\palantir-desktop)
-â”œâ”€â”€ futures v0.3.34
-â”œâ”€â”€ iced v0.12.1
-â”œâ”€â”€ image v0.24.9
-â”œâ”€â”€ md-5 v0.10.6
-â”œâ”€â”€ palantir-core v0.1.0 (C:\PalantirMC\crates\palantir-core)
-â”œâ”€â”€ palantir-loader v0.1.0 (C:\PalantirMC\crates\palantir-loader)
-â”œâ”€â”€ palantir-net v0.1.0 (C:\PalantirMC\crates\palantir-net)
-â”œâ”€â”€ serde v1.0.229
-â”œâ”€â”€ serde_json v1.0.151
-â”œâ”€â”€ sha1 v0.10.7
-â”œâ”€â”€ wgpu v0.19.4
-â””â”€â”€ windows-sys v0.52.0
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ futures v0.3.34
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ iced v0.12.1
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ image v0.24.9
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ md-5 v0.10.6
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ palantir-core v0.1.0 (C:\PalantirMC\crates\palantir-core)
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ palantir-loader v0.1.0 (C:\PalantirMC\crates\palantir-loader)
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ palantir-net v0.1.0 (C:\PalantirMC\crates\palantir-net)
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ serde v1.0.229
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ serde_json v1.0.151
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ sha1 v0.10.7
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ wgpu v0.19.4
+Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ windows-sys v0.52.0
 
 $ cargo test --workspace --all-targets --locked
     168 passed; 0 failed; 0 ignored  (palantir-core, lib)
@@ -3471,8 +3471,8 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 503 filtered out; fi
   calls *do* had to be read from the service's own protocol rather than from a
   vendored caller. The four requests are `POST
   api.minecraftservices.com/minecraft/profile/skins` with `{"variant":..,"url":..}`,
-  `DELETE â€¦/profile/skins/active`, `PUT â€¦/profile/capes/active` with
-  `{"capeId":..}`, and `DELETE â€¦/profile/capes/active` -- cross-checked against two
+  `DELETE Ã¢â‚¬Â¦/profile/skins/active`, `PUT Ã¢â‚¬Â¦/profile/capes/active` with
+  `{"capeId":..}`, and `DELETE Ã¢â‚¬Â¦/profile/capes/active` -- cross-checked against two
   independent public implementations of the same API (the wiki.vg-documented shape
   as implemented by `minecraft-launcher-core-node`'s `mojang.ts`, whose
   `setSkin`/`resetSkin`/`showCape`/`hideCape` are these four requests down to the
@@ -4110,7 +4110,7 @@ $ grep -c "archon.sockets.on" ui/src/composables/server-context-runtime.ts
   urlencoded exchange, a token store and a re-authorize path when `expires_in` runs
   out; the published exchange has no refresh token, so "expired" means "authorize
   again". (B) A personal access token the reader generates in their own settings and
-  pastes: no registration, no redirect, the documented `Authorization: mrp_â€¦` header,
+  pastes: no registration, no redirect, the documented `Authorization: mrp_Ã¢â‚¬Â¦` header,
   at the cost of a settings field and a secret in a file, and with the open question
   this measurement cannot close -- whether Archon accepts the same token, since
   Archon's own documentation is not in this tree and neither is the client code that
@@ -4375,7 +4375,7 @@ $ grep -c 'locale.rs\|text.rs\|button_text' .scratch/g121-clippy.log
      `{count, number}` groups with the language's separator -- `1.234` in German
      and Portuguese, a no-break space in Russian, Polish and French, a comma in
      English and the CJK languages -- but every digit is a Western one. The
-     reference's `Intl.NumberFormat('ar-SA')` writes 1,234 as `Ù¡Ù¬Ù¢Ù£Ù¤`, and this
+     reference's `Intl.NumberFormat('ar-SA')` writes 1,234 as `Ã™Â¡Ã™Â¬Ã™Â¢Ã™Â£Ã™Â¤`, and this
      renderer writes `1,234`, so an Arabic sentence here carries Arabic words with
      Western numerals. The reason is proportion, not impossibility: 32 messages
      carry a typed number and the difference only shows at four digits and above,
@@ -4433,8 +4433,8 @@ $ grep -c 'locale.rs\|text.rs\|button_text' .scratch/g121-clippy.log
               "https://api.github.com/repos/modrinth/code/contents/packages/api-client/src[/modules[/archon]]?ref=8966b5e"
          curl -sS "https://api.github.com/repos/modrinth/code/git/trees/74f004c7ae39d37f82fc79c0a930d91d626acc03?recursive=1"
          curl -sS -O "https://raw.githubusercontent.com/modrinth/code/8966b5e/packages/api-client/src/{types/client.ts,features/auth.ts,features/panel-version.ts,features/node-auth.ts,core/abstract-module.ts,utils/jwt-retry.ts,utils/node-url.ts}"
-         curl -sS -O "â€¦/src/modules/archon/{actions,backups,backups-queue,content,options,properties,server-users}/{v1}.ts" \
-                    "â€¦/src/modules/archon/{nodes,servers,transfers}/{internal}.ts" "â€¦/src/modules/archon/{notices,servers}/v0.ts" "â€¦/src/modules/archon/servers/v1.ts"
+         curl -sS -O "Ã¢â‚¬Â¦/src/modules/archon/{actions,backups,backups-queue,content,options,properties,server-users}/{v1}.ts" \
+                    "Ã¢â‚¬Â¦/src/modules/archon/{nodes,servers,transfers}/{internal}.ts" "Ã¢â‚¬Â¦/src/modules/archon/{notices,servers}/v0.ts" "Ã¢â‚¬Â¦/src/modules/archon/servers/v1.ts"
          python -c "re.findall(r'client\\.request', open(f).read())"      # per module, and the total
          curl -A PalantirMC/0.1.0-g111-measurement -o /dev/null -w '%{http_code}' \
               api.modrinth.com/v2/user/modrinth [-H 'X-Panel-Version: 1|99']
@@ -4447,7 +4447,7 @@ $ grep -c 'locale.rs\|text.rs\|button_text' .scratch/g121-clippy.log
             and the transcript of the live probes, 2026-09-28:
 
 ```
-# packages/api-client/src â€” the package `app-frontend/package.json` names as
+# packages/api-client/src Ã¢â‚¬â€ the package `app-frontend/package.json` names as
 # "@modrinth/api-client": "workspace:^" and this tree does not vendor
 https://api.github.com/repos/modrinth/code/contents/packages/api-client/src?ref=8966b5e2e7951e83651fbebbf2fb6d7608a94a33
   core/  features/  modules/  platform/  state/  tests/  types/  utils/  index.ts
@@ -4478,13 +4478,13 @@ $ python -c '...'    # `client.request` calls per Archon module file, and the me
   servers-v1          7 calls  DELETE,GET,POST       102
   total 84 calls in 13 modules (58 in the 11 above + 19 + 7)
 
-$ grep -rho "client\.archon\.[a-zA-Z0-9_]*\.[a-zA-Z0-9_]*" vendor/â€¦ | sort -u | wc -l
+$ grep -rho "client\.archon\.[a-zA-Z0-9_]*\.[a-zA-Z0-9_]*" vendor/Ã¢â‚¬Â¦ | sort -u | wc -l
 65          # two-name call sites in the vendored frontend; 67 by G109's deeper pattern
 
 $ curl -o /dev/null -w '%{http_code}' api.modrinth.com/v2/user/modrinth
 no header 200    X-Panel-Version: 1 200    X-Panel-Version: 99 200
 
-$ curl -H 'X-Panel-Version: â€¦' https://archon.modrinth.com/â€¦
+$ curl -H 'X-Panel-Version: Ã¢â‚¬Â¦' https://archon.modrinth.com/Ã¢â‚¬Â¦
 /v0/servers  no header   426 {"error":"unsupported archon request version"}
 /v0/servers  version 1   404 not found
 /v0/servers  version 99  426 {"error":"unsupported archon request version"}
@@ -4492,7 +4492,7 @@ $ curl -H 'X-Panel-Version: â€¦' https://archon.modrinth.com/â€¦
 /v1/regions  version 1   200 [{"shortcode":"au-syd","countrycode":"au","display_name":"Sydney, Australia",
                              "lat":-33.903355933,"lon":151.19163831,"zone":"nodes.modrinth.com",
                              "bucket_regions":["australia-southeast"],"internal":false,
-                             "backup_anchor_hour":0}, {"shortcode":"us-vin", â€¦}]
+                             "backup_anchor_hour":0}, {"shortcode":"us-vin", Ã¢â‚¬Â¦}]
 ```
 
   **The client's own contract, in its own words.** `types/client.ts` names three
@@ -5322,8 +5322,8 @@ CONFIRMED: the page carries all 120 gates, 6 stage cards and every subject as wr
   whatever the boundary turned out to be" -- while a constant plus a walk to the first
   numbered variant that is absent both satisfies it and lets the gate spell the whole
   body out. The walk is exercised rather than argued: the gate's own test feeds the
-  builder a texture containing the constant and asserts that it moves to `â€¦Boundary1`,
-  and another containing both to `â€¦Boundary2`. And the file part's name is reduced
+  builder a texture containing the constant and asserts that it moves to `Ã¢â‚¬Â¦Boundary1`,
+  and another containing both to `Ã¢â‚¬Â¦Boundary2`. And the file part's name is reduced
   (`file_part_name`): the name comes from a file dialog, so a quote or a newline in it
   would end the header line early and leave the rest of the body as bytes the service
   would read as a part of its own; a name that reduces to nothing becomes `skin.png`,
@@ -7005,7 +7005,7 @@ dashboard exit=0
   A launch asks both, before the resolve, and says what it found:
   `this instance names Forge but no Minecraft version, so its installer cannot be
   matched to a game: the mirror's wrapper document answers for it, and the install
-  runs at launch instead â€” add a 'net.minecraft' component to run it here`
+  runs at launch instead Ã¢â‚¬â€ add a 'net.minecraft' component to run it here`
 
   **What the test reads.** The pack is the loader alone -- no `net.minecraft`
   component at all -- and the wrapper's own document is cached where the mirror
@@ -7368,17 +7368,17 @@ $ python tools/progress.py --check
   find missing glyphs in your system fonts"; `iced_core` 0.12.3 sets it in
   `Text::new`. A scratch probe against `cosmic-text` 0.10.0 directly, with the five
   bundled Inter faces and this machine's own font database, shaped
-  `ç®€ä»‹åƒµå°¸å…¥ä¾µå¤©ä¸­æ–‡å­—å¹•æ¸¸æˆæ¨¡ç»„ä¸‹è½½` and counted `.notdef`: **Basic missed all 21
+  `Ã§Â®â‚¬Ã¤Â»â€¹Ã¥Æ’ÂµÃ¥Â°Â¸Ã¥â€¦Â¥Ã¤Â¾ÂµÃ¥Â¤Â©Ã¤Â¸Â­Ã¦â€“â€¡Ã¥Â­â€”Ã¥Â¹â€¢Ã¦Â¸Â¸Ã¦Ë†ÂÃ¦Â¨Â¡Ã§Â»â€žÃ¤Â¸â€¹Ã¨Â½Â½` and counted `.notdef`: **Basic missed all 21
   characters at every one of the five weights**, and **Advanced missed 4 of them at
   500 and 600 and all 21 at 800**, because a fallback candidate has to match the
   request's weight exactly (`Attrs::matches`) and Windows publishes Microsoft YaHei
-  at 400 and 700 and Yu Gothic at 500. Only `ç®€ æˆ ç»„ è½½` -- simplified-only hanzi
+  at 400 and 700 and Yu Gothic at 500. Only `Ã§Â®â‚¬ Ã¦Ë†Â Ã§Â»â€ž Ã¨Â½Â½` -- simplified-only hanzi
   that a Japanese face has none of -- were missing at 500; the rest came out of Yu
   Gothic, which is the wrong script's glyph forms for a Chinese body. The probe is
   not committed (`.scratch/fontprobe`), so what the gate itself measures is the end
   of the chain: `ui.rs`'s
   `a_hanzi_is_found_at_every_weight_the_interface_sets_text_at` builds the same
-  system the window draws in out of the same five faces and shapes `ç®€ä½“ä¸­æ–‡` at
+  system the window draws in out of the same five faces and shapes `Ã§Â®â‚¬Ã¤Â½â€œÃ¤Â¸Â­Ã¦â€“â€¡` at
   400, 500, 600, 700 and 800, asserting no `.notdef` at any of them -- with 400 as
   the control, because a machine with no CJK face at all has nothing to fall back
   to, and the test says so rather than passing on a measurement it did not take.
@@ -7496,7 +7496,7 @@ $ python tools/progress.py --check
   padding either side, so a row has **512** to fill, and the packing gives
   **en-US 9 rows, de-DE 10, id-ID 13** against the 8 the counted version always
   drew -- because the counted version drew chips off the edge. The longest chip of
-  all is Czech's own name for English, `AngliÄtina (SpojenÃ© stÃ¡ty americkÃ©)`,
+  all is Czech's own name for English, `AngliÃ„Âtina (SpojenÃƒÂ© stÃƒÂ¡ty americkÃƒÂ©)`,
   **265.2 pixels**, which is more than half of the 512 a row has: the Czech list
   breaks into rows of two where English's names let five share a row. Indonesian's
   thirteen rows are the language this gate's twin below exists for.
@@ -8139,10 +8139,10 @@ $ python tools/progress.py --check
   EXPECT: 1284 passed / 0 failed and 19 ignored in `Test workspace` (177 + 8 +
           792 + 4 + 33 + 270), run 37143533920, green in 7m32s
           progress exits 0, with G149 attributed to stage 3
-  EVIDENCE: `ProjectCard.vue:319-325` with css-grid-1 Â§11.2 and Â§11.5, and the three
+  EVIDENCE: `ProjectCard.vue:319-325` with css-grid-1 Ã‚Â§11.2 and Ã‚Â§11.5, and the three
       numbers that could only be fitted one way.
 
-  The second card's summary ended `â€”â€” A` where the reference ends `â€”â€” A skyblock`, and
+  The second card's summary ended `Ã¢â‚¬â€Ã¢â‚¬â€ A` where the reference ends `Ã¢â‚¬â€Ã¢â‚¬â€ A skyblock`, and
   the previous pass was right that the size is not the answer: the shared prefix's word
   boundaries agree to the pixel, so both sides are set at the same size and the
   difference is **where the `1fr` column stops**.
@@ -8156,9 +8156,9 @@ $ python tools/progress.py --check
   ```
 
   over `auto 1fr auto auto` with `gap-x-3`, and `__actions` spans the third column,
-  the gutter and the fourth. **Â§11.2:** gutters are fixed-size tracks for the sizing
+  the gutter and the fourth. **Ã‚Â§11.2:** gutters are fixed-size tracks for the sizing
   algorithm, so the button spans *three* tracks and 12 of its width is the gutter's.
-  **Â§11.5:** a spanning item's width is distributed across the tracks it spans,
+  **Ã‚Â§11.5:** a spanning item's width is distributed across the tracks it spans,
   "insofar as possible" -- and nothing else is in the third column, the `dummy` area
   being named and never filled, so it takes the whole shortfall. Tracks three and four
   together therefore owe the button's width less one `gap-x-3`, which is **177** of
@@ -9036,6 +9036,24 @@ $ python tools/progress.py --check
   rename to `Sift Launcher.exe` and rollback all need a Windows host with an
   installed copy and a server to serve one. `NOTES.md` carries the design and each
   risk by name.
+
+- [x] G166: the key field writes where the store reads, and a keystroke writes
+  nothing
+  CHECK: cargo test -p palantir-desktop --locked the_apis_tab_saves_the_key
+  EXPECT: test result: ok -- 910 passed / 0 failed in the desktop crate
+  EVIDENCE: one test against a scratch home and a `Store::load` of it. Typing
+          `"  abc123  "` leaves the preferences file empty; Save trims it to
+          `"abc123"` and the file carries it; `Store::curseforge_key` -- which
+          reloads the file every time it is asked -- answers with that key; and an
+          emptied field removes the row rather than writing `""`, so the
+          environment variable can win for one run. `SettingsTab::Apis` joins the
+          tab table test as a ninth tab under a fourth heading, both literals
+          because the reference has no word for either.
+
+  **What this gate cannot say.** The key unlocks CurseForge only against the live
+  service, and no request has been made: the search path is still proven against a
+  scripted fetch. The field is the app-directory row's `text_input` with
+  `.secure(true)` added, so its drawing inherits that row's measurements.
 ## What these gates cannot say
 
 - **CORRECTED 2026-10-04: the reference starts again, and this bullet was wrong.**

@@ -4241,3 +4241,49 @@ exactly those six (`brand.rs`, `pages/bedrock.rs`, `pages/discover.rs`, `prefs.r
 `single.rs`, `store.rs`), chose no `rustfmt.toml` and touched nothing generated.
 Every change was a line wrap. What is left in that diff is the four generated
 files and nothing else, which is the closest the step can come to passing.
+## The key has a field now, in a tab the reference does not have
+
+The CurseForge key has been a preference row since the client landed, and until
+now the only ways to set it were a JSON file and an environment variable. A
+preference with no control is not a setting a reader can be expected to find, so
+the settings dialog grew a ninth tab, **APIs**, with one masked field, a Save
+button and a line saying what happened.
+
+**Why a new tab rather than a row in an existing one.** The reference is
+Modrinth-only: `TabbedModal`'s `tabs` array has eight entries under three headings
+(`display`, `account`, `instances`) and no field for a third-party credential,
+because there is no third-party credential. The three headings were the surface it
+had, so this is a fourth (`Services`) and a ninth tab -- the same trade the Bedrock
+rail slot makes, and for the same reason: a feature the reference lacks needs a
+place, and bending an unrelated tab around it would be the worse lie. Both words
+are literals for the reason the Skins page's label is one: there is no message in
+the locale table for a tab the reference does not have.
+
+**The field is a draft, not the preference.** Typing changes `curseforge_key` and
+writes nothing; Save trims it, puts it in `Prefs::curseforge_api_key` and calls
+`prefs::save`. Binding the field to the preference would write the settings file
+once per keystroke, with half a key in it for most of them. It starts on the saved
+value so a reader changing one character is not retyping what masking hides, and
+iced 0.12 spells the masking `.secure(true)` -- `password()` is a later API, and
+the first compile on this tree said so.
+
+**An empty field clears the row rather than storing `""`.** `Prefs` skips an empty
+key when it writes (`skip_serializing_if = "String::is_empty"`), so "no key" stays
+the absence of a row and `PALANTIRMC_CURSEFORGE_API_KEY` is free to win for a run.
+A write that fails leaves the key in force for the window and says so in the note,
+which is `choose_theme`'s rule.
+
+**What was measured.** One test, `the_apis_tab_saves_the_key_where_the_store_looks_for_it`,
+and it holds the four facts that could drift apart: a keystroke leaves the file
+empty; Save trims `"  abc123  "` to `"abc123"` and the file carries it;
+`Store::curseforge_key` -- which reloads the file on every call -- answers with it;
+and an emptied field removes the row rather than writing an empty string. The tab's
+own label, glyph and heading join the existing table test. On `sift-launcher`:
+**910 passed / 0 failed** and 4 native passed, the 909 after the formatting sweep
+plus this one.
+
+**What this cannot say.** No live CurseForge request exists yet, so what the key
+*unlocks* is still proven only against a scripted fetch -- this slice is about the
+field reaching the store, not about the service answering. The field's own drawing
+is the same `text_input` the app-directory row uses with one flag changed, so it
+inherits that row's measurements rather than having its own.

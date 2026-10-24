@@ -86,6 +86,12 @@ switch does, in the order a reader meets it:
 - A CurseForge card press opens `curseforge.com/projects/<id>` through
   `pages::Open::Url` -- the canonical address, and the one place this launcher
   navigates outside itself on purpose.
+- The key has a **field** now: Settings → *APIs* (a ninth tab under a fourth
+  heading, both this launcher's own -- the reference has no third-party
+  credential). The input is masked, starts on the saved value, and Save trims it
+  into `Prefs::curseforge_api_key`; typing writes nothing, and an empty field
+  removes the row so `PALANTIRMC_CURSEFORGE_API_KEY` can win for one run. G166
+  holds the four facts.
 
 What is **not** built, and is the next slice in this area:
 

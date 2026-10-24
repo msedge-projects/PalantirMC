@@ -956,6 +956,15 @@ pub struct Shell {
     /// Settings is where it changes: a choice made in the modal has to redraw the
     /// window it was made in, and be in the file for the next launch.
     prefs: crate::prefs::Prefs,
+    /// The CurseForge key being typed into the *APIs* pane, before it is saved.
+    ///
+    /// A draft rather than the preference itself, because a preference is written
+    /// to a file: binding the field straight to `prefs.curseforge_api_key` would
+    /// write the settings file once per keystroke, and a half-typed key is not a
+    /// setting until the reader says it is.
+    curseforge_key: String,
+    /// What the last save of that key said, shown under the field.
+    curseforge_key_note: Option<String>,
     /// Where that file is, once the application has said. `None` in a test, which
     /// is what keeps a test from writing to the real preferences.
     home: Option<palantir_core::paths::PalantirPaths>,
@@ -1519,11 +1528,22 @@ pub enum SettingsTab {
     JavaInstallations,
     /// `ResourceManagementSettings.vue`.
     ResourceManagement,
+    /// This launcher's own *APIs* tab: the catalogue keys the reference has no
+    /// place for.
+    ///
+    /// The reference is Modrinth-only, so it has never needed a third-party
+    /// credential: its `TabbedModal` has eight tabs under three headings and no
+    /// field for one. This launcher reads a second catalogue with a key the reader
+    /// supplies, and a preference with no control would be a JSON file a reader has
+    /// to be told about -- the same trade the Bedrock rail slot makes, for the same
+    /// reason: a surface the reference lacks, added because a feature it lacks
+    /// needs one.
+    Apis,
 }
 
 impl SettingsTab {
     /// Every tab this dialog offers, in the reference's order.
-    pub const ALL: [SettingsTab; 8] = [
+    pub const ALL: [SettingsTab; 9] = [
         SettingsTab::Appearance,
         SettingsTab::Features,
         SettingsTab::Behavior,
@@ -1532,12 +1552,13 @@ impl SettingsTab {
         SettingsTab::SyncedOptions,
         SettingsTab::JavaInstallations,
         SettingsTab::ResourceManagement,
+        SettingsTab::Apis,
     ];
 
-    /// The tab's own label, which is the reference's `app.settings.tabs.<name>`: the
-    /// same message the reference's `defineMessage` gives the tab's `name`.
-    fn label(self) -> Key {
-        match self {
+    /// The tab's own label: the reference's `app.settings.tabs.<name>` message for
+    /// the eight it has, and a literal for the one it does not.
+    fn label(self) -> String {
+        let key = match self {
             SettingsTab::Appearance => Key::AppSettingsTabsAppearance,
             SettingsTab::Features => Key::AppSettingsTabsFeatures,
             SettingsTab::Behavior => Key::AppSettingsTabsBehavior,
@@ -1546,7 +1567,11 @@ impl SettingsTab {
             SettingsTab::SyncedOptions => Key::AppSettingsTabsSyncedOptions,
             SettingsTab::JavaInstallations => Key::AppSettingsTabsJavaInstallations,
             SettingsTab::ResourceManagement => Key::AppSettingsTabsResourceManagement,
-        }
+            // No message exists for a tab the reference does not have, for the
+            // reason the Skins page's own label is a literal.
+            SettingsTab::Apis => return "APIs".to_string(),
+        };
+        key.message().to_string()
     }
 
     /// The icon in front of the label.
@@ -1560,6 +1585,9 @@ impl SettingsTab {
             SettingsTab::SyncedOptions => Glyph::RefreshCw,
             SettingsTab::JavaInstallations => Glyph::Coffee,
             SettingsTab::ResourceManagement => Glyph::Microchip,
+            // A globe, the same glyph the Discover controls put in front of their
+            // *Source* trigger: both are about a catalogue.
+            SettingsTab::Apis => Glyph::Globe,
         }
     }
 
@@ -1573,16 +1601,17 @@ impl SettingsTab {
     }
 
     /// The heading the tab sits under.
-    fn category(self) -> Key {
+    fn category(self) -> SettingsGroup {
         match self {
             SettingsTab::Appearance
             | SettingsTab::Features
             | SettingsTab::Behavior
-            | SettingsTab::Language => Key::SettingsSidebarLabelDisplay,
-            SettingsTab::Privacy => Key::SettingsSidebarLabelAccount,
+            | SettingsTab::Language => SettingsGroup::Display,
+            SettingsTab::Privacy => SettingsGroup::Account,
             SettingsTab::SyncedOptions
             | SettingsTab::JavaInstallations
-            | SettingsTab::ResourceManagement => Key::AppSettingsSidebarLabelInstances,
+            | SettingsTab::ResourceManagement => SettingsGroup::Instances,
+            SettingsTab::Apis => SettingsGroup::Services,
         }
     }
 
@@ -1598,7 +1627,41 @@ impl SettingsTab {
             SettingsTab::SyncedOptions => "settings:tab:synced-options",
             SettingsTab::JavaInstallations => "settings:tab:java-installations",
             SettingsTab::ResourceManagement => "settings:tab:resource-management",
+            SettingsTab::Apis => "settings:tab:apis",
         }
+    }
+}
+
+/// The three headings the reference's `tabCategories` carries, and the fourth this
+/// launcher's own tab needs.
+///
+/// An enum rather than the message the reference's `category()` hands back,
+/// because one of the four has no message: `Services` is this launcher's, and
+/// spelling it as a `Key` would mean borrowing an unrelated word from the locale
+/// table -- "Instances" over an APIs row -- which is exactly the drift the
+/// wording of a settings dialog cannot afford.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SettingsGroup {
+    /// The reference's `display`.
+    Display,
+    /// The reference's `account`.
+    Account,
+    /// The reference's `instances`.
+    Instances,
+    /// This launcher's own: where a service's credential is set.
+    Services,
+}
+
+impl SettingsGroup {
+    /// The heading's word, drawn uppercased by the caller.
+    fn label(self) -> String {
+        match self {
+            SettingsGroup::Display => Key::SettingsSidebarLabelDisplay.message(),
+            SettingsGroup::Account => Key::SettingsSidebarLabelAccount.message(),
+            SettingsGroup::Instances => Key::AppSettingsSidebarLabelInstances.message(),
+            SettingsGroup::Services => "Services",
+        }
+        .to_string()
     }
 }
 
@@ -1825,6 +1888,10 @@ pub enum Message {
     SetAppDirectory(String),
     /// The Resource Management tab: always show copy details.
     ToggleAlwaysShowCopyDetails,
+    /// The APIs tab: a CurseForge key being typed, before it is saved.
+    CurseforgeKey(String),
+    /// The APIs tab: put the typed key into this machine's preferences.
+    SaveCurseforgeKey,
     /// The Resource Management tab: the most downloads in flight at once.
     ///
     /// The reference's control is a `Slider` from 1 to 10
@@ -2027,6 +2094,8 @@ impl Shell {
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
+            curseforge_key: String::new(),
+            curseforge_key_note: None,
             home: None,
         };
         shell.settle();
@@ -2046,6 +2115,9 @@ impl Shell {
         home: palantir_core::paths::PalantirPaths,
         prefs: crate::prefs::Prefs,
     ) -> Shell {
+        // The field starts on what is already saved, so a reader who opens the
+        // pane to change one character is not retyping a key they cannot see.
+        self.curseforge_key = prefs.curseforge_api_key.clone();
         self.prefs = prefs;
         self.home = Some(home);
         self
@@ -2759,6 +2831,17 @@ impl Shell {
             }
             Message::SetAppDirectory(path) => {
                 self.prefs.app_directory = if path.is_empty() { None } else { Some(path) };
+                None
+            }
+            // Typing changes the draft and clears the last note, and writes nothing:
+            // the file is written by the button, once.
+            Message::CurseforgeKey(key) => {
+                self.curseforge_key = key;
+                self.curseforge_key_note = None;
+                None
+            }
+            Message::SaveCurseforgeKey => {
+                self.save_curseforge_key();
                 None
             }
             Message::ToggleAlwaysShowCopyDetails => {
@@ -8567,6 +8650,113 @@ impl Shell {
             .into()
     }
 
+    /// The *APIs* pane: where a catalogue key is typed and saved.
+    ///
+    /// One section, because this launcher has one key. The field masks what is in
+    /// it -- a key is a credential, and a dialog anyone can photograph over a
+    /// shoulder is not the place to draw one -- and it starts on the saved value so
+    /// a reader changing one character is not retyping what they cannot see.
+    ///
+    /// The sentence under the field says where a key comes from, because the
+    /// launcher cannot apply on a reader's behalf, and the note under the button is
+    /// the only feedback: a save that said nothing would be a save a reader cannot
+    /// tell from a typo.
+    fn apis_settings(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text("CurseForge")
+            .size(18.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
+        let desc = text(
+            "Discover's second catalogue reads with a key from CurseForge for Studios. \
+             Keys are free and reviewed per developer, and this launcher never ships \
+             one: the key is written to this machine's preferences file and nothing \
+             else. A key in PALANTIRMC_CURSEFORGE_API_KEY overrides it for one run.",
+        )
+        .size(16.0)
+        .line_height(iced::Pixels(TIGHT_LINE))
+        .font(medium())
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_SECONDARY,
+        )));
+        // What the note says when nothing has been pressed yet: the state of the
+        // saved preference rather than a message about the last action.
+        let standing = if self.prefs.curseforge_api_key.trim().is_empty() {
+            "No key saved: Discover stays on Modrinth's catalogue."
+        } else {
+            "A key is saved on this machine. The field above shows it masked."
+        };
+        let note = text(self.curseforge_key_note.as_deref().unwrap_or(standing))
+            .size(14.0)
+            .font(regular())
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_SECONDARY,
+            )));
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(settings_secret_field(
+                theme,
+                &self.curseforge_key,
+                Message::CurseforgeKey,
+            ))
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(desc)
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(
+                row![]
+                    .align_items(Alignment::Center)
+                    .push(crate::ui::button_text_sized(
+                        theme,
+                        "settings:apis:save",
+                        "Save key",
+                        crate::ui::Kind::Colored,
+                        crate::ui::Size::Md,
+                        Message::SaveCurseforgeKey,
+                    ))
+                    .push(Space::with_width(Length::Fill)),
+            )
+            .push(Space::with_height(Length::Fixed(8.0)))
+            .push(note)
+            .into()
+    }
+
+    /// Save the key the reader typed, trimmed, and say what happened.
+    ///
+    /// An empty field clears the row rather than storing an empty string: `Prefs`
+    /// skips an empty key when it writes, so "no key" is the absence of a row and
+    /// not a row holding nothing -- and `Store::curseforge_key` then falls through
+    /// to the environment variable, which is the one-run override.
+    ///
+    /// A write that fails leaves the key in force for this window, for the reason
+    /// [`Shell::choose_theme`] gives: the setting should still be the one just
+    /// asked for, and a file that cannot be written is a problem for the next
+    /// launch rather than a reason to refuse this one.
+    fn save_curseforge_key(&mut self) {
+        let key = self.curseforge_key.trim().to_string();
+        self.curseforge_key = key.clone();
+        self.prefs.curseforge_api_key = key;
+        self.curseforge_key_note = Some(match &self.home {
+            Some(home) => match crate::prefs::save(home, &self.prefs) {
+                Ok(()) => "Saved to this machine's preferences file.".to_string(),
+                Err(reason) => format!(
+                    "In force for this window, but the file could not be written: {reason}"
+                ),
+            },
+            None => {
+                "In force for this window; this launcher has no preferences file open."
+                    .to_string()
+            }
+        });
+    }
+
     /// The app directory section: the heading, the field the path goes in, and
     /// the reference's own description under it.
     ///
@@ -8841,14 +9031,17 @@ impl Shell {
                 // letter spacing) and is recorded in `NOTES.md`.
                 nav = nav.push(crate::ui::nav_heading(
                     theme,
-                    &tab.category().message().to_uppercase(),
+                    &tab.category().label().to_uppercase(),
                 ));
             }
+            // The label is owned because one of the nine has no locale message to
+            // borrow: see `SettingsTab::label`.
+            let label = tab.label();
             nav = nav.push(crate::ui::nav_item(
                 theme,
                 tab.key(),
                 tab.glyph(),
-                tab.label().message(),
+                &label,
                 tab.badge().map(|key| key.message()),
                 self.settings_tab == tab,
                 Message::SettingsTab(tab),
@@ -8971,6 +9164,7 @@ impl Shell {
             SettingsTab::SyncedOptions => self.synced_options_settings(),
             SettingsTab::JavaInstallations => self.java_installations_settings(),
             SettingsTab::ResourceManagement => self.resource_management_settings(),
+            SettingsTab::Apis => self.apis_settings(),
         }
     }
 
@@ -10883,6 +11077,36 @@ fn settings_field<'a>(
         .into()
 }
 
+/// [`settings_field`] with what it holds drawn as dots, for a credential.
+///
+/// The same box and the same padding: the only difference is that a reader --
+/// or anyone looking over their shoulder -- cannot read the key off the screen.
+/// The value is still in memory and still saved; masking is about the window, not
+/// about protecting the file, which is this launcher's preferences file either way
+/// (`prefs.rs` says why it is not a keychain).
+fn settings_secret_field<'a>(
+    theme: Gen,
+    value: &str,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    text_input("", value)
+        .on_input(on_input)
+        // iced 0.12 spells masking `secure`, which is `is_secure` on the widget.
+        .secure(true)
+        .padding(Padding {
+            top: 10.0,
+            bottom: 10.0,
+            left: 12.0,
+            right: 12.0,
+        })
+        .size(14.0)
+        .font(medium())
+        .style(iced::theme::TextInput::Custom(Box::new(
+            crate::ui::Field::bordered(theme),
+        )))
+        .into()
+}
+
 fn appearance_settings_height(options: usize, columns: usize) -> f32 {
     let columns = columns.max(1);
     let rows = options.div_ceil(columns) as f32;
@@ -11791,6 +12015,67 @@ mod tests {
         // would be a request for a project that satisfies no facet -- an empty
         // answer wearing the shape of a filter.
         assert_eq!(exclusion_facet(&[]), None);
+    }
+
+    /// The key field saves where the store looks, and typing saves nothing.
+    ///
+    /// Two facts, and between them the whole slice. `Store::curseforge_key` reads
+    /// the preferences *file* every time it is asked, so a save that only changed
+    /// the shell's copy would leave every CurseForge search answering "no key"
+    /// while the field looked full. And a field bound straight to the preference
+    /// would write that file once per keystroke -- with half a key in it for most of
+    /// them -- which is why the draft exists.
+    #[test]
+    fn the_apis_tab_saves_the_key_where_the_store_looks_for_it() {
+        let root = std::env::temp_dir()
+            .join("palantirmc-shell-tests")
+            .join("apis-key");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        let home = palantir_core::paths::PalantirPaths::at(&root);
+        let mut shell = shell_at("/")
+            .with_prefs(home.clone(), crate::prefs::Prefs::default())
+            .with_store(Store::load(&home));
+
+        // Typing is a draft: the file still says nothing.
+        let _ = shell.handle(Message::CurseforgeKey("  abc123  ".to_string()));
+        assert!(
+            crate::prefs::load(&home).curseforge_api_key.is_empty(),
+            "a keystroke must not write the settings file"
+        );
+
+        // Saving trims what was typed, writes it, and the store -- which reloads
+        // the file -- answers with it.
+        let _ = shell.handle(Message::SaveCurseforgeKey);
+        assert_eq!(crate::prefs::load(&home).curseforge_api_key, "abc123");
+        if std::env::var_os(crate::prefs::CURSEFORGE_KEY_ENV).is_none() {
+            assert_eq!(
+                shell.store.curseforge_key().ok().as_deref(),
+                Some("abc123"),
+                "the store reads the row the field wrote"
+            );
+        }
+        assert!(
+            shell
+                .curseforge_key_note
+                .as_deref()
+                .is_some_and(|note| note.starts_with("Saved")),
+            "the pane says the save happened: {:?}",
+            shell.curseforge_key_note
+        );
+
+        // An empty field clears the row rather than storing an empty string, so
+        // "no key" stays the absence of a row and the environment variable can win.
+        let _ = shell.handle(Message::CurseforgeKey("   ".to_string()));
+        let _ = shell.handle(Message::SaveCurseforgeKey);
+        assert_eq!(crate::prefs::load(&home).curseforge_api_key, "");
+        let text = std::fs::read_to_string(root.join(palantir_core::paths::PREFS_FILE))
+            .unwrap_or_else(|error| panic!("the preferences file: {error}"));
+        assert!(
+            !text.contains("curseforge_api_key"),
+            "an empty key is not written at all: {text}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn shell_at(address: &str) -> Shell {
@@ -14275,6 +14560,7 @@ mod tests {
                 SettingsTab::SyncedOptions,
                 SettingsTab::JavaInstallations,
                 SettingsTab::ResourceManagement,
+                SettingsTab::Apis,
             ]
         );
         // Each tab's own label, icon and badge, against the same array: the
@@ -14340,7 +14626,7 @@ mod tests {
             ),
         ];
         for (tab, label, message, glyph, badge) in drawn {
-            assert_eq!(tab.label(), label, "{message}");
+            assert_eq!(tab.label(), message, "{message}");
             assert_eq!(label.message(), message);
             assert_eq!(tab.glyph(), glyph, "{message}");
             assert_eq!(tab.badge(), badge, "{message}");
@@ -14354,19 +14640,25 @@ mod tests {
             SettingsTab::Behavior,
             SettingsTab::Language,
         ] {
-            assert_eq!(tab.category(), Key::SettingsSidebarLabelDisplay);
+            assert_eq!(tab.category(), SettingsGroup::Display);
         }
         assert_eq!(
             SettingsTab::Privacy.category(),
-            Key::SettingsSidebarLabelAccount
+            SettingsGroup::Account
         );
         for tab in [
             SettingsTab::SyncedOptions,
             SettingsTab::JavaInstallations,
             SettingsTab::ResourceManagement,
         ] {
-            assert_eq!(tab.category(), Key::AppSettingsSidebarLabelInstances);
+            assert_eq!(tab.category(), SettingsGroup::Instances);
         }
+        // The one tab the reference has no word for, and the one heading it has no
+        // category for: both are literals, and both are asserted as words rather
+        // than as constants so a rename is caught.
+        assert_eq!(SettingsTab::Apis.category(), SettingsGroup::Services);
+        assert_eq!(SettingsTab::Apis.label(), "APIs");
+        assert_eq!(SettingsGroup::Services.label(), "Services");
         // The headings' own words, read once rather than trusted: a category
         // whose message went missing would otherwise draw blank.
         assert_eq!(Key::SettingsSidebarLabelDisplay.message(), "Display");
