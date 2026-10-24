@@ -4962,6 +4962,10 @@ impl Shell {
     // ---- Drawing --------------------------------------------------------
 
     fn render(&self) -> Element<'_, Message> {
+        // What this frame costs, when somebody has asked to measure it. Off unless
+        // `PALANTIRMC_FRAME_LOG` names a file, so the shipped launcher pays one
+        // environment lookup and an `Option` check per frame and nothing else.
+        let _frame = crate::frame_log::begin();
         // Keep the window's hit test pointed at the maximize control: the
         // rectangle is derived from this shell's own constants, so re-publishing
         // it is a store behind a lock rather than a measurement to keep in step.

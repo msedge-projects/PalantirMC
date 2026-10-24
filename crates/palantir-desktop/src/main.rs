@@ -51,6 +51,10 @@ mod hover;
 /// Drawing one of the reference's icons: the scale and the centring, which are
 /// the two things a caller cannot guess.
 mod icon;
+/// Opt-in frame timing: how long a frame took to build and how long it was since the
+/// last one, written to the file `PALANTIRMC_FRAME_LOG` names. Nothing is measured
+/// when the variable is unset, which is every shipped run.
+mod frame_log;
 /// The reference client's icon set, compiled from its vendored SVGs by
 /// `tools/gen_icons.py` into geometry the toolkit strokes.
 ///
