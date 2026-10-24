@@ -5664,4 +5664,245 @@ mod tests {
             "NavTabs.vue now sets letter-spacing directly"
         );
     }
+
+    /// One shaped line, as `(byte start, byte end, x, rtl, glyph id, face)` per
+    /// glyph, in the order the line draws them.
+    ///
+    /// Byte offsets rather than characters: `LayoutGlyph::start`/`end` are byte
+    /// indices into the line, and the whole point of the bidi gates below is what
+    /// happened to *these* ranges.
+    fn laid_out(
+        system: &mut cosmic_text::FontSystem,
+        text: &str,
+    ) -> Vec<(usize, usize, f32, bool, u16, String)> {
+        let mut buffer = cosmic_text::Buffer::new(system, cosmic_text::Metrics::new(14.0, 20.0));
+        buffer.set_size(system, 900.0, 900.0);
+        buffer.set_text(
+            system,
+            text,
+            cosmic_text::Attrs::new(),
+            cosmic_text::Shaping::Advanced,
+        );
+        buffer.shape_until_scroll(system);
+        let mut out = Vec::new();
+        for run in buffer.layout_runs() {
+            for glyph in run.glyphs {
+                let face = system
+                    .db()
+                    .face(glyph.font_id)
+                    .map(|face| face.post_script_name.clone())
+                    .unwrap_or_default();
+                out.push((
+                    glyph.start,
+                    glyph.end,
+                    glyph.x,
+                    glyph.level.is_rtl(),
+                    glyph.glyph_id,
+                    face,
+                ));
+            }
+        }
+        out
+    }
+
+    /// Arabic joins, and the join is the shaper's rather than the font's.
+    ///
+    /// Joining is **not** a ligature: a five-letter word keeps five glyphs, and
+    /// what changes is that each one is the positional form the shape of the word
+    /// asks for -- initial, medial or final -- rather than the isolated form a
+    /// letter drawn alone gets. The gate therefore shapes each letter on its own
+    /// and holds the word's glyphs against those: a shaper that never asked for
+    /// contextual forms, or a face that has none, answers exactly the isolated
+    /// set. Measured on the build VM: five glyphs from DejaVu Sans, none of them
+    /// `.notdef`, and positional forms that differ from the isolated ones.
+    ///
+    /// The face is whichever the machine has (DejaVu Sans on the build VM,
+    /// Segoe UI on Windows, Noto Sans Arabic where installed). What the gate
+    /// holds is that the engine asks for joining and the face answers it, which
+    /// is the pair that draws Arabic words rather than isolated letters.
+    #[test]
+    fn an_arabic_word_is_shaped_with_joined_glyphs() {
+        let mut system = app_font_system();
+        let word = "مرحبا";
+        let glyphs = laid_out(&mut system, word);
+        assert!(
+            !glyphs.is_empty(),
+            "nothing was shaped for {word:?} -- this host has no Arabic face"
+        );
+        assert!(
+            glyphs.iter().all(|(_, _, _, _, id, _)| *id != 0),
+            "an Arabic letter drew as .notdef; the faces here are {:?}",
+            glyphs.iter().map(|glyph| &glyph.5).collect::<Vec<_>>()
+        );
+        assert!(
+            glyphs.iter().all(|glyph| glyph.3),
+            "an Arabic word is an RTL run: {glyphs:?}"
+        );
+
+        // The same five letters, each shaped alone: the isolated forms.
+        let mut isolated: Vec<u16> = word
+            .chars()
+            .flat_map(|letter| {
+                let alone = laid_out(&mut system, &letter.to_string());
+                alone.into_iter().map(|glyph| glyph.4).collect::<Vec<_>>()
+            })
+            .collect();
+        isolated.sort_unstable();
+        let mut joined: Vec<u16> = glyphs.iter().map(|glyph| glyph.4).collect();
+        joined.sort_unstable();
+        assert_ne!(
+            joined, isolated,
+            "every letter drew its isolated form: the shaper did not ask for joining"
+        );
+    }
+
+    /// A Latin-Arabic-Latin line keeps its three levels apart, and the Arabic run
+    /// is laid out right to left inside a left-to-right paragraph.
+    ///
+    /// This is the bidi half of the text work: `unicode-bidi` is already in the
+    /// tree through cosmic-text, so what a gate can add is the proof that the
+    /// shell's shaping asks for it. The three ranges are asserted by byte offset:
+    /// `abc` (0..3) and ` def` (15..19) ascend at an even level, and the Arabic
+    /// word (4..14) descends at an odd one -- descending starts *are* the RTL
+    /// picture, because the glyph list is in drawing order.
+    #[test]
+    fn a_latin_arabic_latin_line_puts_each_run_at_its_own_level() {
+        let mut system = app_font_system();
+        let glyphs = laid_out(&mut system, "abc مرحبا def");
+
+        let latin_head: Vec<_> = glyphs.iter().filter(|glyph| glyph.0 < 3).collect();
+        let arabic: Vec<_> = glyphs
+            .iter()
+            .filter(|glyph| (4..14).contains(&glyph.0))
+            .collect();
+        let latin_tail: Vec<_> = glyphs.iter().filter(|glyph| glyph.0 >= 15).collect();
+
+        assert_eq!(latin_head.len(), 3, "abc: {latin_head:?}");
+        assert_eq!(latin_tail.len(), 3, "def: {latin_tail:?}");
+        assert!(!arabic.is_empty(), "the Arabic word did not shape at all");
+
+        assert!(latin_head.iter().all(|glyph| !glyph.3), "{latin_head:?}");
+        assert!(latin_tail.iter().all(|glyph| !glyph.3), "{latin_tail:?}");
+        assert!(arabic.iter().all(|glyph| glyph.3), "{arabic:?}");
+
+        let starts = |run: &[&(usize, usize, f32, bool, u16, String)]| -> Vec<usize> {
+            run.iter().map(|glyph| glyph.0).collect()
+        };
+        assert!(
+            starts(&latin_head).windows(2).all(|pair| pair[0] < pair[1]),
+            "a left-to-right run ascends: {:?}",
+            starts(&latin_head)
+        );
+        assert!(
+            starts(&latin_tail).windows(2).all(|pair| pair[0] < pair[1]),
+            "a left-to-right run ascends: {:?}",
+            starts(&latin_tail)
+        );
+        assert!(
+            starts(&arabic).windows(2).all(|pair| pair[0] > pair[1]),
+            "a right-to-left run descends in drawing order: {:?}",
+            starts(&arabic)
+        );
+        // And it stays between the Latin halves rather than being moved to an
+        // edge, which is what a run reordered as a whole would do.
+        let arabic_xs: Vec<f32> = arabic.iter().map(|glyph| glyph.2).collect();
+        assert!(
+            arabic_xs.iter().all(|x| *x > 20.0),
+            "the Arabic run starts after `abc`: {arabic_xs:?}"
+        );
+        assert!(
+            arabic_xs.iter().all(|x| *x < latin_tail[0].2),
+            "the Arabic run ends before ` def`: {:?} against {}",
+            arabic_xs,
+            latin_tail[0].2
+        );
+    }
+
+    /// The digits inside a right-to-left line stay left to right.
+    ///
+    /// `123` is a number, not three Arabic letters: bidi gives it an even level
+    /// *inside* the odd one, so it draws 1-2-3 while the word beside it draws
+    /// right to left. A port that reversed the whole line -- or that let the RTL
+    /// level win for digits -- reads "321" here, which is the failure this exists
+    /// for.
+    ///
+    /// **The order is read off x, not off the glyph list.** An RTL paragraph's
+    /// list runs right to left (x descending), so the digits arrive as 3, 2, 1 --
+    /// that is the *correct* storage order, and sorting by x is what turns it
+    /// back into the picture a reader sees.
+    #[test]
+    fn digits_inside_a_right_to_left_line_keep_their_order() {
+        let mut system = app_font_system();
+        let glyphs = laid_out(&mut system, "مرحبا 123");
+        // Five two-byte Arabic letters are bytes 0..10, the space 10..11, so the
+        // digits are 11..14.
+        let mut digits: Vec<_> = glyphs
+            .iter()
+            .filter(|glyph| (11..14).contains(&glyph.0))
+            .collect();
+        assert_eq!(digits.len(), 3, "123: {digits:?}");
+        assert!(
+            digits.iter().all(|glyph| !glyph.3),
+            "a number is an even-level run even inside RTL text: {digits:?}"
+        );
+        digits.sort_by(|left, right| left.2.total_cmp(&right.2));
+        let starts: Vec<usize> = digits.iter().map(|glyph| glyph.0).collect();
+        assert_eq!(
+            starts,
+            vec![11, 12, 13],
+            "left to right the digits read 1-2-3: {digits:?}"
+        );
+        // The word beside them is still RTL, so this is a mixed line and not a
+        // paragraph that was read the other way round.
+        let word: Vec<_> = glyphs
+            .iter()
+            .filter(|glyph| (0..10).contains(&glyph.0))
+            .collect();
+        assert!(!word.is_empty(), "the Arabic word did not shape");
+        assert!(word.iter().all(|glyph| glyph.3), "{word:?}");
+    }
+
+    /// The fallback table the shipping platform reads names a colour emoji face
+    /// before its monochrome symbol face -- and that ordering is the only reason
+    /// emoji draw in colour on Windows at all.
+    ///
+    /// `vendor/cosmic-text`'s `common_fallback()` is the list `FontFallbackIter`
+    /// walks when the requested family cannot draw a character, and the Windows
+    /// entry is `Segoe UI`, `Segoe UI Emoji`, `Segoe UI Symbol`, …: the emoji
+    /// face comes second, so an emoji reaches it before the flat symbol face.
+    /// Measured on the build VM with a colour face installed: 😀 came back from
+    /// `Noto Color Emoji` as `Content::Color` and 🎮 from the same face, where
+    /// without one 🎮 was `.notdef` and 😀 was DejaVu's flat outline.
+    ///
+    /// **Why the table is asserted rather than the pixels.** A gate that needs a
+    /// colour emoji font cannot run on a host without one, and CI's Linux image
+    /// has none. What can regress on the next `cosmic-text` merge is the order of
+    /// this list, and that is readable from the tree on any host.
+    #[test]
+    fn the_fallback_table_puts_an_emoji_face_before_a_monochrome_one() {
+        let windows = include_str!("../../../vendor/cosmic-text/src/font/fallback/windows.rs");
+        let emoji = windows
+            .find("\"Segoe UI Emoji\"")
+            .expect("windows.rs no longer names Segoe UI Emoji at all");
+        let symbol = windows
+            .find("\"Segoe UI Symbol\"")
+            .expect("windows.rs no longer names Segoe UI Symbol at all");
+        assert!(
+            emoji < symbol,
+            "Segoe UI Symbol is tried before Segoe UI Emoji: emoji would draw flat"
+        );
+
+        // The Linux table is left in upstream's order on purpose. Putting
+        // `Noto Color Emoji` first there was tried and reverted: the same list
+        // chooses the *primary* face when the requested family is absent, so the
+        // whole line -- spaces included -- came out of the emoji font and a test
+        // string measured 133.4 px where it measures 107.4 px. The emoji face
+        // only has to be reachable, which is what this asserts.
+        let unix = include_str!("../../../vendor/cosmic-text/src/font/fallback/unix.rs");
+        assert!(
+            unix.contains("\"Noto Color Emoji\""),
+            "unix.rs no longer offers Noto Color Emoji, so a Linux host with the \
+             font installed could not reach it"
+        );
+    }
 }

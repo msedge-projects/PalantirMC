@@ -3708,3 +3708,64 @@ field would be a surface the reference does not have. And none of this has been
 asked of the live service: there is no key on this machine, so the seam is proven
 against a scripted `MapFetch` exactly as `curseforge.rs`'s own tests are. A live
 test is owed the day a key exists to run it with.
+## The emoji was never broken on Windows, and the bidi was already right
+
+Slice B was scoped as "unicode-bidi is already in the tree, so the bidi half is
+gates; the emoji half is the real work -- colour emoji fallback in the FONTS
+path". Measured first, with a probe that printed what the engine did instead of
+what it was assumed to do, both halves came out differently.
+
+**Emoji already draw in colour on Windows, in the vendored fallback table.**
+`vendor/cosmic-text`'s `windows.rs` names its fallbacks
+`Segoe UI`, `Segoe UI Emoji`, `Segoe UI Symbol`, `Segoe UI Historic`: the emoji
+face is second, so a character Inter cannot draw reaches a colour face before any
+flat symbol face. That is why the launcher's own project text has never looked
+wrong on the machine it ships to. The Linux table is the other way round --
+`DejaVu Sans` sits above `Noto Color Emoji` -- and DejaVu carries a handful of
+emoji as flat outlines, so on the build VM 😀 came back from DejaVu as
+`Content::Mask` and 🎮 was `.notdef` until a colour face was installed, at which
+point the same glyph came back as `Content::Color` from Noto. One string, two
+pictures, decided by which machine shaped it: the same class of defect as the
+font seeding slice C fixed, and the reason the probe was worth writing.
+
+**The obvious fix is wrong, and the probe caught it in one run.** Moving
+`Noto Color Emoji` to the head of the Linux table did make 😀 colour -- and also
+made the emoji font the *primary* face for the whole line, because
+`FontFallbackIter` walks that same list to choose the first face when the
+requested family is not installed. `music 🎮 game` measured **133.4 px** where it
+measures **107.4**: every space and letter after the emoji had come out of a
+10 MB emoji font. Reverted. What ships this slice is the gate, not the reorder:
+`the_fallback_table_puts_an_emoji_face_before_a_monochrome_one` reads both
+platform tables out of the tree and asserts Windows keeps its emoji face ahead of
+its symbol face and that Linux keeps the emoji face reachable -- a policy pinned
+as data, which is the thing a `cosmic-text` merge can quietly change.
+
+**The bidi gates, and two assumptions of my own that the VM refused.**
+`unicode-bidi` is in the tree through cosmic-text, so what needed proving was
+that the shell's shaping asks for it. Four ranges of one line, asserted by byte
+offset: `abc` and ` def` ascend at an even level, and the Arabic word between
+them descends at an odd one -- descending starts *are* the RTL picture, because
+the glyph list is in drawing order. Two of my first assertions were wrong and
+failed on the build VM before they were kept:
+
+* **Joining does not reduce the glyph count.** Five Arabic letters stay five
+  glyphs; what changes is that each is the positional form -- initial, medial,
+  final -- rather than the isolated form a letter drawn alone gets. The gate now
+  shapes each letter on its own and holds the word's glyph ids against the
+  isolated set, which is the property that actually distinguishes joining.
+* **An RTL paragraph's glyph list is x-descending.** The digits of `مرحبا 123`
+  arrive as 3, 2, 1 and draw as "123"; sorting by x turns the list back into the
+  picture. The order is read off `x`, not off the list.
+
+**What was measured.** Four new tests -- Arabic joining, a Latin-Arabic-Latin
+line's three levels, the digits' order, and the fallback table -- all green on
+`sift-launcher` with `cargo test -p palantir-desktop --locked`: **876 passed / 0
+failed** and 4 native passed, which is the 872 slice A left plus the four.
+
+**What this cannot say.** Nothing here asserts a colour *pixel* on a runner: CI's
+Linux image has no colour emoji font, so the promise is pinned as the table the
+platform walks rather than as ink, and the colour path itself has been measured
+once, on the VM with Noto installed, as `Content::Color`. A Windows run of the
+probe would close that gap and needs a host; until then the claim is "the face
+Windows ships is reached second, before its symbol face", which is readable from
+the tree and is what the gate holds.
