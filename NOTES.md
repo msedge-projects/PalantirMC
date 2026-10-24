@@ -3597,3 +3597,42 @@ measures through `crate::FONTS` instead, the runner is green on the same test si
 (`37199382822`, 1314 passed / 0 failed and 19 ignored), and this machine is too (822
 passed / 0 failed in the desktop crate). Nothing was amended or force-pushed to get
 there, and the red run stays in G156's `EXPECT` because it is what explains the change.
+
+## That fix covered the gates that opted in, not the number the layout breaks on
+
+G157 gave `shape_width` a `shape_width_in` sibling and rebuilt the measurement
+through `crate::FONTS` -- for the tests that build that system themselves.
+`advance()` is the number the layout breaks on, and it kept shaping through
+iced's global font system. In the window that global *is* the five shipped
+faces, because `run_shell` fills it before the first frame; in a test binary it
+is whatever the host has installed. So every gate that measured through
+`advance()` was still a measurement of the machine, and one of them was the only
+red test on a fresh Linux build VM with no Inter in it:
+
+```
+the_welcome_call_to_action_is_content_sized_and_no_wider_than_the_reference_s
+  the call to action measures 229.7, wider than the reference's 214
+```
+
+214 is `2 * BUTTON_PAD + 20 + 8 + advance("Create an instance", semibold(),
+16.0)`, and on a host without Inter one term of it was a fallback face's width.
+Installing Inter on that VM made it pass, which is the tell: the gate was
+reading the host, and the fix belongs in the tree rather than in `fc-cache`.
+
+**A second font system was tried first, and it is the wrong shape of fix.**
+Measuring through a private system seeded from `crate::FONTS` fixes the number
+and breaks the thing the number is for: `a_measured_label_is_drawn_exactly_as
+wide_as_the_layout_is_told` and `the_number_a_row_is_broken_on_is_the_width_iced
+_lays_the_label_out_at` compare layout against what iced draws, so a layout
+measured through one system while the glyphs come from another disagrees the
+moment the host lacks the face -- **93.9723** drawn against **82.9497**
+measured, **37.283203** against **32.633522**. Those two gates are the reason
+the seeding below is right rather than merely green.
+
+`seed_shipped_fonts()` loads the five files into iced's global, `#[cfg(test)]`,
+once per process, from `shape_width`. Production is untouched: `run_shell`
+already fills that same global through `Settings::fonts`, which is where the
+window's agreement between layout and drawing comes from. Verified on the VM
+after deleting every Inter face from it -- `fc-list | grep -ci inter` reading
+**0** -- at **1,377 passed, 19 ignored, 0 failed**, the same totals the Windows
+runner reports with no Inter at all.
