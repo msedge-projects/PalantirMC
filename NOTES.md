@@ -4084,3 +4084,55 @@ stop.
 **What was measured.** `cargo test -p palantir-desktop --locked` on
 `sift-launcher`: **903 passed / 0 failed** and 4 native passed, which is the 902
 after the Bedrock shelf plus the footer's gate.
+## Scrolling, measured against fastframe's shipped numbers rather than restyled
+
+The ask was a comparison, not a redesign: read `crmne/fastframe` v0.6.0's
+`fastframe-scroll` -- an egui crate, a reference implementation and explicitly not
+a dependency -- and hold this shell's motion against the numbers it ships. Both
+sets are read from source, not from a running app on either side.
+
+| | this shell (`crate::scroll`) | fastframe-scroll v0.6.0 |
+| --- | --- | --- |
+| wheel step | **60 px** per notch (`WHEEL_PIXELS_PER_NOTCH`, iced's own default) | **120 pt** per notch (`WHEEL_STEP`; egui's default is 40) |
+| what moves | a position tween to a target | a velocity that decays |
+| glide | fixed **160 ms** (`DURATION`), eased, same length for a long flick and a short one | exponential, **τ = 0.35 s** (`GLIDE_DECAY`), stops below **40 pt/s** (`GLIDE_STOP`) |
+| does it always glide | yes, one notch starts one | only if the release is faster than **120 pt/s** (`GLIDE_START`) |
+| touchpad | none -- a wheel event is a wheel event | Linux only: **×1.8** (`TOUCHPAD_SCALE`), a **0.1 s** rest cancels the glide (`GLIDE_REST`), a **0.15 s** quiet gap ends an unannounced gesture (`GESTURE_GAP`) |
+| axis | none | a gesture is locked to the axis it started on (**1.2** wider than tall starts sideways, `SIDEWAYS`) |
+| state | nine named regions, each with its own tween | one state per window |
+
+**The one number that reconciles the two glide shapes.** A fastframe glide
+released at its threshold speed covers `τ × (120 − 40) = 28 pt` after the fingers
+lift, and takes `τ × ln(3) = 0.384 s` to get there; a fast release covers more and
+takes longer. This shell's glide covers *whatever is left of the target* in
+160 ms, so at 60 px a notch it moves 60 px in the time fastframe would move about
+28 -- the two are not the same curve, and they are not meant to be: one is a
+deadline, the other is momentum.
+
+**Why nothing changed.** The three things fastframe adds exist for a pair of
+platforms this launcher is not: its touchpad scale and glide-after-lift are for
+Linux, where egui receives raw deltas with no momentum, and its 120-point step is
+for egui's 40-point default. iced 0.12 here gets wheel events from winit, which on
+Windows delivers the OS's own accelerated deltas; scaling those by 1.8 or adding a
+velocity model on top would add momentum the operating system already added, and
+the wheel step would be a behaviour change nobody has a capture to check -- a
+scroll is an animation, and every geometry gate in this tree is a still frame.
+What would be restyling is exactly what the brief forbids.
+
+**What was verified.** The 35 tests in `crate::scroll` still pass, and they are
+the ones that matter here: a long flick takes the same time as a short one, the
+offset reaches its target and then stops, a slow machine glides too and lands on
+the deadline, only a wheel over the content is claimed, and a wheel moves the
+region it names and leaves the others alone.
+
+**The gate that was missing.** The nine region names were only ever asserted by
+inspection -- a region is an id on a widget *and* a key in the shell's glide
+table, so a name that one side knows and the other does not is a wheel that can
+never reach a glide. `REGIONS` is now the list of all nine, and
+`the_regions_are_nine_distinct_ids_and_every_one_is_drawn` holds it to three
+facts: the names are distinct, each is a `scroll:` id, and each appears at a call
+site in one of the five files that draw regions.
+
+**What was measured.** `cargo test -p palantir-desktop --locked` on
+`sift-launcher`: the new gate passes among the rest. The full workspace run and
+the clippy sweep are in the commit's own numbers.

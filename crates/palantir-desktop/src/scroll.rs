@@ -115,6 +115,25 @@ pub const LOADER_BUILDS: &str = "scroll:loader-builds";
 /// The same modal's list of the linked pack's versions.
 pub const PACK_VERSIONS: &str = "scroll:pack-versions";
 
+/// Every region this shell has, in the order they were added.
+///
+/// One list because a region is two things at once -- an id on a widget and a key
+/// in the shell's glide table -- and a name only one side knows is a region that
+/// reports to nothing. The gate below holds three facts that were previously only
+/// true by inspection: the nine names are distinct, each is a `scroll:` id, and
+/// each one appears at a call site in this crate.
+pub const REGIONS: [&str; 9] = [
+    PAGE,
+    CONTENT,
+    PANEL,
+    DIALOG,
+    VERSIONS,
+    BUILDS,
+    GAME_VERSIONS,
+    LOADER_BUILDS,
+    PACK_VERSIONS,
+];
+
 /// The id a region's scrollable answers to, and the one the shell moves.
 pub fn id(name: &'static str) -> iced::widget::scrollable::Id {
     iced::widget::scrollable::Id::new(name)
@@ -1009,6 +1028,55 @@ where
 mod tests {
     use super::*;
     use iced::Theme;
+
+    /// The nine regions are distinct, are ids, and are each drawn somewhere.
+    ///
+    /// The gate for what used to be an inspection: a region name is an id on a
+    /// widget *and* a key in the shell's glide table, so a name nothing puts on a
+    /// widget is a wheel that can never reach a glide, and two names that collide
+    /// are one region drawn twice. The call sites are read from the five files
+    /// that own them rather than from the whole crate, because a scan that
+    /// matched `scroll:` strings would also match these names' own definitions.
+    #[test]
+    fn the_regions_are_nine_distinct_ids_and_every_one_is_drawn() {
+        let mut seen = std::collections::BTreeSet::new();
+        for name in REGIONS {
+            assert!(seen.insert(name), "{name} is listed twice");
+            assert!(
+                name.starts_with("scroll:"),
+                "{name} is not shaped like a region id"
+            );
+        }
+        assert_eq!(seen.len(), 9, "the shell has nine regions");
+
+        let sources = [
+            include_str!("page.rs"),
+            include_str!("shell.rs"),
+            include_str!("instance_settings.rs"),
+            include_str!("pages/discover.rs"),
+            include_str!("pages/instance.rs"),
+        ];
+        // The constant each name is declared as, in `REGIONS` order: the gate is
+        // about the spelling a call site uses, and `REGIONS` holds the values.
+        let idents = [
+            "PAGE",
+            "CONTENT",
+            "PANEL",
+            "DIALOG",
+            "VERSIONS",
+            "BUILDS",
+            "GAME_VERSIONS",
+            "LOADER_BUILDS",
+            "PACK_VERSIONS",
+        ];
+        for (name, ident) in REGIONS.iter().zip(idents) {
+            let needle = format!("scroll::{ident}");
+            assert!(
+                sources.iter().any(|source| source.contains(&needle)),
+                "{name} is in the table but no call site draws it"
+            );
+        }
+    }
 
     fn page(content: f32, view: f32) -> ScrollAnim {
         let mut anim = ScrollAnim::default();
