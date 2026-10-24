@@ -366,7 +366,7 @@ fn seed_shipped_fonts() {
             Err(poisoned) => poisoned.into_inner(),
         };
         for bytes in crate::FONTS {
-            guard.db_mut().load_font_data(bytes.to_vec());
+            guard.raw().db_mut().load_font_data(bytes.to_vec());
         }
     });
 }
