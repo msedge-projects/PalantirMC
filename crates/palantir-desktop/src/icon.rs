@@ -60,12 +60,46 @@ struct Picture {
     ink: Color,
 }
 
+/// What an icon's canvas keeps between frames: the tessellated glyph, and the
+/// three inputs that make it stale.
+///
+/// **This is the difference between a smooth window and a slideshow.** Without a
+/// cache, `Program::draw` runs for every icon on every frame, and each call
+/// rebuilds the frame, walks the glyph's paints and tessellates its paths again —
+/// so a page carrying thirty icons re-tessellates thirty vector icons per frame,
+/// and a scroll re-tessellates all of them once per animation step. That is the
+/// cost behind the reader's "feels like 10 fps". With the cache the tessellation
+/// happens once and every later frame draws the mesh it produced.
+///
+/// The key is `(glyph, size, ink)`: an icon whose colour changes on hover, or whose
+/// row resizes, must not keep drawing the old mesh, and `Cache` has no idea what it
+/// was drawn from. The size is compared as bits because `f32` is not `Eq` and two
+/// sizes differing in the last bit are two different meshes anyway.
+#[derive(Debug, Default)]
+struct Cached {
+    cache: canvas::Cache,
+    key: std::cell::Cell<Option<Key>>,
+}
+
+/// The three inputs an icon's mesh is drawn from, and the reason a cached icon is
+/// ever thrown away.
+type Key = (Glyph, u32, [u8; 4]);
+
+impl Cached {
+    /// The key an icon draws under. Split out so a test can hold it: the cache is
+    /// only correct if a change to any of the three clears it, and none of them can
+    /// be observed through a renderer in a unit test.
+    fn key(glyph: Glyph, size: f32, ink: Color) -> Key {
+        (glyph, size.to_bits(), ink.into_rgba8())
+    }
+}
+
 impl<Message> canvas::Program<Message> for Picture {
-    type State = ();
+    type State = Cached;
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -76,16 +110,23 @@ impl<Message> canvas::Program<Message> for Picture {
         // an icon drawn at its requested size would spill out of its slot.
         let size = bounds.width.min(bounds.height).min(self.size);
         let (scale, offset) = fit(self.glyph, size);
-        let mut frame = Frame::new(renderer, bounds.size());
-        frame.translate(offset);
-        frame.scale(scale);
-        for (path, paint) in icons_gen::parts(self.glyph, scale, self.ink) {
-            match paint {
-                Paint::Stroke(stroke) => frame.stroke(&path, stroke),
-                Paint::Fill(color) => frame.fill(&path, color),
-            }
+        let key = Cached::key(self.glyph, size, self.ink);
+        if state.key.get() != Some(key) {
+            // A hover, a resize or a retheme: the mesh in hand is of another icon.
+            state.cache.clear();
+            state.key.set(Some(key));
         }
-        vec![frame.into_geometry()]
+        let geometry = state.cache.draw(renderer, bounds.size(), |frame| {
+            frame.translate(offset);
+            frame.scale(scale);
+            for (path, paint) in icons_gen::parts(self.glyph, scale, self.ink) {
+                match paint {
+                    Paint::Stroke(stroke) => frame.stroke(&path, stroke),
+                    Paint::Fill(color) => frame.fill(&path, color),
+                }
+            }
+        });
+        vec![geometry]
     }
 }
 
@@ -95,6 +136,26 @@ mod tests {
 
     /// A pixel of slack: `f32` division of 16 by 24 is not exactly two thirds.
     const SLACK: f32 = 1e-4;
+
+    /// A cached icon is thrown away by exactly the three things that change it.
+    ///
+    /// This is the gate for the cache: an icon that kept drawing a hover's rest
+    /// ink, or a row's old size, would be a stale picture nobody would think to
+    /// look for — and the cache is what makes a scroll frame cheap, so it cannot be
+    /// traded for a wrong one.
+    #[test]
+    fn a_cached_icon_is_invalidated_by_glyph_size_and_ink_alone() {
+        let ink = Color::from_rgb(0.5, 0.5, 0.5);
+        let key = Cached::key(Glyph::Home, 16.0, ink);
+        assert_eq!(key, Cached::key(Glyph::Home, 16.0, ink), "same inputs");
+        assert_ne!(key, Cached::key(Glyph::Compass, 16.0, ink), "a glyph");
+        assert_ne!(key, Cached::key(Glyph::Home, 20.0, ink), "a size");
+        assert_ne!(
+            key,
+            Cached::key(Glyph::Home, 16.0, Color::from_rgb(0.6, 0.5, 0.5)),
+            "an ink"
+        );
+    }
 
     #[test]
     fn an_icon_fits_its_box_and_touches_it() {

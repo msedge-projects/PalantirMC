@@ -2474,6 +2474,11 @@ impl Shell {
         if self.panel_arrow.is_running() {
             return true;
         }
+        // A region mid-glide is moving as well, and the frame it waits for is this
+        // one: without it a glide would draw its first frame and stop there.
+        if self.glides.animating() {
+            return true;
+        }
         anim::clock()
             .lock()
             .map(|clock| clock.animating())
@@ -2612,10 +2617,11 @@ impl Shell {
                 if let Ok(mut clock) = anim::clock().lock() {
                     clock.tick(now);
                 }
-                // A wheel owes no frame any more: a scroll is the command that
-                // carries the new offset and nothing else. `Message::Tick` is still
-                // what the hover clock and the shell's own tweens ask for.
-                return iced::Command::none();
+                // The frame that carries every scroll region forward. It answers
+                // with one `scroll_to` per region that moved and nothing else; with
+                // the icon cache behind it, a frame of a glide is cheap enough to
+                // afford at 60 Hz.
+                return self.glides.tick(now);
             }
             _ => {}
         }
@@ -12211,16 +12217,16 @@ mod tests {
         assert_eq!(Glyph::X.name(), "x");
     }
 
-    /// A wheel leaves nothing animating, which is the whole of "lightweight".
+    /// A wheel asks for frames until it lands, and then stops asking.
     ///
     /// The shell's frame timer is a subscription that exists only while
-    /// [`Shell::animating`] is true. Scrolling used to make it true for as long as a
-    /// glide ran — ten frames per gesture, on the same thread that draws the window
-    /// — and that is the cost the reader was feeling. A scroll is now one command
-    /// and no frames, so this asserts the cheapest property there is: after a wheel,
-    /// the window is idle again.
+    /// [`Shell::animating`] is true, so this is the whole lifecycle of a scroll in
+    /// two assertions: the wheel starts a glide and keeps the clock awake, and the
+    /// frame after the deadline ends both. A glide that kept the clock awake would
+    /// be a window redrawing for ever; one that never started it would be the jump
+    /// the reader called "10 fps".
     #[test]
-    fn a_wheel_leaves_nothing_asking_for_frames() {
+    fn a_wheel_asks_for_frames_until_it_lands() {
         let mut shell = shell_at("/browse/modpack");
         // Settle the page's own arrival first: the shell is legitimately busy for a
         // few frames while a page fades in, and that is not what this measures.
@@ -12233,14 +12239,16 @@ mod tests {
             offset: 0.0,
         };
         let _ = shell.handle(Message::Wheel(crate::scroll::PAGE, wheel));
-        assert!(
-            !shell.animating(),
-            "a scroll must not keep the frame clock awake"
-        );
+        assert!(shell.animating(), "the notch is travelling");
+        // A glide is ticked by `Message::Tick` against the real clock, so the wait
+        // is real too -- the one sleep in this suite, and it is the deadline.
+        std::thread::sleep(crate::scroll::DURATION + Duration::from_millis(40));
+        let _ = shell.handle(Message::Tick);
+        assert!(!shell.animating(), "and the clock is idle again");
         assert_eq!(
             shell.glides.offset(crate::scroll::PAGE),
             crate::scroll::WHEEL_PIXELS_PER_NOTCH,
-            "and it lands where the notch asked, at once"
+            "with the page where the notch asked"
         );
     }
 

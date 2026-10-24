@@ -4441,3 +4441,45 @@ remaining cost is the page's own draw -- which is the next lever and is measured
 `crate::scale` per page, not by this module. It also changes a feel: no longer
 eased, a notch is a jump of sixty pixels, which is what a browser does and what the
 reference's own web view does, but it is a change a reader will notice.
+## The scroll was never the expensive part; the icons were
+
+Third report, and the first two fixes were both wrong in the same way: they tuned
+the *curve*. "Looks much better but it is not smooth ... feels like 10fps" is not a
+verdict on easing, it is a verdict on how long a frame takes. `crate::scale` had
+already said the cheap half -- Discover builds a hundred cards in **1.1 ms**, an
+instance tab in **0.05-0.15 ms** -- so the cost was not our view code either.
+
+It was `crate::icon`. Every icon was a `Canvas` whose `Program::draw` built a fresh
+`Frame`, walked the glyph's paints and **tessellated its vector paths again, every
+frame**, with no cache anywhere in the crate. A page carrying thirty icons
+re-tessellated thirty icons per frame; a scroll re-tessellated all of them once per
+animation step. That is what a 10 fps feel is made of, and it is why an *animation*
+felt worse than a *jump* -- the jump simply asked for fewer of those frames.
+
+**The fix is `canvas::Cache`**, which is what it is for: `Program::State` is now a
+cache plus the key it was drawn from, `(glyph, size, ink)`, and the cache is cleared
+only when one of those changes (a hover's ink, a row's size, a retheme). Every later
+frame draws the mesh the tessellation produced. `a_cached_icon_is_invalidated_by_glyph_size_and_ink_alone`
+is the gate: a stale icon is a wrong picture nobody would think to look for.
+
+**With that in place the glide returns**, at 150 ms -- egui's own smooth scrolling is
+200 ms and fastframe helps toward it, and 150 is short enough that a notch is done
+before the reader wonders whether it is still moving -- with the no-restart rule
+kept (a burst moves only the target; the deadline belongs to the burst) and a cubic
+ease-out. `one_notch_eases_and_lands_on_its_deadline` and
+`a_wheel_asks_for_frames_until_it_lands` state the lifecycle from both ends: the
+offset starts where the page is, is part way at a third of the deadline, lands
+exactly on it, and the shell's frame subscription then goes idle.
+
+**What was measured.** `sift-launcher`, `cargo test -p palantir-desktop --locked`:
+**893 passed / 0 failed** and 4 native passed. The five failures on the way were
+last round's "instant" tests, restated rather than deleted -- they had asserted the
+contract this replaces -- and the shell's lifecycle test now drives a real
+`Message::Tick` after a real 150 ms, the only sleep in the suite.
+
+**What this cannot say.** It cannot promise 60 fps on the reader's machine: what it
+removes is a per-frame cost that had no business being there, and what remains is
+whatever iced and the GPU cost per frame, which is now in the same league as any
+iced app. If a scroll still stutters after this, the next measurement is the app's
+own frame intervals -- not the curve, which has now been wrong three times and is
+finally the least interesting part of the story.
