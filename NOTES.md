@@ -4136,3 +4136,91 @@ site in one of the five files that draw regions.
 **What was measured.** `cargo test -p palantir-desktop --locked` on
 `sift-launcher`: the new gate passes among the rest. The full workspace run and
 the clippy sweep are in the commit's own numbers.
+## The file dialog stays hand-rolled, because rfd would cost the gates that test it
+
+The question was whether to move the Skins page's file picker to `rfd`. It stays,
+and the reason is what the current picker makes testable rather than what it
+implements: `pick.rs` has three seams a test drives -- the filter as
+`GetOpenFileNameW` reads it (one label, one pattern, a double NUL), the buffer a
+dialog leaves behind (a cancel is an empty buffer, a choice is read to its NUL),
+and the read that follows (a file over the ceiling is refused by size). `rfd`'s
+builder takes `add_filter(name, &[ext])` and builds the OS structure itself, so
+the first of those stops being data a test can read; its dialog blocks on the
+native window just as this one does, so the second and third stay untestable
+either way.
+
+The swap would therefore add a dependency and a `Cargo.lock` change and remove a
+gate, for a dialog nobody can drive in a test on either side. Revisit it if a
+second picking need appears -- a folder picker or a save dialog -- where `rfd`'s
+coverage would be worth more than the seams this picker keeps.
+
+## A self-update: the design written down, and only the part a test can run
+
+The launcher has none, and the plan asked for the decision rather than the
+feature. The shape it would have, and every risk in it:
+
+1. Ask a **signed** manifest for the newest version -- `{version, url, sha256,
+   notes}` -- over HTTPS.
+2. Compare with `CARGO_PKG_VERSION` and do nothing if it is not newer.
+3. Download the installer to a temporary file beside its destination and verify
+   **both** the digest and the size before anything runs. A half-downloaded
+   installer that is executed can update the registry and then fail mid-copy,
+   which is worse than no update at all.
+4. Run it with the launcher closed and exit: Windows will not replace a running
+   executable, so an updater that overwrites in place is one that does nothing.
+
+The risks, in the order they would bite:
+
+- **Trust.** An updater turns "this launcher is running" into "whatever this
+  server says runs with the user's privileges". The manifest has to be signed with
+  a key compiled into the binary, and the signature has to cover the version, the
+  URL and the digest *together* -- a host that can change one field can otherwise
+  redirect the download.
+- **The installer's rename.** `installer/sift.nsi` installs `Sift Launcher.exe`
+  from a payload named `PalantirMC.exe` (`File /oname=`). An updater that looks
+  for `PalantirMC.exe` in the install folder updates nothing, because that is the
+  payload's name and not the installed file's. Either the build adopts the
+  installed name or the updater is told it.
+- **Rollback.** The previous executable has to survive until the new one has
+  started once, or a bad release is a launcher that cannot be opened to fetch the
+  good one.
+- **No host to try it on.** Everything after the comparison needs a Windows
+  machine with an installed copy, an older version to replace and a server to
+  serve one. None of that exists here.
+
+What shipped is the one falsifiable piece: `update::is_newer`, which compares
+dotted fields as numbers (`0.1.10` is later than `0.1.9`), treats a missing field
+as zero (`0.2` is not newer than `0.2.0`), accepts a `v` prefix on either side,
+and answers `false` for anything it cannot read -- a launcher must never decide to
+replace itself on a string it could not parse. Five tests, and nothing calls the
+function yet.
+
+## The font metrics were never skrifa's, and the substitution is the point
+
+The goal this work started from said the font measurements would be done "via
+skrifa". They were not, and the difference is not a shortcut: **the defect was
+which font system shaped the text, not which reader opened the font.** A test
+binary never ran `run_shell`, so `advance()` shaped through iced's global font
+system holding only the host's installed faces; on a box with Inter installed the
+call-to-action gate measured 229.7 against the 214 it asserts, and on a box
+without it measured 214. skrifa is a metrics and outline reader -- it would have
+read the right numbers out of the right file and left the layout shaping through
+the wrong system, so the layout and the drawn glyphs would still have disagreed
+the moment a host lacked the face.
+
+The fix was to seed the shipped faces into the system the tests measure through
+(`seed_shipped_fonts`), so the measurement and the drawing read one system in both
+processes. That is recorded in the two sections above this one, with the numbers
+the two cross-checks produced.
+
+**Where skrifa could still earn a place, and why it has not.** The gates carry a
+recorded `hmtx` column -- 76.54, 71.50, 77.74 and 88.36 -- read off the shipped
+faces when they were added. They are constants rather than a parse, so nothing in
+the build reads a font table today; skrifa (or `ttf-parser`) would make that
+column re-derivable from the files at test time. It is not done because the column
+already has two independent checks a parse could not give: every label's shaped
+width lands within the 0.25 px the gate allows of its `hmtx` sum, and the four
+labels' residuals against the reference's own captures are **-0.206, +0.001,
+-0.004 and -0.070**. A dependency whose job is to re-derive a constant that two
+independent measurements already agree with is a dependency to add when one of
+them changes, not before.

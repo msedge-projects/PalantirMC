@@ -242,6 +242,10 @@ mod theme_tokens;
 /// Stage 3's pages are what use it; keeping them here rather than inside a page is
 /// what makes two pages share a card instead of each drawing one.
 mod ui;
+/// What a self-update would have to be, and the one part of it a test can run:
+/// the version comparison. Nothing calls it -- see the module for the design and
+/// for the risks a session without a Windows host cannot close.
+mod update;
 /// The one way this launcher reaches the network: the engine's cache, its pool
 /// and its queue, as the launch path uses them.
 mod wire;

@@ -168,7 +168,61 @@ Anything that requires launching the described program — the setup wizard, the
 launcher's own window on Windows — is **unverifiable here**. Say so rather than
 inferring it from a green compile.
 
-## 5. Leftovers in the working tree, deliberately not committed
+## 5. The Windows checklist, and none of it is done
+
+Every item below needs a Windows machine with the built exe or the installer on
+it. **Nothing here has been run** — not one box is ticked, and a session that ticks
+one should say which machine, which build (`sha256` of the exe) and what it saw.
+Each item is written so it can be followed without reading the source.
+
+Run the build first: take the exe from CI's `palantirmc-x86_64-pc-windows-msvc`
+artifact (the run on `master`), and the setup exe from `makensis
+-DVERSION=0.1.0 installer\sift.nsi` run on a Windows box with NSIS installed.
+
+- [ ] **The exe's file properties.** Right-click the exe → Properties → Details.
+  Expect *Product name* `PalantirMC`, *File version* `0.1.0`, *Product version*
+  `0.1.0`, the copyright line from `LICENSE`, and the mark as the file's icon in
+  Explorer's list, the taskbar and Alt-Tab, at 16, 32, 48 and 256 pixels.
+- [ ] **The launcher starts, and only one does.** Double-click it twice within a
+  few seconds. Expect one window, and on the second launch a message box saying
+  the launcher is already running and naming a process id. Then: open Task
+  Manager, end the first launcher, delete nothing, and double-click again —
+  expect it to start, because the lock file is a stale claim rather than a
+  permanent one. After closing it cleanly, `%APPDATA%\PalantirMC\palantir.pid`
+  (or wherever `PALANTIRMC_HOME` points) should be gone.
+- [ ] **The machine stays awake through an install.** On a laptop, set a one-minute
+  sleep timeout (`powercfg /change standby-timeout-ac 1`, restore it afterwards),
+  then start a large install or a first launch that downloads. While it runs,
+  `powercfg /requests` should list a SYSTEM request owned by the launcher. Expect
+  no suspend, and the download to finish.
+- [ ] **CurseForge reads, and says so when it cannot.** Put a key in
+  `palantirmc-desktop.json` (`curseforge_api_key`) or set
+  `PALANTIRMC_CURSEFORGE_API_KEY`, open Discover, switch *Source* to CurseForge on
+  the Mods tab. Expect results whose cards carry one stat (downloads) and no
+  followers. Without a key, expect the sentence naming both places a key can go
+  rather than an empty list. Pressing a card should open
+  `curseforge.com/projects/<id>` in the browser. Switching to the Data packs or
+  Servers tab should return the source to Modrinth.
+- [ ] **The Bedrock shelf.** With Minecraft Bedrock installed and played once, open
+  the sixth rail slot. Expect the presence card with the game folder's path, the
+  worlds listed by name, and both pack shelves filled. On a machine without it,
+  expect the *not installed* card and that *Open the Store* opens the Store page
+  for the game. A machine where it has never been played should show *Installed*
+  and three empty sentences naming their folders.
+- [ ] **The settings footer.** Open Settings. Expect `PalantirMC 0.1.0` at the
+  bottom of the tab column, and `Notices travel beside the launcher:
+  THIRD_PARTY_NOTICES.md` under it.
+- [ ] **The installer.** Run the setup exe. Expect: the brand page plays the
+  animation and shows the mark as the wizard's icon; the licence page shows
+  `LICENSE`; the install lands in `%LOCALAPPDATA%\Programs\Sift Launcher` with
+  `Sift Launcher.exe`, `sift.ico`, `LICENSE` and `THIRD_PARTY_NOTICES.md`; a
+  desktop shortcut when that box is ticked; an entry in *Apps & features*; and
+  that the finish page starts the launcher. Then uninstall, and expect the folder,
+  the shortcut and the registry entry gone, with instance data untouched.
+- [ ] **A screenshot of each of the above**, under `.scratch/verify/windows/`,
+  named for the item — the captures are what the next session can check against.
+
+## 6. Leftovers in the working tree, deliberately not committed
 
 - Twelve root-level `*.png` captures from the 2026-10-17 window drivers, and
   root `.local/` (scratch). `AGENTS.md` §"Never commit build output or captures"
