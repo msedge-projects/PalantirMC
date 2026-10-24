@@ -262,4 +262,87 @@ mod tests {
         assert!(full_name().starts_with("PalantirMC "));
         assert!(full_name().ends_with(version()));
     }
+
+    /// The icon the executable carries is a real ICO, at the sizes Windows asks
+    /// for, with 32-bit entries.
+    ///
+    /// `build.rs` hands `assets/brand/app.ico` to the resource compiler, and a
+    /// file that is not a valid icon there is not an error anybody sees: Windows
+    /// falls back to its generic application icon and the exe looks unfinished.
+    /// The file is written by `tools/gen_app_icon.py` -- a Pillow tool, so `--check`
+    /// is a human's command rather than a CI step, exactly as `gen_brand.py` is --
+    /// and this is what holds its shape in the build the runner sees.
+    ///
+    /// The directory is parsed rather than trusted: reserved zero, type one,
+    /// seven entries, and each entry's side and bit depth read back out.
+    #[test]
+    fn the_exe_icon_has_the_sizes_windows_asks_for() {
+        const ICO: &[u8] = include_bytes!("../assets/brand/app.ico");
+        let word = |at: usize| u16::from_le_bytes([ICO[at], ICO[at + 1]]);
+        let dword = |at: usize| {
+            u32::from_le_bytes([ICO[at], ICO[at + 1], ICO[at + 2], ICO[at + 3]])
+        };
+        assert_eq!(word(0), 0, "ICONDIR.reserved must be zero");
+        assert_eq!(word(2), 1, "ICONDIR.type must be 1 for an icon");
+        let count = word(4) as usize;
+        assert_eq!(count, 7, "the seven sizes Windows asks for, and no more");
+
+        let mut sizes = Vec::new();
+        for entry in 0..count {
+            let at = 6 + entry * 16;
+            let width = if ICO[at] == 0 { 256 } else { ICO[at] as u16 };
+            let height = if ICO[at + 1] == 0 { 256 } else { ICO[at + 1] as u16 };
+            assert_eq!(width, height, "an icon entry is square");
+            assert_eq!(word(at + 4), 1, "one colour plane");
+            assert_eq!(word(at + 6), 32, "32 bits per pixel: alpha is in the pixels");
+            let bytes = dword(at + 8) as usize;
+            let offset = dword(at + 12) as usize;
+            assert!(
+                offset + bytes <= ICO.len(),
+                "entry {width} runs past the file: {offset} + {bytes} > {}",
+                ICO.len()
+            );
+            // 32-bit BGRA pixels plus an AND mask padded to four bytes a row.
+            let stride = ((width as usize + 31) / 32) * 4;
+            assert_eq!(
+                bytes,
+                40 + width as usize * height as usize * 4 + stride * height as usize,
+                "entry {width} is not a BITMAPINFOHEADER and two bitmaps"
+            );
+            sizes.push(width);
+        }
+        sizes.sort_unstable();
+        assert_eq!(sizes, vec![16, 24, 32, 48, 64, 128, 256]);
+    }
+
+    /// The one literal `build.rs` carries -- the product name in the file's
+    /// properties -- is the product name the launcher draws.
+    ///
+    /// The build script cannot read `palantir_core::PRODUCT_NAME` without making
+    /// the core crate a build-dependency of this one, so the name is repeated
+    /// there and held here: a resource that called the product something else is
+    /// exactly the drift the comment on [`APP_NAME`] warns about, and it would be
+    /// invisible until somebody right-clicked the exe.
+    #[test]
+    fn the_resource_name_is_the_product_name() {
+        let build = include_str!("../build.rs");
+        let line = build
+            .lines()
+            .find(|line| line.starts_with("const PRODUCT: &str ="))
+            .expect("build.rs no longer declares PRODUCT");
+        assert!(
+            line.contains(&format!("\"{APP_NAME}\"")),
+            "build.rs's PRODUCT is not {APP_NAME}: {line}"
+        );
+        // And the version the resource carries is the one `brand::version()` reads,
+        // which is why neither is a literal here: both come from `CARGO_PKG_VERSION`.
+        assert!(
+            build.contains("env!(\"CARGO_PKG_VERSION\")"),
+            "build.rs no longer takes its version from Cargo.toml"
+        );
+        assert!(
+            build.contains("assets/brand/app.ico"),
+            "build.rs no longer embeds the generated icon"
+        );
+    }
 }

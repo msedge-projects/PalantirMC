@@ -120,10 +120,16 @@ rather than a codec dependency.
 
 Also outstanding, and lower value:
 
-- `installer/sift.ico` has no generator and no `--check`; it was converted once
-  by an ad-hoc script from the current mark. It is a placeholder and should be
-  replaced with Sift's own logo, ideally by a `tools/gen_installer_icon.py` that
-  writes BMP entries and can be `--check`ed like the animation.
+- `installer/sift.ico` has a generator now (2026-10-24): `tools/gen_app_icon.py`
+  writes it and `crates/palantir-desktop/assets/brand/app.ico` from the brand art,
+  seven BMP entries, with `--check` like the animation's. Both files are the same
+  bytes, because NSIS resolves relative paths against its own directory. The exe's
+  own icon and version block come from `build.rs` (`winresource`), and that path
+  is Windows-only -- it compiled first on CI's exe jobs and has not been looked at
+  on a desktop, which is the check still owed.
+- The **About page does not exist**, in this launcher or in the reference: the old
+  shell's went with G88. `brand::version()` is the one source of the number the exe
+  now carries, and a surface that draws it is a change of its own.
 - The payload is still `PalantirMC.exe`; the installer renames it to
   `Sift Launcher.exe` at install time (`File /oname=`), while the build still
   produces the old exe name. The rename in the product itself is untouched, and

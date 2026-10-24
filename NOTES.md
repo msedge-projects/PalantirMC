@@ -3868,3 +3868,58 @@ jobs and has not been executed anywhere: the VM is Linux, so what ran is the
 `/proc` branch and the decision table around it. A real proof is two windows on
 one desktop -- close the first with the task manager and start again -- and no
 machine in this session has been able to do that.
+## The exe had no icon and no version to right-click
+
+`PalantirMC.exe` carried neither a resource icon nor a version block, so Explorer,
+the taskbar, the Alt-Tab list and the file's properties sheet all showed the
+generic application icon and no version at all -- while the window itself drew the
+mark and `brand::version()` knew the number. The installer's `sift.ico` was a
+placeholder with no generator behind it, and the About page the comments refer to
+is not in the tree: it went with the old shell in G88, and the reference has no
+About page either.
+
+**The icon is generated, at both paths.** `tools/gen_app_icon.py` imports
+`gen_brand.py`'s recipe -- black to alpha, colour divided back out, crop to the ink
+at 91%, one Lanczos pass per size -- and writes seven entries (16, 24, 32, 48, 64,
+128, 256) as a container this tool builds itself. That last part is not
+wheel-reinvention: NSIS refuses an ICO whose entries are PNG-compressed and
+Pillow's writer picks PNG for the large sizes, so the file would build with the
+resource compiler and fail in the installer. `assets/brand/app.ico` is what
+`build.rs` embeds; `installer/sift.ico` is the same bytes beside the script that
+reads it, because NSIS resolves relative paths against its own directory.
+
+**`build.rs` is Windows-only and takes the version from `Cargo.toml`.** A build
+script that hardcoded `0.1.0` would be a second place a release has to be edited;
+`env!("CARGO_PKG_VERSION")` is the same value `brand::version()` reads, so the file
+on disk and the number the launcher prints cannot disagree. The one literal it
+does carry -- the product name -- is held to `APP_NAME` by a test, because the
+build script cannot see `palantir_core::PRODUCT_NAME` without making the core
+crate a build-dependency of this one.
+
+**`winresource` with `default-features = false`.** Its default `toml` feature reads
+`[package.metadata.winres]` from the manifest, and nothing is declared there --
+every property is set explicitly -- so the feature would add three crates to the
+lock file for a file this build does not have. The lock's whole diff is one
+package, and it was produced by running cargo on `sift-launcher` and bringing the
+eleven lines back, as the working rules require.
+
+**Two Rust gates, because the icon's shape is what CI can see.** One parses the
+ICO's directory out of `include_bytes!` and holds it to seven square entries at 32
+bits with the bitmap sizes the header implies; the other holds `build.rs`'s
+product name to `APP_NAME` and its version to `CARGO_PKG_VERSION`. The
+generator's own `--check` is a person's command rather than a CI step, for the
+reason `gen_brand.py` is: the pixels come from Pillow's resampler, and two Pillow
+versions can differ in the last bit of a fractional edge.
+
+**What was measured.** `cargo test -p palantir-desktop --locked` on
+`sift-launcher`, over the pushed tree plus this patch: **888 passed / 0 failed**
+and 4 native passed -- the 886 slice E left plus the two brand gates. The icon is
+372,526 bytes in seven entries, and the lock's diff is `winresource 0.1.34` and
+`"winresource"` in the desktop crate's dependency list, eleven lines.
+
+**What this cannot say, and it is the whole of the remaining question.** The
+resource compiler is Microsoft's and `build.rs`'s `#[cfg(windows)]` path has never
+been executed anywhere here: CI's two exe jobs are the first place it compiles, and
+nothing in this session has opened the built exe's properties sheet. "Explorer
+shows the mark and the sheet shows 0.1.0" needs a Windows look, and the About page
+the version was meant to feed does not exist to look at.

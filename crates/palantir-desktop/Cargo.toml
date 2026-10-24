@@ -15,6 +15,19 @@ license.workspace = true
 name = "PalantirMC"
 path = "src/main.rs"
 
+# The exe's own file properties: `build.rs` writes the icon and the version
+# block with this, which is what Explorer, the taskbar and the properties sheet
+# read. Windows-only, because the resource compiler and the script it drives are
+# Microsoft's; nothing here is needed to build or test on Linux.
+#
+# `default-features = false` drops the crate's `toml` feature, which reads
+# `[package.metadata.winres]` out of a Cargo manifest. Nothing is declared there:
+# every property is set explicitly in `build.rs`, from `Cargo.toml`'s own version,
+# so the feature would put three more crates in the lock file for a file this
+# build does not have.
+[target.'cfg(windows)'.build-dependencies]
+winresource = { version = "0.1", default-features = false }
+
 [dependencies]
 # `image` paints the instance-icon art read out of the reference client's
 # binary; `canvas` draws the launcher's own
