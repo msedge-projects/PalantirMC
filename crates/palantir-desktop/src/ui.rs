@@ -38,6 +38,7 @@
 #![allow(dead_code)]
 
 use crate::pages::overlay::Stack;
+use iced::advanced::graphics::text::cosmic_text;
 use iced::advanced::text::Renderer as TextRenderer;
 use iced::widget::text::{Shaping, StyleSheet as TextStyle};
 use iced::widget::{column, container, image, mouse_area, row, text_input, Space, Text};
@@ -328,15 +329,39 @@ const LEADING: f32 = 1.3;
 /// `to_attributes`, and measures it with the same `measure`. The test at the
 /// bottom of this file holds the two to each other.
 fn shape_width(label: &str, font: iced::Font, size: f32) -> f32 {
-    use iced::advanced::graphics::text::font_system;
-    let borrowed = font_system().write();
-    let mut guard = match borrowed {
+    static SYSTEM: std::sync::OnceLock<std::sync::Mutex<cosmic_text::FontSystem>> =
+        std::sync::OnceLock::new();
+    let system = SYSTEM.get_or_init(|| std::sync::Mutex::new(measurement_font_system()));
+    let mut guard = match system.lock() {
         Ok(guard) => guard,
-        // A panic while the window's system was borrowed somewhere else must not
-        // cost the layout its measurement: recover the guard and measure anyway.
+        // A panic while this system was borrowed must not cost the layout its
+        // measurement: recover the guard and measure anyway.
         Err(poisoned) => poisoned.into_inner(),
     };
-    shape_width_in(guard.raw(), label, font, size)
+    shape_width_in(&mut guard, label, font, size)
+}
+
+/// The system a measurement is shaped through: [`crate::FONTS`] seeded once per
+/// process, instead of iced's global one.
+///
+/// **Why this is not `font_system()`.** In the window iced loads [`crate::FONTS`]
+/// into that global before the first frame, so the layout and the glyphs agree.
+/// A test binary never runs `run_shell`, so the same call there holds only what
+/// the machine has installed: `Create an instance` at 16 semibold measured
+/// **229.7** on a box with no Inter and **214** on one with it, and
+/// `the_welcome_call_to_action_is_content_sized_and_no_wider_than_the_reference_s`
+/// asserts 214. A gate whose number depends on the host's font list is not a
+/// measurement, it is a report about the host; seeding from the shipped bytes
+/// makes the number the file's own.
+///
+/// The system still offers every installed face as a fallback -- `new_with_fonts`
+/// loads the host's fonts and *then* adds these -- so a hanzi still finds a CJK
+/// face through the same path [`text`] documents.
+fn measurement_font_system() -> cosmic_text::FontSystem {
+    cosmic_text::FontSystem::new_with_fonts(crate::FONTS.iter().map(|bytes| {
+        cosmic_text::fontdb::Source::Binary(std::sync::Arc::new(bytes.to_vec())
+            as std::sync::Arc<dyn AsRef<[u8]> + Send + Sync>)
+    }))
 }
 
 /// [`shape_width`] against a named font system rather than the window's.
