@@ -251,13 +251,19 @@ impl Shell {
             self.content_column(ui)
         };
 
-        // The About modal is drawn over the whole window, last, so nothing paints on top
-        // of it. It reports whether it is still open, which is the frame debt it owes.
-        let about = crate::pages::about::draw(ui, Self::window_rect(), &self.theme, &mut self.about_open);
-        rail_animating |= about;
+        // The About modal is drawn over the whole window, last, so nothing paints on top of
+        // it. It is static while open -- no tween, no hover -- so it owes no frame debt: an
+        // open modal that asked for a repaint every vsync would be the one thing in this
+        // window failing the idle-CPU budget. What it does owe is a frame when it closes, so
+        // the page underneath is not left half-covered by a stale buffer.
+        let was_open = self.about_open;
+        crate::pages::about::draw(ui, Self::window_rect(), &self.theme, &mut self.about_open);
+        if was_open != self.about_open {
+            ui.ctx().request_repaint();
+        }
 
         // An icon in flight is a reason to draw the next frame, exactly like a hover.
-        rail_animating || content || self.icons.loading() || self.results.loading() || about
+        rail_animating || content || self.icons.loading() || self.results.loading()
     }
 
     /// The top bar: the mark and the page's name at the left, window controls at the right.

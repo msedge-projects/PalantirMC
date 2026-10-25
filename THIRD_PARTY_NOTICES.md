@@ -205,3 +205,17 @@ in binary distributions alike. Adding an entry is part of taking the code.
   fit and its corner masks, and the plate's texture is cropped to the window the
   reference's `object-cover` shows before it is composited -- none of it writes to
   the files.
+
+## fastframe-scroll 0.6.0 — MIT
+
+Vendored, unmodified, at `vendor/fastframe-scroll/` (upstream `crmne/fastframe` v0.6.0; the
+crate is not on crates.io). It is the scroll container Discover's result list uses, because
+epaint's own scroller clamps to its own notch size and the reference scrolls faster.
+
+Copyright (c) Carmine Paolino <carmine@paolino.me>. The full MIT text is at
+`vendor/fastframe-scroll/LICENSE-MIT.txt`, and `vendor/fastframe-scroll/UPSTREAM.md` records the
+blob hashes of every file so the copy can be shown to be unmodified.
+
+This entry was missing while the crate was already linked into the binary and already named on
+the About page: the modal carried the notice and this file did not, which by this repo's own
+rule (attribution is a shipping condition) made the file the wrong one.

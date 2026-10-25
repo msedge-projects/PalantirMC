@@ -37,10 +37,10 @@ use eframe::egui::{self, ColorImage, TextureHandle};
 
 /// The mark, 512x512 RGBA, as `tools/gen_brand.py` writes it.
 ///
-/// The path is the generated file's own: `crates/sift-desktop/assets/brand/logo512.png`,
+/// The path is the generated file's own: `assets/brand/logo512.png`,
 /// which is where the generator and `--check` look for it. `src/brand.rs` is two
 /// directories below the crate root, so the walk up is `../../`.
-const LOGO_PNG: &[u8] = include_bytes!("../../sift-desktop/assets/brand/logo512.png");
+const LOGO_PNG: &[u8] = include_bytes!("../../../assets/brand/logo512.png");
 
 /// The mark's texture, uploaded once for the life of the process.
 ///
