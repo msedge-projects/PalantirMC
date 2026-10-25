@@ -15,6 +15,7 @@ pub mod home;
 pub mod library;
 pub mod screenshots;
 pub mod servers;
+pub mod settings;
 pub mod skins;
 pub mod project;
 

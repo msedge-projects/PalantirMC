@@ -85,6 +85,8 @@ pub struct Shell {
     pub theme: Theme,
     /// Project icons, fetched off the frame thread and cached as textures.
     icons: crate::images::Images,
+    /// The one game this shell starts, and the worker that reports on it.
+    game: crate::game::Game,
     /// The instances on disk, read when the shell starts and when the rail returns to Home.
     instances: Vec<crate::data::Entry>,
     /// The project whose page is open, if any. `None` means the rail's own page is showing.
@@ -112,6 +114,8 @@ pub struct Shell {
     toast: Option<String>,
     /// Whether the About modal is showing.
     about_open: bool,
+    /// The settings modal: open flag and selected tab.
+    settings: crate::pages::settings::State,
 }
 
 impl Default for Shell {
@@ -124,6 +128,7 @@ impl Default for Shell {
             scrolling: fastframe_scroll::Scrolling::default(),
             theme: crate::theme::dark(),
             icons: crate::images::Images::default(),
+            game: crate::game::Game::default(),
             instances: crate::data::load().0,
             open_project: None,
             project_state: crate::pages::project::State::default(),
@@ -137,6 +142,7 @@ impl Default for Shell {
             servers: crate::pages::servers::State::default(),
             toast: None,
             about_open: false,
+            settings: crate::pages::settings::State::default(),
         }
     }
 }
@@ -148,6 +154,8 @@ impl Shell {
         let ctx = ui.ctx().clone();
         // First thing in the frame, before any scroll area reads the input.
         self.scrolling.apply(&ctx);
+        // Take the launch worker's latest word before any of the window reads it.
+        self.game.poll();
 
         let window = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(g::WINDOW.0, g::WINDOW.1));
         ui.painter().rect_filled(window, 0, self.theme.BG);
@@ -256,14 +264,22 @@ impl Shell {
         // open modal that asked for a repaint every vsync would be the one thing in this
         // window failing the idle-CPU budget. What it does owe is a frame when it closes, so
         // the page underneath is not left half-covered by a stale buffer.
-        let was_open = self.about_open;
+        // Both modals are static while open, so neither owes a frame: what they owe is one
+        // repaint on the frame they close, so the page underneath is not left half-covered.
+        let was_about = self.about_open;
+        let was_settings = self.settings.open;
         crate::pages::about::draw(ui, Self::window_rect(), &self.theme, &mut self.about_open);
-        if was_open != self.about_open {
+        crate::pages::settings::draw(ui, Self::window_rect(), &self.theme, &mut self.settings);
+        if was_about != self.about_open || was_settings != self.settings.open {
             ui.ctx().request_repaint();
         }
 
         // An icon in flight is a reason to draw the next frame, exactly like a hover.
-        rail_animating || content || self.icons.loading() || self.results.loading()
+        rail_animating
+            || content
+            || self.icons.loading()
+            || self.results.loading()
+            || self.game.busy()
     }
 
     /// The top bar: the mark and the page's name at the left, window controls at the right.
@@ -340,7 +356,7 @@ impl Shell {
         painter.text(
             chip,
             Align2::RIGHT_CENTER,
-            "No instances running",
+            self.game.status().to_string(),
             crate::fonts::body(12.0),
             self.theme.SECONDARY,
         );
@@ -467,9 +483,9 @@ impl Shell {
                 .clicked()
             {
                 match index {
-                    2 => self.about_open = true,
-                    0 => self.toast = Some("Settings are not wired yet.".to_owned()),
-                    _ => self.toast = Some("Reload is not wired yet.".to_owned()),
+                    0 => self.settings.open = true,
+                    1 => self.toast = Some("Reload is not wired yet.".to_owned()),
+                    _ => self.about_open = true,
                 }
             }
         }
@@ -524,9 +540,7 @@ impl Shell {
                 // nothing, which reads as a broken press.
                 self.toast = Some("Importing from another launcher is not wired yet.".to_owned());
             }
-            crate::pages::home::Action::Play(_id) => {
-                self.toast = Some("Launching is not wired yet.".to_owned());
-            }
+            crate::pages::home::Action::Play(id) => self.game.start(id),
         }
     }
 
