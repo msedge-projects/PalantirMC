@@ -74,6 +74,18 @@
     "FIRST_CARD": [
       400,
       300
+    ],
+    "RAIL_SKINS": [
+      32,
+      169
+    ],
+    "RAIL_SCREENSHOTS": [
+      32,
+      219
+    ],
+    "RAIL_SERVERS": [
+      32,
+      269
     ]
   },
   "pages": {
@@ -190,16 +202,16 @@
         }
       ]
     },
-    "library": {
-      "title_hint": "Library",
+    "skins": {
+      "title_hint": "Skins",
       "steps": [
         {
           "click": [
-            "RAIL_LIBRARY"
+            "RAIL_SKINS"
           ]
         },
         {
-          "wait": 900
+          "wait": 1200
         },
         {
           "move": [
@@ -207,7 +219,49 @@
           ]
         },
         {
-          "wait": 300
+          "wait": 400
+        }
+      ]
+    },
+    "screenshots": {
+      "title_hint": "Screenshots",
+      "steps": [
+        {
+          "click": [
+            "RAIL_SCREENSHOTS"
+          ]
+        },
+        {
+          "wait": 1200
+        },
+        {
+          "move": [
+            "PARK"
+          ]
+        },
+        {
+          "wait": 400
+        }
+      ]
+    },
+    "servers": {
+      "title_hint": "Servers",
+      "steps": [
+        {
+          "click": [
+            "RAIL_SERVERS"
+          ]
+        },
+        {
+          "wait": 1200
+        },
+        {
+          "move": [
+            "PARK"
+          ]
+        },
+        {
+          "wait": 400
         }
       ]
     }
