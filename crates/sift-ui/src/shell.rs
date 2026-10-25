@@ -367,7 +367,26 @@ impl Shell {
             egui::pos2(g::PANEL_LEFT, g::TITLE_BAR),
             egui::vec2(g::PANEL, g::WINDOW.1 - g::TITLE_BAR),
         );
+
+        // A project page contributes its compatibility block above the shared sections --
+        // the reference teleports it into this same panel. It needs `ui` mutably, so it runs
+        // before the painter is borrowed for the shared sections below.
+        let mut shared_top = panel.top() + 20.0;
+        if let Some(project) = self.open_project.clone() {
+            let used = crate::pages::project::panel(
+                ui,
+                Rect::from_min_size(
+                    egui::pos2(panel.left() + 24.0, panel.top() + 20.0),
+                    egui::vec2(g::PANEL - 48.0, 400.0),
+                ),
+                &self.theme,
+                &project,
+            );
+            shared_top = panel.top() + 20.0 + used + 16.0;
+        }
+
         let painter = ui.painter();
+        let _ = shared_top;
         painter.rect_filled(panel, 0, self.theme.BG);
         painter.vline(
             panel.left() + 0.5,
@@ -421,23 +440,6 @@ impl Shell {
             6.0,
             self.theme.SECONDARY,
         );
-
-        // A project page's compatibility block sits above the shared sections, which is
-        // where the reference teleports it. The shared panel is then drawn below it.
-        let mut shared_top = panel.top();
-        if let Some(project) = self.open_project.clone() {
-            let used = crate::pages::project::panel(
-                ui,
-                Rect::from_min_size(
-                    egui::pos2(panel.left() + 24.0, panel.top() + 20.0),
-                    egui::vec2(g::PANEL - 48.0, 400.0),
-                ),
-                &self.theme,
-                &project,
-            );
-            shared_top = panel.top() + 20.0 + used + 12.0;
-        }
-        let _ = shared_top;
 
         // The news card: a raised block with a heading row and the article title.
         let news = Rect::from_min_size(
