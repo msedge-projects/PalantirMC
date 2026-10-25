@@ -286,6 +286,41 @@ state is now the state both apps can be compared in, and the reference's empty s
 ones a first-run user meets. That is where the next pass should spend its measurements rather
 than in the populated grids.
 
+### The launcher makes an instance — 2026-10-25
+
+Pressed `N` in the egui app on the VM, and the instance list changed by itself:
+
+```
+/data/home/.local/share/SiftLauncher/instances/Instance 1/instance.cfg
+mmc-pack.json: {"components":[{"important":true,"uid":"net.minecraft","version":"1.21.4"}],...}
+```
+
+The page went from the welcome hero to `Jump back in` with an `Instance 1 / Vanilla 1.21.4`
+row and a play button. That is the first user flow in this rewrite that **does something**:
+before it, every page was a drawing of a page.
+
+Three things about how it is built:
+
+- **The page reports intent, the shell acts.** `home::draw` returns an `Action` (`Create`,
+  `Import`, `Play(id)`) instead of doing the work, because a page has no paths, no disk and no
+  process table -- and a page that reached for them would be untestable and would need every
+  rule the shell already owns taught to it again.
+- **The data folder is the new one.** `/data/home/.local/share/SiftLauncher/` next to the old
+  `PalantirMC/`, which is the "start clean" decision showing up where it matters.
+- **The version is one constant** (`DEFAULT_MC_VERSION = "1.21.4"`) until the reference's create
+  modal exists. A default that works beats a button that does nothing, and the instance it
+  writes is a real one that a real launch can resolve.
+
+The two verbs that are not wired say so: `Import from launcher` and the play button set a
+one-line toast naming what is missing. A press that silently does nothing reads as a broken
+button, and the toast is cheaper than a lie.
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-30 | Home hero | the reference opens a modal to name the instance, pick its kind and version, and show an icon; the launcher names it `Instance N` and fixes the version |
+| E-31 | Home list | our row is the reference's `Jump back in` row but the play button does not launch yet, and there is no per-row menu (edit, duplicate, delete, open folder) |
+| E-32 | Home | `Import from launcher` reports that it is not wired; the reference scans the other launchers it knows and lists what it found |
+
 ### Open after this pass
 
 | # | Region | What differs |
