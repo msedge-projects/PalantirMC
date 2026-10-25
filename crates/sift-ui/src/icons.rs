@@ -71939,41 +71939,34 @@ mod tests {
         }
     }
 
+    /// Every glyph in the table names a file in the reference's icon set.
+    ///
+    /// This test used to compare the enum with the iced generator's output. That crate is
+    /// deleted, so the comparison would now be the table against itself; the authority
+    /// that still exists outside this file is the icon source tree, and a variant naming
+    /// a file nobody can find is the drift worth catching.
     #[test]
-    fn the_enum_matches_the_iced_generator_variant_for_variant() {
-        // The two files are meant to be read side by side, which only works if
-        // the variants are the same names in the same order. The iced file is
-        // read at compile time rather than copied here, so this fails the day
-        // the two generators disagree instead of the day somebody notices.
-        let iced = include_str!("../../sift-desktop/src/icons_gen.rs");
-        let mut expected: Vec<String> = Vec::new();
-        let mut inside = false;
-        for line in iced.lines() {
-            if line == "pub enum Glyph {" {
-                inside = true;
-                continue;
-            }
-            if !inside {
-                continue;
-            }
-            if line == "}" {
-                break;
-            }
-            let trimmed = line.trim();
-            if trimmed.starts_with("///") || trimmed.is_empty() {
-                continue;
-            }
-            if let Some(name) = trimmed.strip_suffix(',') {
-                expected.push(name.to_owned());
+    fn every_glyph_names_a_file_in_the_reference_icon_set() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../vendor/modrinth-app/assets/icons");
+        if !root.is_dir() {
+            // A vendored tree is not always present (a published crate would not carry
+            // it). Skipping is honest; passing a check that never ran would not be.
+            eprintln!("skipped: {} is not present", root.display());
+            return;
+        }
+        let mut missing: Vec<&str> = Vec::new();
+        for (name, _) in every() {
+            if !root.join(format!("{name}.svg")).is_file() {
+                missing.push(name);
             }
         }
-        let actual: Vec<String> = every()
-            .iter()
-            .map(|(_, glyph)| format!("{glyph:?}"))
-            .collect();
-        assert!(!expected.is_empty(), "the iced enum was not found");
-        assert_eq!(actual.len(), expected.len(), "the variant count moved");
-        assert_eq!(actual, expected, "the variant names or their order moved");
+        assert!(
+            missing.is_empty(),
+            "{} glyphs name no file: {:?}",
+            missing.len(),
+            &missing[..missing.len().min(8)]
+        );
     }
 
     #[test]
