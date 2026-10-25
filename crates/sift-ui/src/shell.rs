@@ -508,24 +508,32 @@ impl Shell {
                 // enough to scroll: a capture compares anatomy, not the catalogue.
                 // Real results when the search has them; the reference's own six cards while
                 // the box is empty, so the page is never a blank rectangle.
-                let live: Vec<Card<'_>> = match self.results.state() {
+                let live: Vec<Card> = match self.results.state() {
                     crate::search::State::Ready { hits, .. } => hits
                         .iter()
                         .map(|hit| Card {
-                            title: &hit.title,
-                            author: &hit.author,
-                            summary: &hit.summary,
-                            tags: &[],
-                            downloads: &hit.downloads,
-                            followers: &hit.followers,
-                            updated: "",
-                            icon: &hit.icon,
+                            title: hit.title.clone(),
+                            author: hit.author.clone(),
+                            summary: hit.summary.clone(),
+                            // The loaders the hit carries, which is what the reference shows
+                            // on a card that came from a search rather than a project page.
+                            tags: hit
+                                .loaders
+                                .iter()
+                                .map(|loader| (loader.clone(), Glyph::Box))
+                                .collect(),
+                            downloads: hit.downloads.clone(),
+                            followers: hit.followers.clone(),
+                            // The search API has no "updated" field, and the row is omitted
+                            // rather than drawn empty.
+                            updated: String::new(),
+                            icon: hit.icon.clone(),
                         })
                         .collect(),
                     _ => Vec::new(),
                 };
                 let sample = sample_results();
-                let results: &[Card<'_>] = if live.is_empty() { &sample } else { &live };
+                let results: &[Card] = if live.is_empty() { &sample } else { &live };
                 let mut opened = false;
                 for index in 0..results.len().max(1) {
                     let clicked = card(ui, &self.theme, index, &results[index % results.len()], &mut self.icons);
@@ -555,7 +563,7 @@ fn card(
     ui: &mut Ui,
     theme: &Theme,
     index: usize,
-    result: &Card<'_>,
+    result: &Card,
     icons: &mut crate::images::Images,
 ) -> bool {
     let width = ui.available_width();
@@ -582,7 +590,7 @@ fn card(
 
     // The title, the author and the link glyph, on one baseline.
     let title = painter.layout_no_wrap(
-        result.title.to_owned(),
+        result.title.clone(),
         crate::fonts::title(17.0),
         theme.CONTRAST,
     );
@@ -609,8 +617,11 @@ fn card(
     // its first card breaks after "in a", which is a ~440-point line, so the second line
     // exists for the same reason it does there.
     let summary_width = (rect.width() - 96.0 - 150.0).min(440.0);
+    // Two lines, ellipsised, the way the reference cuts a long description: a card that grew
+    // with its summary would break the list's rhythm and the grid's arithmetic.
+    let summary_text = ellipsise(&result.summary, 150);
     let summary = painter.layout(
-        result.summary.to_owned(),
+        summary_text,
         crate::fonts::body(13.5),
         theme.SECONDARY,
         summary_width,
@@ -619,8 +630,8 @@ fn card(
 
     // The tag pills, each with its own glyph, then the stats on the same row.
     let mut x = rect.left() + 96.0;
-    for tag in result.tags {
-        let text = painter.layout_no_wrap(tag.0.to_owned(), crate::fonts::body(11.0), theme.SECONDARY);
+    for tag in &result.tags {
+        let text = painter.layout_no_wrap(tag.0.clone(), crate::fonts::body(11.0), theme.SECONDARY);
         let pill = Rect::from_min_size(
             egui::pos2(x, rect.top() + 104.0),
             egui::vec2(text.size().x + 30.0, 24.0),
@@ -659,10 +670,15 @@ fn card(
     // The three stats, right-aligned on the tag row in the reference's order.
     let mut right = rect.right() - 16.0;
     for (glyph, value) in [
-        (Glyph::Download, result.downloads),
-        (Glyph::Heart, result.followers),
-        (Glyph::Calendar, result.updated),
+        (Glyph::Download, result.downloads.as_str()),
+        (Glyph::Heart, result.followers.as_str()),
+        (Glyph::Calendar, result.updated.as_str()),
     ] {
+        if value.is_empty() {
+            // A stat the API does not have is a glyph with nothing after it; the reference
+            // simply omits the row.
+            continue;
+        }
         let label = painter.layout_no_wrap(
             value.to_owned(),
             crate::fonts::body(11.0),
@@ -697,108 +713,137 @@ fn card(
 }
 
 /// What a result card shows. The reference's list carries these fields and no others.
-pub struct Card<'a> {
+///
+/// Owned rather than borrowed: half the cards come from a search reply, whose strings the
+/// page does not own, and a card that borrowed them would tie the list to the reply's
+/// lifetime for no gain.
+pub struct Card {
     /// The project's name.
-    pub title: &'a str,
+    pub title: String,
     /// The team that published it.
-    pub author: &'a str,
+    pub author: String,
     /// One or two sentences of description.
-    pub summary: &'a str,
+    pub summary: String,
     /// The categories and loader, as (label, glyph).
-    pub tags: &'a [(&'a str, Glyph)],
+    pub tags: Vec<(String, Glyph)>,
     /// The download count, already abbreviated the way the reference shows it.
-    pub downloads: &'a str,
+    pub downloads: String,
     /// The follower count, abbreviated the same way.
-    pub followers: &'a str,
-    /// When it last changed, in the reference's phrasing.
-    pub updated: &'a str,
+    pub followers: String,
+    /// When it last changed, in the reference's phrasing; empty when the API has no such
+    /// field, which is the case for a search hit.
+    pub updated: String,
     /// The project icon's URL.
-    pub icon: &'a str,
+    pub icon: String,
 }
 
-/// Six results with the reference's own content, so a capture shows the real anatomy
-/// rather than lorem ipsum: the first four are the cards the reference's first capture
-/// displayed, in its order.
+/// Six results with the reference's own content, so a capture shows the real anatomy rather
+/// than lorem ipsum: the first four are the cards the reference's first capture displayed, in
+/// its order.
 ///
 /// The icon URLs are the API's own `icon_url` answers for those six projects, fetched with
-/// `tools/parity`'s probe rather than constructed: `/data/<id>/icon.png` is not a URL the
-/// CDN serves -- it answers 400 on every id -- and the hashed `_96.webp` is.
-fn sample_results() -> [Card<'static>; 6] {
-    [
+/// `tools/parity`'s probe rather than constructed: `/data/<id>/icon.png` is not a URL the CDN
+/// serves -- it answers 400 on every id -- and the hashed `_96.webp` is.
+fn sample_results() -> Vec<Card> {
+    fn tags(pairs: &[(&str, Glyph)]) -> Vec<(String, Glyph)> {
+        pairs.iter().map(|(label, glyph)| ((*label).to_owned(), *glyph)).collect()
+    }
+    vec![
         Card {
-            title: "Fabulously Optimized",
-            author: "Fabulously Optimized",
-            summary: "Beautiful graphics, speedy performance and familiar features in a simple package. Wilderness Bound beta!",
-            tags: &[
+            title: "Fabulously Optimized".to_owned(),
+            author: "Fabulously Optimized".to_owned(),
+            summary: "Beautiful graphics, speedy performance and familiar features in a simple package. Wilderness Bound beta!".to_owned(),
+            tags: tags(&[
                 ("Client", Glyph::Monitor),
                 ("Lightweight", Glyph::Sparkles),
                 ("Multiplayer", Glyph::Users),
                 ("Optimization", Glyph::Rocket),
                 ("Fabric", Glyph::Box),
-            ],
-            downloads: "19.38M",
-            followers: "5,005",
-            updated: "5 days ago",
-            icon: "https://cdn.modrinth.com/data/1KVo5zza/d8152911f8fd5d7e9a8c499fe89045af81fe816e_96.webp",
+            ]),
+            downloads: "19.38M".to_owned(),
+            followers: "5,005".to_owned(),
+            updated: "5 days ago".to_owned(),
+            icon: "https://cdn.modrinth.com/data/1KVo5zza/d8152911f8fd5d7e9a8c499fe89045af81fe816e_96.webp".to_owned(),
         },
         Card {
-            title: "Zombie Invade 100 Days",
-            author: "FlameFire",
-            summary: "Same as Forge Labs 100 Days Zombie Apocalypse in new Minecraft.",
-            tags: &[
+            title: "Zombie Invade 100 Days".to_owned(),
+            author: "FlameFire".to_owned(),
+            summary: "Same as Forge Labs 100 Days Zombie Apocalypse in new Minecraft.".to_owned(),
+            tags: tags(&[
                 ("Client and server", Glyph::Users),
                 ("Challenging", Glyph::TagCategorySwords),
                 ("Forge", Glyph::Box),
-            ],
-            downloads: "15.36M",
-            followers: "9,659",
-            updated: "10 months ago",
-            icon: "https://cdn.modrinth.com/data/l9m9tuPN/fefe3f67c37744344d100638452c7bf059d586a1_96.webp",
+            ]),
+            downloads: "15.36M".to_owned(),
+            followers: "9,659".to_owned(),
+            updated: "10 months ago".to_owned(),
+            icon: "https://cdn.modrinth.com/data/l9m9tuPN/fefe3f67c37744344d100638452c7bf059d586a1_96.webp".to_owned(),
         },
         Card {
-            title: "Cobblemon Official Modpack [Fabric]",
-            author: "Cobbled Studios",
-            summary: "The official modpack of the Cobblemon mod, for Fabric!",
-            tags: &[
+            title: "Cobblemon Official Modpack [Fabric]".to_owned(),
+            author: "Cobbled Studios".to_owned(),
+            summary: "The official modpack of the Cobblemon mod, for Fabric!".to_owned(),
+            tags: tags(&[
                 ("Client and server", Glyph::Users),
                 ("Adventure", Glyph::Compass),
                 ("Lightweight", Glyph::Sparkles),
                 ("Fabric", Glyph::Box),
-            ],
-            downloads: "11.53M",
-            followers: "2,732",
-            updated: "12 hours ago",
-            icon: "https://cdn.modrinth.com/data/5FFgwNNP/e7f9ee2e9d361623847853fe2ddce42f519ee64f.png",
+            ]),
+            downloads: "11.53M".to_owned(),
+            followers: "2,732".to_owned(),
+            updated: "12 hours ago".to_owned(),
+            icon: "https://cdn.modrinth.com/data/5FFgwNNP/e7f9ee2e9d361623847853fe2ddce42f519ee64f.png".to_owned(),
         },
         Card {
-            title: "COBBLEVERSE - Pokemon Adventure",
-            author: "LUMYVERSE",
-            summary: "Start a true Pokemon adventure in Minecraft: Cobblemon 1.7.3 [ALL 1025 Pokemon] • Mega Evolutions • Gyms & Badges • Starter Kit.",
-            tags: &[("Adventure", Glyph::Compass), ("Fabric", Glyph::Box)],
-            downloads: "7.31M",
-            followers: "2,092",
-            updated: "Updated today",
-            icon: "https://cdn.modrinth.com/data/Jkb29YJU/581ecf54530972afb18a04660afd820f2f24f6c7.png",
+            title: "COBBLEVERSE - Pokemon Adventure".to_owned(),
+            author: "LUMYVERSE".to_owned(),
+            summary: "Start a true Pokemon adventure in Minecraft: Cobblemon 1.7.3 [ALL 1025 Pokemon] - Mega Evolutions - Gyms & Badges - Starter Kit.".to_owned(),
+            tags: tags(&[("Adventure", Glyph::Compass), ("Fabric", Glyph::Box)]),
+            downloads: "7.31M".to_owned(),
+            followers: "2,092".to_owned(),
+            updated: "Updated today".to_owned(),
+            icon: "https://cdn.modrinth.com/data/Jkb29YJU/581ecf54530972afb18a04660afd820f2f24f6c7.png".to_owned(),
         },
         Card {
-            title: "Better MC [FORGE]",
-            author: "Shivaxi",
-            summary: "The kitchen-sink pack that keeps its focus: quests, dungeons and a world that rewards exploring.",
-            tags: &[("Adventure", Glyph::Compass), ("Forge", Glyph::Box)],
-            downloads: "5.02M",
-            followers: "1,940",
-            updated: "3 days ago",
-            icon: "https://cdn.modrinth.com/data/4BV47HRn/7f5ef7cc61b2593609aabef3ed07a866a4f11b73_96.webp",
+            title: "Better MC [FORGE]".to_owned(),
+            author: "Shivaxi".to_owned(),
+            summary: "The kitchen-sink pack that keeps its focus: quests, dungeons and a world that rewards exploring.".to_owned(),
+            tags: tags(&[("Adventure", Glyph::Compass), ("Forge", Glyph::Box)]),
+            downloads: "5.02M".to_owned(),
+            followers: "1,940".to_owned(),
+            updated: "3 days ago".to_owned(),
+            icon: "https://cdn.modrinth.com/data/4BV47HRn/7f5ef7cc61b2593609aabef3ed07a866a4f11b73_96.webp".to_owned(),
         },
         Card {
-            title: "All the Mods 10",
-            author: "ATMTeam",
-            summary: "Every mod that matters, curated and tested, with a quest book to hold it together.",
-            tags: &[("Kitchen sink", Glyph::Boxes), ("NeoForge", Glyph::Box)],
-            downloads: "4.88M",
-            followers: "1,512",
-            updated: "6 days ago",
-            icon: "https://cdn.modrinth.com/data/CfpXILxG/832f62314350e237f299f2ee39d90fb7d85b6419_96.webp",
+            title: "All the Mods 10".to_owned(),
+            author: "ATMTeam".to_owned(),
+            summary: "Every mod that matters, curated and tested, with a quest book to hold it together.".to_owned(),
+            tags: tags(&[("Kitchen sink", Glyph::Boxes), ("NeoForge", Glyph::Box)]),
+            downloads: "4.88M".to_owned(),
+            followers: "1,512".to_owned(),
+            updated: "6 days ago".to_owned(),
+            icon: "https://cdn.modrinth.com/data/CfpXILxG/832f62314350e237f299f2ee39d90fb7d85b6419_96.webp".to_owned(),
         },
     ]
 }
+
+/// Cut `text` to a two-line card's worth, with an ellipsis when something was removed.
+///
+/// A character count rather than a pixel measurement: the summary's font is fixed at 13.5 and
+/// its measure at 440, so the two are proportional, and a count is testable without a painter.
+fn ellipsise(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_owned();
+    }
+    let mut cut: String = text.chars().take(limit.saturating_sub(1)).collect();
+    // Cut at a word boundary when there is one near the limit, so the card does not end on a
+    // half word the way a hard slice does.
+    if let Some(space) = cut.rfind(' ') {
+        if space > limit / 2 {
+            cut.truncate(space);
+        }
+    }
+    cut.push('\u{2026}');
+    cut
+}
+
