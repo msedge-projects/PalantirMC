@@ -51,3 +51,17 @@ sift-core = { path = "../sift-core" }
 # some projects still on `.png`), so both decoders are needed and neither is speculative.
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# The release profile this workspace ships with.
+#
+# A nested workspace inherits nothing, so the root's `lto = true` / `strip = true` never applied
+# here and the exe that shipped was an unstripped default-release build -- bigger on disk and
+# slower to page in than it needed to be. `panic = "abort"` is the owner's accepted trade: a
+# panic ends the process instead of unwinding, which is what a GUI wants and what removes the
+# landing pads this binary will never use.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
