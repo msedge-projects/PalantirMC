@@ -86,7 +86,7 @@ the rename first among product work, so nothing is renamed twice.
 | --- | --- | --- |
 | **L0** | Parity harness + lightness baselines: `tools/parity/*`, `tools/lightness.py`, Modrinth app and our Linux build installed on `sift-launcher`, captures working | one page captured side by side end to end; baselines recorded in `NOTES.md` |
 | **R1** | Rename: repo `SiftLauncher`, crates `sift-core/-net/-loader/-desktop/-ui`, `PRODUCT_NAME`, window id, env vars (`SIFT_*`, old read once), prefs file, log/pid names, CI artifacts, **fresh data dirs** (`%APPDATA%\SiftLauncher`, no migration) | both workspaces build; `palantir` survives only in `NOTES.md` history and `vendor/` |
-| **R2** | Brand: `gen_brand.py` rewritten for the RGBA source → `logo512.png`, `icon256.png`, `app.ico`; About page; installer text | `--check` passes; the new mark in title bar, hero and taskbar |
+| **R2** | Brand: `gen_brand.py` rewritten for the RGBA source → `logo512.png`, `icon256.png`, `app.ico`, `installer/sift.ico`; About page; installer text | `--check` passes; the new mark in title bar, hero and taskbar |
 | **A1** | egui chrome 1:1: window, title bar, rail, panel, the nine scroll regions | rail/head/panel pass their parity gates; p95 ≤ 20 ms |
 | **A2** | Motion 1:1: hover/press/focus states and **the reference's durations**, fastframe scroll step, tab transitions | transition-duration gate per component (±16 ms); hover states pixel-compared |
 | **B1–B3** | `sift-store`: `store.rs` (4,021) + `prefs.rs` (1,034) out of the UI crate, 119 call sites across 18 modules inverted | both stacks on it; iced still builds; tests green |

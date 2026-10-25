@@ -1,226 +1,689 @@
 #!/usr/bin/env python3
-"""Derive the launcher's hero logo and window icon from the brand source art.
+"""Derive the launcher's brand assets from the Sift mark.
 
-The two files the GUI embeds are crops of `assets/brand/palantirmc.png`, and this
-is what takes the crop, so the derivation is a command rather than a paragraph
-somebody has to re-invent on the next logo:
+    python tools/gen_brand.py              # write the two PNGs and both .ico files
+    python tools/gen_brand.py --check      # fail if the files on disk are not these bytes
+    python tools/gen_brand.py --report     # the measurements, plus each icon entry
+    python tools/gen_brand.py --self-test  # prove a change to the source's alpha changes these
 
-    python tools/gen_brand.py            # write logo512.png and icon256.png
-    python tools/gen_brand.py --check    # fail if the files on disk are not these bytes
-    python tools/gen_brand.py --report   # the measurements the crop was taken from
+Four files, one drawing:
 
-## Why the source art is not embedded as it stands
+* `assets/brand/logo512.png` (512x512 RGBA) -- the welcome hero and title mark.
+* `assets/brand/icon256.png` (256x256 RGBA) -- the window and taskbar icon.
+* `assets/brand/app.ico` -- the exe's icon, for `build.rs` and the resource compiler.
+* `installer/sift.ico` -- the same bytes for the installer, which reads its icon
+  from a path beside its own script and so cannot share the file.
 
-The art is drawn on a black tile, and `include_bytes!`-ing it would put that tile
-in the window: a black square beside the welcome copy and in the taskbar, on a UI
-whose own surfaces are dark but not black. So the backdrop becomes transparency,
-which is the first thing this does.
+## The alpha is the source's, not this tool's
 
-## From black to alpha
-
-Black is exactly zero, so a pixel's own brightest channel *is* its alpha: a
-stroke of the mark at full strength has one channel at 255, and a pixel of the
-glow around it is as opaque as its strongest channel says. Nothing has to be
-guessed or keyed, and no colour that is genuinely dark inside the mark is cut
-out, because a dark colour has a low brightest channel -- which is the same
-measure as its opacity.
-
-The colour is then divided back out of that alpha. Left as measured, the source
-pixels are already premultiplied, and compositing premultiplied colour over a
-dark surface darkens it twice: a glow pixel of `(60, 120, 30)` would draw as
-`(28, 56, 14)`. Dividing it by its own alpha restores the colour the art has, so
-the mark lands on the UI at the brightness it was drawn at, and the glow
-*lightens* what is under it -- which is what a glow is for.
-
-Pixels below 8/255 are cleared outright. That is not tidiness: it is the
-resampler's ringing and the last of the glow, and kept, they turn into a grey
-haze in the corners of the tile.
+The source, `assets/brand/sift-logo-source.png`, is drawn on a real
+transparent background. The recipe this script carried before was written for a
+mark that sat on a black tile: alpha was *derived* from each pixel's brightest
+channel, because black is zero and so the brightest channel was the opacity.
+Run that on art that already has alpha and it destroys the drawing -- a dark
+edge inside the mark reads as nearly transparent, every solid dark stroke comes
+back as a haze, and the old tile's silhouette is re-added as a halo. So nothing
+here derives anything. The alpha channel is taken as given and used for two
+things only: finding the mark, and deciding which pixels count as empty.
 
 ## The crop
 
-The mark is taller than it is wide, so a square crop of the source would either
-clip it or leave it small and off-centre. Instead the ink's own bounding box is
-measured and a square is centred on it, sized so the mark's longest side covers
-91% of it -- the proportion the first mark in this tree was cropped at, and the
-one that leaves a margin that is even on all four sides. Centred matters twice
-over: `brand::tests::window_icon_decodes_to_256_square` asserts the icon's ink is
-centred in its square, and a crop that is not centred on the ink fails it.
+The ink box is the bounding box of every pixel with alpha above 8 -- low enough
+to keep the softest stroke the artist drew, high enough to ignore an encoder's
+rounding noise. A square is centred on that box with the mark's longest side
+covering 91% of it: the proportion the previous mark in this tree was cropped
+at, kept so the hero tile and the taskbar are framed as they were. Centred
+matters twice over -- `brand.rs`'s `window_icon_decodes_to_256_square` asserts
+the ink is centred in its square -- and the square slides back inside the
+source if centring would hang it off an edge, because the mark cannot be asked
+to move.
 
 ## Resampling
 
-Each output is resampled straight from the crop -- one Lanczos pass, not a chain
-of them -- in premultiplied space, which is the only way alpha can be averaged
-without dragging the mark's edge towards the black that is no longer there. The
-floor is applied again afterwards, because resampling lifts it.
+One Lanczos pass per output size, straight from that square, in premultiplied
+space: colour is multiplied by alpha before it is filtered and divided back out
+after, so a stroke's edge averages against its own colour rather than against
+the transparent black behind it -- which is where the dark fringe on
+transparent art comes from. The division rounds, and alpha below 8 is cleared
+again afterwards because the filter lifts the floor back up.
+
+## The icon
+
+Seven sizes -- 16, 24, 32, 48, 64, 128 and 256 -- each a classic BMP entry: a
+40-byte BITMAPINFOHEADER, the pixels as 32-bit BGRA bottom-up, and an all-zero
+AND mask padded to four bytes a row. PNG-compressed entries are smaller and
+newer and are deliberately not used: NSIS refuses them, and `brand.rs`'s icon
+test holds the entry arithmetic (`40 + w*h*4 + stride*h`), which is the part a
+resource compiler and Explorer depend on. The container is assembled here
+rather than handed to Pillow's ICO writer, because that writer resizes each
+frame itself, through `thumbnail` in straight alpha -- the dark fringe again at
+the sizes where it shows most -- and writes a plane count of zero.
+
+## Which renderer
+
+Pillow if it imports -- the fast path, and the one the committed files were
+written with. Otherwise ImageMagick (`magick`, or `convert` on 6.x), which does
+the same work with `-alpha premultiply` / `-alpha unpremultiply`. If neither is
+installed the tool stops and names what to install rather than guessing.
+ImageMagick is recognised by its `-version` banner, not by the executable's
+name: Windows ships an unrelated `convert.exe`.
+
+`--check` compares bytes, and the pixels are the resampler's: Pillow and
+ImageMagick filter a fractional edge differently, and two Pillow versions can
+differ by a least-significant bit. So it is the command a person runs after
+touching the art, on the machine that wrote the files, which is how `GATES.md`
+and `brand.rs` describe it. What holds in CI is the container's shape, in
+`brand.rs`'s icon test, and that does not depend on an encoder.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
+import re
+import shutil
+import struct
+import subprocess
 import sys
+import tempfile
 from io import BytesIO
 from pathlib import Path
-
-import numpy as np
-from PIL import Image
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 BRAND = ROOT / "crates" / "palantir-desktop" / "assets" / "brand"
-SOURCE = BRAND / "palantirmc.png"
+SOURCE = BRAND / "sift-logo-source.png"
 
-# The two embedded files, with the side each is cut at.
+# The two embedded PNGs, with the side each is rendered at.
 OUTPUTS = [(BRAND / "logo512.png", 512), (BRAND / "icon256.png", 256)]
 
-# Below this alpha a pixel is the resampler's tail rather than the mark.
+# The exe's icon and the installer's copy of it: one file's bytes, two paths.
+ICON = BRAND / "app.ico"
+INSTALLER_ICON = ROOT / "installer" / "sift.ico"
+
+# The sizes Windows asks for: 16 and 32 in the shell's lists, 24 and 48 on the
+# desktop, 64 for the Alt-Tab preview, 128 and 256 for the large-icon views.
+ICON_SIZES = [16, 24, 32, 48, 64, 128, 256]
+
+# At or below this alpha a pixel is empty: the softest stroke the artist drew
+# is above it, and an encoder's rounding noise is below it.
 ALPHA_FLOOR = 8
 
 # The mark's longest side, as a fraction of the square crop's side.
 INK_SHARE = 0.91
 
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
-def isolated(path: Path) -> np.ndarray:
-    """The source art as RGBA: black backdrop to alpha, colour divided back out."""
-    rgb = np.asarray(Image.open(path).convert("RGB"), dtype=np.uint16)
-    alpha = rgb.max(axis=2)
-    # Rounded division rather than truncation: `156 * 255 / 251` is 158.5 and the
-    # art's own stroke colour, so rounding keeps it at 158 instead of darkening
-    # every bright pixel by the same half step.
-    colour = np.where(
-        alpha[..., None] > 0,
-        np.minimum(255, (rgb * 255 + alpha[..., None] // 2) // np.maximum(alpha[..., None], 1)),
-        0,
-    ).astype(np.uint8)
-    rgba = np.dstack([colour, alpha.astype(np.uint8)])
-    rgba[alpha < ALPHA_FLOOR] = 0
-    return rgba
+# `straight = round(premultiplied * 255 / alpha)`, tabulated for every
+# (alpha, channel) pair so the division is one lookup instead of a pass over
+# the image deciding what to divide by.
+_RECIPROCAL = bytes(
+    min(255, (channel * 255 + alpha // 2) // alpha) if alpha else 0
+    for alpha in range(256)
+    for channel in range(256)
+)
 
 
-def ink_box(rgba: np.ndarray) -> tuple[int, int, int, int]:
-    """`(left, top, right, bottom)` of everything at or above the alpha floor."""
-    ys, xs = np.nonzero(rgba[..., 3] >= ALPHA_FLOOR)
-    if not len(xs):
-        raise SystemExit(f"{SOURCE.name}: no artwork above the alpha floor")
-    return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+class BackendMissing(Exception):
+    """Neither imaging path could be loaded."""
 
 
-def crop(rgba: np.ndarray) -> np.ndarray:
-    """The square around the mark's ink box that both outputs are cut from."""
-    height, width = rgba.shape[:2]
-    left, top, right, bottom = ink_box(rgba)
-    side = int(math.ceil(max(right - left + 1, bottom - top + 1) / INK_SHARE))
-    side = min(side, width, height)
-    # Centre on the ink, then slide back inside the source if that would hang off
-    # an edge -- the mark is not centred in its own tile, and cannot be asked to
-    # move, so the crop is what gives.
-    x0 = int(round((left + right + 1) / 2 - side / 2))
-    y0 = int(round((top + bottom + 1) / 2 - side / 2))
-    x0 = max(0, min(x0, width - side))
-    y0 = max(0, min(y0, height - side))
-    return rgba[y0:y0 + side, x0:x0 + side]
+# --------------------------------------------------------------------------
+# The recipe, which is the same whichever renderer carries it out
+# --------------------------------------------------------------------------
 
 
-def resample(rgba: np.ndarray, side: int) -> np.ndarray:
-    """One Lanczos pass to `side` square, averaged as premultiplied colour.
+def square_box(
+    ink: tuple[int, int, int, int], size: tuple[int, int]
+) -> tuple[int, int, int]:
+    """`(left, top, side)` of the square every output is cut from.
 
-    Premultiplied because the alternative averages a stroke's edge against the
-    transparent black around it and draws a dark rim no pixel of the art has.
-    Each plane goes through PIL as 8-bit, which is where the integer truncation
-    `NOTES.md` measures comes from.
+    `ink` is `(left, top, right, bottom)`, right and bottom exclusive, the way
+    `getbbox()` returns it, and `size` is the source's `(width, height)`.
     """
-    if rgba.shape[0] == side and rgba.shape[1] == side:
-        return rgba.copy()
-    alpha = rgba[..., 3]
-    premultiplied = [
-        (rgba[..., channel].astype(np.uint16) * alpha // 255).astype(np.uint8)
-        for channel in range(3)
-    ]
-    planes = [
-        np.asarray(Image.fromarray(plane).resize((side, side), Image.LANCZOS), dtype=np.uint16)
-        for plane in premultiplied
-    ]
-    scaled_alpha = np.asarray(
-        Image.fromarray(alpha).resize((side, side), Image.LANCZOS), dtype=np.uint16
+    left, top, right, bottom = ink
+    width, height = right - left, bottom - top
+    if width <= 0 or height <= 0:
+        raise SystemExit(f"{SOURCE.name}: no artwork above alpha {ALPHA_FLOOR}")
+    side = int(math.ceil(max(width, height) / INK_SHARE))
+    side = min(side, size[0], size[1])
+    x0 = round((left + right) / 2 - side / 2)
+    y0 = round((top + bottom) / 2 - side / 2)
+    x0 = max(0, min(x0, size[0] - side))
+    y0 = max(0, min(y0, size[1] - side))
+    return x0, y0, side
+
+
+def compose(image_module: Any, planes: list[Any], alpha: Any) -> Any:
+    """The RGBA raster: colour divided back out of alpha, then the floor applied.
+
+    `planes` are the premultiplied R, G and B bands after the same resize as
+    `alpha`. A pixel below the floor is cleared outright -- colour as well as
+    alpha, so a compositor that ignores alpha at small sizes cannot paint the
+    filter's ringing.
+    """
+    cover = alpha.tobytes()
+    red, green, blue = (plane.tobytes() for plane in planes)
+    out = bytearray(len(cover) * 4)
+    for index, value in enumerate(cover):
+        if value < ALPHA_FLOOR:
+            continue
+        at = index * 4
+        row = value << 8
+        out[at] = _RECIPROCAL[row + red[index]]
+        out[at + 1] = _RECIPROCAL[row + green[index]]
+        out[at + 2] = _RECIPROCAL[row + blue[index]]
+        out[at + 3] = value
+    return image_module.frombytes("RGBA", alpha.size, bytes(out))
+
+
+def bgra_bottom_up(rgba: bytes, side: int) -> bytes:
+    """The XOR bitmap of one icon entry: BGRA, the last row first.
+
+    The format stores its rows the way a DIB does, which is upside down
+    relative to every PNG in this tree. Swapping the red and blue planes and
+    reversing the rows wholesale keeps this a handful of slice copies rather
+    than a loop over a quarter of a million pixels.
+    """
+    swapped = bytearray(len(rgba))
+    swapped[0::4] = rgba[2::4]
+    swapped[1::4] = rgba[1::4]
+    swapped[2::4] = rgba[0::4]
+    swapped[3::4] = rgba[3::4]
+    stride = side * 4
+    out = bytearray(len(rgba))
+    for row in range(side):
+        start = (side - 1 - row) * stride
+        out[row * stride:(row + 1) * stride] = swapped[start:start + stride]
+    return bytes(out)
+
+
+def icon_entry(side: int, rgba: bytes) -> bytes:
+    """One ICONDIRENTRY's image: BITMAPINFOHEADER, XOR bitmap, AND mask."""
+    if len(rgba) != side * side * 4:
+        raise SystemExit(f"the {side}px icon frame is {len(rgba)} bytes, not {side * side * 4}")
+    bitmap = bgra_bottom_up(rgba, side)
+    # The mask is all zero because a 32-bit entry carries its alpha in the XOR
+    # bitmap; it still has to be there, padded to four bytes a row, because the
+    # entry's height covers both bitmaps and a reader sizes the second from the
+    # first.
+    stride = ((side + 31) // 32) * 4
+    mask = bytes(stride * side)
+    header = struct.pack(
+        "<IiiHHIIiiII",
+        40,  # biSize
+        side,  # biWidth
+        side * 2,  # biHeight: the XOR bitmap and the AND mask together
+        1,  # biPlanes
+        32,  # biBitCount
+        0,  # biCompression: BI_RGB
+        len(bitmap) + len(mask),  # biSizeImage
+        0, 0, 0, 0,  # resolution and palette, unused at 32 bits
     )
-    out = np.zeros((side, side, 4), dtype=np.uint8)
-    divisor = np.maximum(scaled_alpha, 1)
-    for channel, plane in enumerate(planes):
-        out[..., channel] = np.where(
-            scaled_alpha > 0,
-            np.minimum(255, (plane * 255 + divisor // 2) // divisor),
-            0,
-        ).astype(np.uint8)
-    out[..., 3] = scaled_alpha
-    out[scaled_alpha < ALPHA_FLOOR] = 0
-    return out
+    entry = header + bitmap + mask
+    # The same sum `brand.rs`'s icon test makes, checked before it is written.
+    expected = 40 + side * side * 4 + stride * side
+    if len(entry) != expected:
+        raise SystemExit(f"the {side}px icon entry is {len(entry)} bytes, not {expected}")
+    return entry
 
 
-def encoded(rgba: np.ndarray) -> bytes:
-    """The PNG bytes for one output.
+def ico_file(frames: list[tuple[int, bytes]]) -> bytes:
+    """The ICO: ICONDIR, one ICONDIRENTRY per size, then each size's entry."""
+    expected = sorted(ICON_SIZES)
+    if [side for side, _ in frames] != expected:
+        raise SystemExit(f"icon frames are {[side for side, _ in frames]}, not {expected}")
+    entries = [(side, icon_entry(side, rgba)) for side, rgba in frames]
+    header = struct.pack("<HHH", 0, 1, len(entries))
+    offset = len(header) + 16 * len(entries)
+    directory = b""
+    for side, entry in entries:
+        stored = side if side < 256 else 0  # zero is the format's way of saying 256
+        directory += struct.pack(
+            "<BBBBHHII",
+            stored,  # width
+            stored,  # height
+            0,  # palette colours: none, this is true colour
+            0,  # reserved
+            1,  # colour planes
+            32,  # bits per pixel: alpha is in the pixels
+            len(entry),
+            offset,
+        )
+        offset += len(entry)
+    return header + directory + b"".join(entry for _, entry in entries)
 
-    Encoded through a buffer rather than straight to disk so `--check` can
-    compare what this tool would write against what is committed without touching
-    the tree when they differ.
+
+def build(
+    backend: Any, source: Path
+) -> tuple[list[tuple[Path, int | None, bytes]], dict[str, Any]]:
+    """Every output as `(path, side or None, bytes)`, plus the measurements.
+
+    Built entirely in memory (or in the backend's scratch directory) so
+    `--check` can compare against the tree without touching it.
     """
-    buffer = BytesIO()
-    Image.fromarray(rgba).save(buffer, format="PNG", optimize=True)
-    return buffer.getvalue()
+    art = backend.load(source)
+    size = backend.size(art)
+    ink = backend.ink_box(art)
+    x0, y0, side = square_box(ink, size)
+    square = backend.crop(art, (x0, y0, side))
+    premultiplied = backend.premultiplied(square)
+
+    # One render per side, kept as a handle: `icon256.png` and the icon's 256
+    # entry are then the same pixels rather than two chances to disagree.
+    handles: dict[int, Any] = {}
+
+    def render(side_px: int) -> Any:
+        if side_px not in handles:
+            handles[side_px] = backend.straight(premultiplied, side_px)
+        return handles[side_px]
+
+    outputs: list[tuple[Path, int | None, bytes]] = [
+        (path, side_px, backend.png(render(side_px))) for path, side_px in OUTPUTS
+    ]
+    icon = ico_file([(side_px, backend.rgba(render(side_px), side_px)) for side_px in ICON_SIZES])
+    outputs.append((ICON, None, icon))
+    outputs.append((INSTALLER_ICON, None, icon))
+
+    facts = {
+        "size": size,
+        "ink": ink,
+        "square": (x0, y0, side),
+        "frames": [
+            (side_px, 40 + side_px * side_px * 4 + ((side_px + 31) // 32) * 4 * side_px)
+            for side_px in ICON_SIZES
+        ],
+    }
+    return outputs, facts
 
 
-def build() -> tuple[list[tuple[Path, bytes]], np.ndarray]:
-    """Every output as `(path, bytes)`, plus the crop they all come from."""
-    rgba = isolated(SOURCE)
-    square = crop(rgba)
-    return [(path, encoded(resample(square, side))) for path, side in OUTPUTS], square
+# --------------------------------------------------------------------------
+# Pillow: the preferred renderer
+# --------------------------------------------------------------------------
+
+
+class PillowBackend:
+    """Pillow does the filtering in C and the pixels stay in memory."""
+
+    name = "Pillow"
+
+    def __init__(self) -> None:
+        import PIL
+        from PIL import Image, ImageChops
+
+        self.Image = Image
+        self.ImageChops = ImageChops
+        self.lanczos = getattr(Image, "Resampling", Image).LANCZOS
+        self.label = f"Pillow {PIL.__version__}"
+
+    def load(self, path: Path) -> Any:
+        return self.Image.open(path).convert("RGBA")
+
+    def size(self, handle: Any) -> tuple[int, int]:
+        return handle.size
+
+    def ink_box(self, handle: Any) -> tuple[int, int, int, int]:
+        above = handle.getchannel("A").point(lambda value: 255 if value > ALPHA_FLOOR else 0)
+        box = above.getbbox()
+        if box is None:
+            raise SystemExit(f"{SOURCE.name}: no artwork above alpha {ALPHA_FLOOR}")
+        return box
+
+    def crop(self, handle: Any, box: tuple[int, int, int]) -> Any:
+        x0, y0, side = box
+        return handle.crop((x0, y0, x0 + side, y0 + side))
+
+    def premultiplied(self, handle: Any) -> Any:
+        alpha = handle.getchannel("A")
+        planes = [
+            self.ImageChops.multiply(band, alpha)
+            for band in handle.convert("RGB").split()
+        ]
+        return planes, alpha
+
+    def straight(self, premultiplied: Any, side: int) -> Any:
+        planes, alpha = premultiplied
+        scaled_alpha = alpha.resize((side, side), self.lanczos)
+        scaled = [plane.resize((side, side), self.lanczos) for plane in planes]
+        return compose(self.Image, scaled, scaled_alpha)
+
+    def png(self, handle: Any) -> bytes:
+        buffer = BytesIO()
+        handle.save(buffer, format="PNG", optimize=True)
+        return buffer.getvalue()
+
+    def rgba(self, handle: Any, side: int) -> bytes:
+        return handle.tobytes()
+
+    def clear_pixel(self, path: Path, point: tuple[int, int]) -> Path:
+        """A copy of `path` with one pixel's alpha cleared, for `--self-test`."""
+        image = self.Image.open(path).convert("RGBA")
+        image.putpixel(point, (0, 0, 0, 0))
+        touched = path.with_name(f"{path.stem}-perturbed.png")
+        image.save(touched, format="PNG")
+        return touched
+
+    def close(self) -> None:
+        pass
+
+
+# --------------------------------------------------------------------------
+# ImageMagick: the fallback, same recipe, one process per step
+# --------------------------------------------------------------------------
+
+
+def find_magick() -> str | None:
+    """The ImageMagick executable, if one is installed.
+
+    Validated by its banner rather than its name: `C:\\Windows\\system32\\
+    convert.exe` is the FAT-to-NTFS tool, it answers `-version` with an error,
+    and reading that as ImageMagick would fail in a far less obvious place.
+    `magick` is the 7.x name and `convert` the 6.x one.
+    """
+    for name in ("magick", "convert"):
+        exe = shutil.which(name)
+        if exe is None:
+            continue
+        try:
+            done = subprocess.run(
+                [exe, "-version"], capture_output=True, text=True, timeout=30
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if "ImageMagick" in (done.stdout or "") + (done.stderr or ""):
+            return exe
+    return None
+
+
+class MagickBackend:
+    """The same steps as `magick` commands, each writing a scratch PNG.
+
+    `-alpha premultiply` / `-alpha unpremultiply` are ImageMagick's own names
+    for the two halves of the resampling this tool needs; the floor is one
+    `-fx` pass, which is slow but only runs on the output sizes.
+    """
+
+    name = "ImageMagick"
+
+    def __init__(self, exe: str) -> None:
+        self.exe = exe
+        self.label = f"ImageMagick ({exe})"
+        self.scratch = tempfile.TemporaryDirectory(prefix="gen_brand_")
+        self.count = 0
+
+    def _run(self, arguments: list[str]) -> bytes:
+        command = [self.exe, *arguments]
+        done = subprocess.run(command, capture_output=True, check=False)
+        if done.returncode != 0:
+            detail = done.stderr.decode("utf-8", "replace").strip()
+            raise SystemExit(f"{self.exe} failed: {' '.join(command)}\n{detail}")
+        return done.stdout
+
+    def _out(self) -> Path:
+        self.count += 1
+        return Path(self.scratch.name) / f"{self.count:02d}.png"
+
+    def load(self, path: Path) -> Any:
+        text = self._run([str(path), "-format", "%w %h", "info:"]).decode()
+        width, height = (int(value) for value in text.split())
+        return path, (width, height)
+
+    def size(self, handle: Any) -> tuple[int, int]:
+        return handle[1]
+
+    def ink_box(self, handle: Any) -> tuple[int, int, int, int]:
+        # A black border first, so the box is measured against black even if
+        # the art reaches a corner, and then shifted back by that border.
+        text = self._run(
+            [
+                str(handle[0]),
+                "-alpha", "extract",
+                "-threshold", f"{ALPHA_FLOOR}/255",
+                "-bordercolor", "black",
+                "-border", "1",
+                "-format", "%@",
+                "info:",
+            ]
+        ).decode().strip()
+        matched = re.fullmatch(r"(\d+)x(\d+)\+(\d+)\+(\d+)", text)
+        if matched is None:
+            raise SystemExit(
+                f"{self.exe}: cannot read the ink box from {handle[0].name}: {text!r}"
+            )
+        width, height, x0, y0 = (int(value) for value in matched.groups())
+        if width <= 0 or height <= 0:
+            raise SystemExit(f"{SOURCE.name}: no artwork above alpha {ALPHA_FLOOR}")
+        left, top = x0 - 1, y0 - 1
+        return left, top, left + width, top + height
+
+    def crop(self, handle: Any, box: tuple[int, int, int]) -> Any:
+        x0, y0, side = box
+        out = self._out()
+        self._run(
+            [str(handle[0]), "-crop", f"{side}x{side}+{x0}+{y0}", "+repage", str(out)]
+        )
+        return out, (side, side)
+
+    def premultiplied(self, handle: Any) -> Any:
+        out = self._out()
+        self._run(
+            [
+                str(handle[0]),
+                "-alpha", "on",
+                "-alpha", "premultiply",
+                "-depth", "8",
+                "-define", "png:color-type=6",
+                str(out),
+            ]
+        )
+        return out, handle[1]
+
+    def straight(self, premultiplied: Any, side: int) -> Any:
+        out = self._out()
+        self._run(
+            [
+                str(premultiplied[0]),
+                "-filter", "Lanczos",
+                "-resize", f"{side}x{side}!",
+                "-alpha", "unpremultiply",
+                "-channel", "RGBA",
+                "-fx", f"(a*255)<{ALPHA_FLOOR}?0:u",
+                "+channel",
+                "-depth", "8",
+                "-define", "png:color-type=6",
+                "-strip",
+                str(out),
+            ]
+        )
+        return out, (side, side)
+
+    def png(self, handle: Any) -> bytes:
+        return handle[0].read_bytes()
+
+    def rgba(self, handle: Any, side: int) -> bytes:
+        return self._run([str(handle[0]), "-depth", "8", "rgba:-"])
+
+    def clear_pixel(self, path: Path, point: tuple[int, int]) -> Path:
+        x, y = point
+        touched = path.with_name(f"{path.stem}-perturbed.png")
+        self._run(
+            [
+                str(path),
+                "(", "-size", "1x1", "xc:transparent", ")",
+                "-geometry", f"+{x}+{y}",
+                "-compose", "Copy",
+                "-composite",
+                str(touched),
+            ]
+        )
+        return touched
+
+    def close(self) -> None:
+        self.scratch.cleanup()
+
+
+def choose_backend() -> Any:
+    """Pillow if it imports, else ImageMagick, else a message naming both."""
+    try:
+        return PillowBackend()
+    except ImportError:
+        pass
+    exe = find_magick()
+    if exe is not None:
+        return MagickBackend(exe)
+    raise BackendMissing(
+        "no imaging backend: this tool needs Pillow or ImageMagick.\n"
+        "  install one of them, then re-run:\n"
+        "    python -m pip install Pillow\n"
+        "    winget install ImageMagick.ImageMagick   (or: scoop install imagemagick)\n"
+        "  ImageMagick has to be on PATH as `magick` (7.x) or `convert` (6.x)."
+    )
+
+
+# --------------------------------------------------------------------------
+# Reporting and the modes
+# --------------------------------------------------------------------------
+
+
+def digest(blob: bytes) -> str:
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def report(
+    backend: Any,
+    facts: dict[str, Any],
+    outputs: list[tuple[Path, int | None, bytes]],
+    entries: bool,
+) -> None:
+    """The measurements, one short line each -- the same in every mode."""
+    width, height = facts["size"]
+    left, top, right, bottom = facts["ink"]
+    x0, y0, side = facts["square"]
+    ink_w, ink_h = right - left, bottom - top
+    print(f"backend   {backend.label}")
+    print(f"source    {SOURCE.name} {width}x{height}")
+    print(
+        f"ink box   {left},{top}..{right - 1},{bottom - 1} "
+        f"({ink_w}x{ink_h}, alpha > {ALPHA_FLOOR})"
+    )
+    print(
+        f"square    {side}x{side} at {x0},{y0} "
+        f"(mark {100 * max(ink_w, ink_h) / side:.1f}% of the side)"
+    )
+    for path, side_px, blob in outputs:
+        drawn = f"{side_px}x{side_px}" if side_px else f"{len(facts['frames'])} BMP entries"
+        print(f"{path.name:<13} {drawn:<17} {len(blob):>8} bytes  sha256 {digest(blob)}")
+    # Each entry's computed length, always: this is the sum `brand.rs`'s icon
+    # test asserts, so a change to the container shows up here as well as there.
+    print(
+        "entries   "
+        + " ".join(f"{side_px}:{length}" for side_px, length in facts["frames"])
+        + " bytes"
+    )
+    if entries:
+        # The same numbers spelled out, because the test's arithmetic is a sum.
+        for side_px, length in facts["frames"]:
+            stride = ((side_px + 31) // 32) * 4
+            print(
+                f"  entry {side_px:>3}x{side_px:<3} {length:>7} bytes "
+                f"= 40 + {side_px * side_px * 4} + {stride * side_px}"
+            )
+
+
+def self_test(
+    backend: Any,
+    baseline: list[tuple[Path, int | None, bytes]],
+    facts: dict[str, Any],
+) -> int:
+    """Clear one source pixel in a temp copy and prove the outputs move with it.
+
+    This is the check `--check` cannot make on its own: it shows the derived
+    bytes are a function of the source's alpha rather than of anything cached,
+    and it needs no write to the tree.
+    """
+    point = (facts["size"][0] // 2, facts["size"][1] // 2)
+    with tempfile.TemporaryDirectory(prefix="gen_brand_selftest_") as scratch:
+        copy = Path(scratch) / SOURCE.name
+        copy.write_bytes(SOURCE.read_bytes())
+        touched = backend.clear_pixel(copy, point)
+        perturbed, _ = build(backend, touched)
+
+    before = {path.name: digest(blob) for path, _, blob in baseline}
+    after = {path.name: digest(blob) for path, _, blob in perturbed}
+    print(f"self-test cleared alpha at {point[0]},{point[1]} in a temp copy of {SOURCE.name}")
+    unchanged = [name for name in before if before[name] == after[name]]
+    for name in before:
+        state = "unchanged" if name in unchanged else "changed"
+        print(f"self-test {name:<13} {state:<9} {before[name]} -> {after[name]}")
+    if unchanged:
+        print(
+            f"self-test failed: {', '.join(unchanged)} ignored the source's alpha",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"self-test all {len(before)} outputs follow the source's alpha")
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--check", action="store_true",
-                        help="fail if the files on disk are not what this would write")
-    parser.add_argument("--report", action="store_true",
-                        help="print the measurements the crop was taken from")
+    parser.add_argument(
+        "--check", action="store_true",
+        help="fail if the files on disk are not what this would write",
+    )
+    parser.add_argument(
+        "--report", action="store_true",
+        help="the measurements and each icon entry, writing nothing",
+    )
+    parser.add_argument(
+        "--self-test", action="store_true",
+        help="prove a one-pixel change to the source's alpha changes the outputs",
+    )
     args = parser.parse_args()
 
     if not SOURCE.is_file():
         print(f"missing brand art: {SOURCE}", file=sys.stderr)
         return 2
 
-    outputs, square = build()
-    if args.report:
-        rgba = isolated(SOURCE)
-        left, top, right, bottom = ink_box(rgba)
-        print(f"source      {SOURCE.name}: {rgba.shape[1]}x{rgba.shape[0]}")
-        print(f"ink box     {left},{top}..{right},{bottom} "
-              f"({right - left + 1}x{bottom - top + 1}, "
-              f"{100 * max(right - left + 1, bottom - top + 1) / rgba.shape[1]:.1f}% of the source)")
-        print(f"crop        {square.shape[1]}x{square.shape[0]} "
-              f"(ink covers {100 * max(right - left + 1, bottom - top + 1) / square.shape[1]:.1f}%)")
-        for path, blob in outputs:
-            plane = np.asarray(Image.open(BytesIO(blob)), dtype=np.uint8)
-            alpha = plane[..., 3]
-            opaque = int((alpha == 255).sum())
-            print(f"{path.name:<13} {plane.shape[1]}x{plane.shape[0]} "
-                  f"{len(blob)} bytes, clear {int((alpha == 0).sum())/(alpha.size):.1%}, "
-                  f"opaque {opaque}, ink {int(alpha.astype(np.uint64).sum())}")
+    try:
+        backend = choose_backend()
+    except BackendMissing as error:
+        print(str(error), file=sys.stderr)
+        return 2
 
-    if args.check:
-        stale = [
-            path for path, blob in outputs
-            if not path.is_file() or path.read_bytes() != blob
-        ]
-        if stale:
-            for path in stale:
-                print(f"{path.relative_to(ROOT)} is not what this tool writes", file=sys.stderr)
-            print("Run `python tools/gen_brand.py` and commit the result.", file=sys.stderr)
-            return 1
-        print(f"{len(outputs)} brand files are current")
+    try:
+        outputs, facts = build(backend, SOURCE)
+        if args.self_test:
+            report(backend, facts, outputs, entries=False)
+            return self_test(backend, outputs, facts)
+
+        report(backend, facts, outputs, entries=args.report)
+
+        if args.check:
+            stale = [
+                path for path, _, blob in outputs
+                if not path.is_file() or path.read_bytes() != blob
+            ]
+            if stale:
+                for path in stale:
+                    print(f"{path.relative_to(ROOT)} is not what this tool writes", file=sys.stderr)
+                print("Run `python tools/gen_brand.py` and commit the result.", file=sys.stderr)
+                return 1
+            print(f"{len(outputs)} brand files are current")
+            return 0
+
+        if args.report:
+            print("report only: nothing written")
+            return 0
+
+        for path, _, blob in outputs:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(blob)
+        print(f"wrote {len(outputs)} brand files")
         return 0
-
-    for path, blob in outputs:
-        path.write_bytes(blob)
-        print(f"wrote {path.relative_to(ROOT)} ({len(blob)} bytes)")
-    return 0
+    finally:
+        backend.close()
 
 
 if __name__ == "__main__":

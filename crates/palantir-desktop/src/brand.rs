@@ -3,26 +3,30 @@
 //! The artwork lives in `assets/brand/` and is embedded with `include_bytes!`
 //! so the GUI never touches the disk to paint the logo:
 //!
-//! * `palantirmc.png` — the original 1254x1254 source art (kept for reference,
-//!   not embedded).
+//! * `sift-logo-source.png` — the 2048x2048 RGBA source art, drawn on a real
+//!   transparent background (kept for reference, not embedded).
 //! * `logo512.png` — the emblem, square-cropped with a small margin so it stays
 //!   centered, 512x512. This is what the welcome hero and the title bar paint.
 //! * `icon256.png` — the same crop at 256x256, for the window/taskbar icon.
+//! * `app.ico` — the same mark at the seven sizes Windows asks for, which
+//!   `build.rs` hands to the resource compiler (not embedded here).
 //!
-//! Both derived files are RGBA with the source's pure-black backdrop turned
-//! into real transparency, so the emblem blends into the dark UI and the
-//! taskbar instead of sitting on a black tile. Alpha is the pixel's brightest
-//! channel (the backdrop is `#000000`, so black is exactly zero), resampled
-//! premultiplied and normalized so the emblem's core stays fully opaque;
-//! pixels below 8/255 are cleared outright, which drops the resampler's
-//! ringing and keeps the darkest glow from turning into grey haze.
+//! Both embedded files are RGBA and keep the source's own transparency, so the
+//! emblem blends into the dark UI and the taskbar instead of sitting on a tile.
+//! Nothing is keyed out to make that happen: the art already has an alpha
+//! channel, and that is what the crop is measured through -- the mark's ink box
+//! is the bounding box of every pixel above alpha 8. A square is centred on it
+//! with the mark's longest side filling 91% of the square, the same framing
+//! convention as the mark before this one, so the hero and the taskbar keep the
+//! margin they shipped with. Each output is one Lanczos pass from that square
+//! in premultiplied space -- averaging straight alpha against transparent black
+//! is what draws a dark rim -- and pixels below 8/255 are cleared outright,
+//! which drops the resampler's ringing and keeps the darkest glow from turning
+//! into grey haze.
 //!
-//! Both derived files come from `tools/gen_brand.py`, which is that recipe in
-//! code: it measures the mark's ink box, cuts a square centred on it with the
-//! mark filling 91% of the side -- 309x464 of the 512 tile, so the hero and the
-//! taskbar get the same framing -- and resamples that once per output in
-//! premultiplied space. Regenerate with `python tools/gen_brand.py`; `--check`
-//! fails if the files on disk are not what it writes.
+//! Every derived file comes from `tools/gen_brand.py`, which is that recipe in
+//! code. Regenerate with `python tools/gen_brand.py`; `--check` fails if the
+//! files on disk are not what it writes.
 
 use iced::widget::image::Handle;
 use iced::window::Icon;
@@ -269,7 +273,7 @@ mod tests {
     /// `build.rs` hands `assets/brand/app.ico` to the resource compiler, and a
     /// file that is not a valid icon there is not an error anybody sees: Windows
     /// falls back to its generic application icon and the exe looks unfinished.
-    /// The file is written by `tools/gen_app_icon.py` -- a Pillow tool, so `--check`
+    /// The file is written by `tools/gen_brand.py` -- a Pillow tool, so `--check`
     /// is a human's command rather than a CI step, exactly as `gen_brand.py` is --
     /// and this is what holds its shape in the build the runner sees.
     ///

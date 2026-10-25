@@ -6,7 +6,7 @@
 //! * **The icon.** Without a resource, Explorer, the taskbar, the Alt-Tab list
 //!   and the file's own properties sheet all show the generic application icon,
 //!   however carefully the window draws its own. `assets/brand/app.ico` is
-//!   written by `tools/gen_app_icon.py` from the brand art at the seven sizes
+//!   written by `tools/gen_brand.py` from the brand art at the seven sizes
 //!   Windows asks for.
 //! * **The version.** The exe carries `FileVersion`/`ProductVersion` so a user
 //!   reporting a bug can right-click the file and say which build they have, and

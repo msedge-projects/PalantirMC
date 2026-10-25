@@ -99,7 +99,7 @@ tag is one of the few actions that needs a human's go-ahead first (see
   arcs and smooth curves resolved to cubics. `--check` as above. The icons are
   outlines stroked in `currentColor` upstream, which is why they are geometry and
   not a bitmap — a bitmap cannot take the colour of the button it sits in.
-- `tools/gen_brand.py` — derives the two embedded brand files from the source art
+- `tools/gen_brand.py` — derives the two embedded brand files, the Windows icon and the installer's copy from the source art
   in `assets/brand/`: the source's black backdrop becomes alpha, the colour is
   divided back out of that alpha, and a square centred on the mark's ink box is
   resampled to 512 and 256. `--check` as above.

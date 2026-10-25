@@ -157,7 +157,8 @@ rather than a codec dependency.
 
 Also outstanding, and lower value:
 
-- `installer/sift.ico` has a generator now (2026-10-24): `tools/gen_app_icon.py`
+- `installer/sift.ico` and `crates/palantir-desktop/assets/brand/app.ico` have one
+generator (2026-10-25): `tools/gen_brand.py`
   writes it and `crates/palantir-desktop/assets/brand/app.ico` from the brand art,
   seven BMP entries, with `--check` like the animation's. Both files are the same
   bytes, because NSIS resolves relative paths against its own directory. The exe's

@@ -17,3 +17,6 @@ __pycache__/
 # The clean-room tree, parked here rather than deleted when the project went
 # back to the Modrinth port. Not part of any build.
 /.archive/
+
+# Parity captures: produced by tools/parity/*, compared and then discarded.
+out/

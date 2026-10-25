@@ -3878,15 +3878,17 @@ placeholder with no generator behind it, and the About page the comments refer t
 is not in the tree: it went with the old shell in G88, and the reference has no
 About page either.
 
-**The icon is generated, at both paths.** `tools/gen_app_icon.py` imports
-`gen_brand.py`'s recipe -- black to alpha, colour divided back out, crop to the ink
-at 91%, one Lanczos pass per size -- and writes seven entries (16, 24, 32, 48, 64,
-128, 256) as a container this tool builds itself. That last part is not
-wheel-reinvention: NSIS refuses an ICO whose entries are PNG-compressed and
-Pillow's writer picks PNG for the large sizes, so the file would build with the
-resource compiler and fail in the installer. `assets/brand/app.ico` is what
-`build.rs` embeds; `installer/sift.ico` is the same bytes beside the script that
-reads it, because NSIS resolves relative paths against its own directory.
+**The icon is generated, at both paths, from the RGBA source.** `tools/gen_brand.py`
+reads `sift-logo-source.png` (2048x2048, already transparent), measures the mark's
+ink box through the **alpha channel** -- the old recipe derived alpha from a black
+backdrop, which would erase this mark's own dark edges -- cuts a square at 91% of the
+side (the framing convention kept from the shipped art), resamples once per output in
+premultiplied space, and writes `logo512.png`, `icon256.png`, `app.ico` and
+`installer/sift.ico`. The ICO entries are **classic BMP** (40-byte header, BGRA rows,
+AND mask), not PNG-compressed: `brand.rs`'s gate asserts that byte layout, and rc.exe
+reads it without question. `--check` fails if any of the four is not what the tool
+writes. The old `tools/gen_app_icon.py` is gone; it imported `gen_brand`'s numpy
+helpers, and there is one generator for one icon.
 
 **`build.rs` is Windows-only and takes the version from `Cargo.toml`.** A build
 script that hardcoded `0.1.0` would be a second place a release has to be edited;
