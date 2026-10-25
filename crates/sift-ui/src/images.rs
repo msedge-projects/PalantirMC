@@ -130,7 +130,7 @@ fn fetch(url: &str) -> Result<ColorImage, String> {
     let result = sift_net::download_file(url, &path, Duration::from_secs(20))
         .map_err(|error| error.to_string());
     let bytes = match result {
-        Ok(()) => std::fs::read(&path).map_err(|error| error.to_string()),
+        Ok(_) => std::fs::read(&path).map_err(|error| error.to_string()),
         Err(error) => Err(error),
     };
     let _ = std::fs::remove_file(&path);
