@@ -321,6 +321,35 @@ button, and the toast is cheaper than a lie.
 | E-31 | Home list | our row is the reference's `Jump back in` row but the play button does not launch yet, and there is no per-row menu (edit, duplicate, delete, open folder) |
 | E-32 | Home | `Import from launcher` reports that it is not wired; the reference scans the other launchers it knows and lists what it found |
 
+### The launcher runs Minecraft — 2026-10-25
+
+Pressed the play pill on a quick-created instance in the egui app on the VM. What happened,
+in the order the data folder shows it:
+
+| Stage | Evidence |
+| --- | --- |
+| Java | `…/SiftLauncher/java/java-runtime-delta/bin/java`, **105 MB**, fetched and unpacked |
+| Libraries | `…/libraries/**`, **93 MB**, every one on the classpath |
+| Assets | `…/assets`, **413 MB** |
+| Client jar | `com/mojang/minecraft/1.21.4/minecraft-1.21.4-client.jar` |
+| Process | `net.minecraft.client.main.Main --username Player --version 1.21.4 --gameDir … --accessToken 0 --userType legacy` |
+| The game ran | the instance's own `minecraft/` grew `logs/`, `saves/`, `resourcepacks/` |
+| The window said so | the title bar chip read **`Running`** |
+
+That is the chain the whole rewrite was for: a page press, an input, a downloaded runtime, a
+spawned game, and a status the reader can see. Nothing in it is a mock — `sift-game` is the
+same engine the iced build used, moved whole.
+
+Three honest limits of that press, all named in the code: the account is the fixed offline
+`Player` (an online-mode server would refuse it), the monitor work-area probe is `None` (a
+maximized instance falls back to its configured size), and the game's own stdout is discarded
+(there is no log window yet, only the chip's state).
+
+**The architecture that made it possible in one slice:** the engine takes no UI type. Progress
+arrives as `install::Progress` on a channel, the work-area question arrives as a parameter, and
+the process spawn is a caller's `Command` -- so the egui shell wired a launch with a worker, a
+channel and a state machine, and no part of `sift-game` knows what a window is.
+
 ### Open after this pass
 
 | # | Region | What differs |
