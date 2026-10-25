@@ -91,6 +91,10 @@ pub struct Shell {
     results: crate::search::Search,
     /// The skins page's own state.
     skins: crate::pages::skins::State,
+    /// The screenshots page's own state.
+    screenshots: crate::pages::screenshots::State,
+    /// The servers page's own state.
+    servers: crate::pages::servers::State,
 }
 
 impl Default for Shell {
@@ -109,6 +113,8 @@ impl Default for Shell {
             search: crate::widgets::search::Search::default(),
             results: crate::search::Search::default(),
             skins: crate::pages::skins::State::default(),
+            screenshots: crate::pages::screenshots::State::default(),
+            servers: crate::pages::servers::State::default(),
         }
     }
 }
@@ -150,6 +156,30 @@ impl Shell {
                 }
                 None => false,
             }
+        } else if self.rail == Rail::Screenshots {
+            let rect = crate::pages::Page::Screenshots.rect();
+            ui.painter().rect_filled(rect, 0, self.theme.BG);
+            let theme = self.theme;
+            let result = crate::pages::screenshots::draw(
+                ui,
+                rect,
+                &theme,
+                &mut self.icons,
+                &mut self.screenshots,
+            );
+            result
+        } else if self.rail == Rail::Servers {
+            let rect = crate::pages::Page::Servers.rect();
+            ui.painter().rect_filled(rect, 0, self.theme.BG);
+            let theme = self.theme;
+            let result = crate::pages::servers::draw(
+                ui,
+                rect,
+                &theme,
+                &mut self.icons,
+                &mut self.servers,
+            );
+            result
         } else if self.rail == Rail::Skins {
             // The skins page owns its own state; the shell keeps it beside the others so the
             // selection survives a trip to another page.

@@ -12,6 +12,8 @@
 
 pub mod home;
 pub mod library;
+pub mod screenshots;
+pub mod servers;
 pub mod skins;
 pub mod project;
 
@@ -31,6 +33,10 @@ pub enum Page {
     Library,
     /// Skins: the player's own and the catalogue's.
     Skins,
+    /// Screenshots taken in any instance.
+    Screenshots,
+    /// Servers the launcher knows about.
+    Servers,
 }
 
 impl Page {
@@ -42,6 +48,8 @@ impl Page {
             // A project page's breadcrumb is its own name, which the shell supplies.
             Page::Project => "Project",
             Page::Library => "Library",
+            Page::Screenshots => "Screenshots",
+            Page::Servers => "Servers",
             Page::Skins => "Skins",
         }
     }
