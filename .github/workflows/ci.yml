@@ -141,6 +141,13 @@ jobs:
       - name: egui icon regeneration
         run: python tools/gen_icons_egui.py --check
 
+      # The brand generator has two imaging paths and they do not agree on dialect:
+      # the runner has ImageMagick 7 and no Pillow, so its fallback ran and IM 7 refused
+      # `-alpha premultiply`. Installing Pillow pins the gate to one implementation, which
+      # is what a byte-level check needs.
+      - name: Install Pillow
+        run: python -m pip install --quiet --disable-pip-version-check pillow
+
       # And the brand art: four files derived from one source, with a byte-level gate.
       - name: Brand art regeneration
         run: python tools/gen_brand.py --check

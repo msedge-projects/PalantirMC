@@ -75,6 +75,8 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod tests {
+    use crate::shell;
+
     /// The shell starts on Discover and animating nothing: a window that opens
     /// mid-animation draws a frame it did not need.
     #[test]
