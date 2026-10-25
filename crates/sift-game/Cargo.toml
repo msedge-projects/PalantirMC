@@ -14,6 +14,10 @@ license.workspace = true
 [dependencies]
 sift-core = { path = "../sift-core" }
 sift-net = { path = "../sift-net" }
+# The pack formats and the loader metadata the install plan reads: `install.rs` calls
+# `sift_loader::plan_pack`, `detect_format` and the mrpack applier, so this is a real
+# dependency and not the dev-dependency a test would justify.
+sift-loader = { path = "../sift-loader" }
 # The worker's event channel is a `futures` mpsc stream, which is what iced's
 # `subscription::channel` hands a subscription and what the egui shell can pump
 # from a thread too. It is not an iced type: iced appears nowhere in this crate.
