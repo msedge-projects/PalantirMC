@@ -227,13 +227,32 @@ def main() -> int:
     png = args.out / f"{args.page}-{args.state}-{slug}.png"
     if png.exists():
         png.unlink()
-    captured = run(["import", "-display", args.display, "-window", window, str(png)],
-                   timeout=60)
-    if captured.returncode != 0 or not png.exists():
+
+    # Read the whole screen and crop, rather than asking X for the window itself.
+    # On Xvfb there is no compositor to fight over and the windows are placed at the
+    # origin, so this is exact -- and it is the only form that works for every app
+    # here: `import -window <id>` blocks for the whole timeout on a GL surface, which
+    # is what the first attempt at our launcher did.
+    whole = args.out / f".{args.page}-{args.state}-{slug}-root.png"
+    captured = run(["import", "-display", args.display, "-window", "root", str(whole)],
+                   timeout=90)
+    if captured.returncode != 0 or not whole.exists():
         print(f"capture_x11: import failed: {captured.stderr.strip()}", file=sys.stderr)
         return 3
 
     x, y, width, height = rect_of(window)
+    if width <= 0 or height <= 0:
+        print(f"capture_x11: window {window} has no geometry", file=sys.stderr)
+        return 3
+    cropped = run(
+        ["convert", str(whole), "-crop", f"{width}x{height}+{x}+{y}", "+repage", str(png)],
+        timeout=90,
+    )
+    whole.unlink(missing_ok=True)
+    if cropped.returncode != 0 or not png.exists():
+        print(f"capture_x11: crop failed: {cropped.stderr.strip()}", file=sys.stderr)
+        return 3
+
     corners = ";".join(f"{r},{g},{b}" for r, g, b in sample_points(png))
     line = (
         f"app={slug} page={args.page} state={args.state} "
