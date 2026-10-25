@@ -78,3 +78,32 @@ python ../../tools/lightness.py --exe target/release/PalantirEgui.exe --check  #
 
 Exceeded rows print as `BUDGET exceeded: <name> <value> > <budget>`, and
 `--check` turns them into exit 1. A missing measurement is SKIP, never PASS.
+
+## Measured: the egui build, 2026-10-25
+
+`tools/lightness-measure.sh` on the `sift-launcher` VM, against the **debug** build (the one
+every capture is taken from), so these are a ceiling rather than a shipping number:
+
+| Budget | Limit | Measured (debug) | Verdict |
+| --- | --- | --- | --- |
+| Startup to first window | <= 400 ms | **65 ms** | passes with room |
+| Idle CPU | 0 ticks | **0 ticks over 10 s** | passes exactly |
+| Idle RSS | <= 120 MB | **134.1 MB** | **over by 14 MB** |
+| Release exe | <= the iced build (28.6 MB) | debug 304 MB; release measured separately | pending |
+
+Two of the three are already what the budget asks for, and the idle-CPU one is the design
+working: `App::ui` asks for a frame only while a hover, a glide, a search or an icon fetch is
+in flight, so a window with nothing happening draws nothing at all. Zero processor ticks over
+ten seconds is the measurement of that claim.
+
+**Idle RSS is the one that misses, and the debug build is most of the reason**: an
+unoptimised 304 MB binary has every touched code page resident, and the 2.7 MB generated icon
+table is debug-shaped. The honest test is the release build, so the script is run against it
+next; if a release build still sits above 120 MB the next steps in order are: drop the two
+Inter weights nothing uses (400/500/600/700/800 -> 400/600/800), load the icon table once
+rather than as a debug-sized const, and give the texture cache a bound (it currently keeps
+every icon it has ever fetched).
+
+The measurement itself is worth keeping as a habit rather than a number: startup is polled
+for the window rather than assumed from a sleep, RSS comes from `/proc/<pid>/status`, and idle
+CPU is a `utime+stime` delta over a ten-second window with the app untouched.
