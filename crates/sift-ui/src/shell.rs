@@ -560,7 +560,7 @@ impl Shell {
                 let results = sample_results();
                 let mut opened = false;
                 for index in 0..12 {
-                    let clicked = card(ui, &self.theme, &results[index % results.len()], &mut self.icons);
+                    let clicked = card(ui, &self.theme, index, &results[index % results.len()], &mut self.icons);
                     opened |= clicked;
                 }
                 if opened {
@@ -583,7 +583,13 @@ impl Shell {
 /// 96,104; the stats right-aligned on that same row; and the install button at the card's
 /// top-right corner. The card itself is 148 tall with a 12-point gap, which is what the
 /// reference's pitch between two card tops measures.
-fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>, icons: &mut crate::images::Images) -> bool {
+fn card(
+    ui: &mut Ui,
+    theme: &Theme,
+    index: usize,
+    result: &Card<'_>,
+    icons: &mut crate::images::Images,
+) -> bool {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, g::CARD), Sense::hover());
     let painter = ui.painter();
@@ -715,12 +721,11 @@ fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>, icons: &mut crate::images
 
     ui.add_space(g::CARD_GAP);
     // The whole card is the hit target; the reference navigates on a press anywhere on it.
-    ui.interact(
-        rect,
-        egui::Id::new(("result-card", result.title)),
-        Sense::click(),
-    )
-    .clicked()
+    // Keyed by row, not by title: the same project can legitimately appear twice in a list
+    // (two sources, a repeat), and duplicate widget ids make egui paint a clash warning and
+    // box the card in red.
+    ui.interact(rect, egui::Id::new(("result-card", index)), Sense::click())
+        .clicked()
 }
 
 /// What a result card shows. The reference's list carries these fields and no others.
