@@ -578,7 +578,7 @@ fn card(
     // The project's own icon once it has arrived; the plate until then, and for ever if the
     // fetch failed. Rounded corners are the tile's: a texture drawn into a square rect inside
     // a rounded plate keeps the plate's corner showing, which is what the reference does.
-    if let Some(texture) = icons.get(ui.ctx(), result.icon) {
+    if let Some(texture) = icons.get(ui.ctx(), &result.icon) {
         let inner = tile.shrink(2.0);
         painter.image(
             texture.id(),
