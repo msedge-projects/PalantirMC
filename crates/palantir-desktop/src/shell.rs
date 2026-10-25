@@ -4966,9 +4966,6 @@ impl Shell {
         // `PALANTIRMC_FRAME_LOG` names a file, so the shipped launcher pays one
         // environment lookup and an `Option` check per frame and nothing else.
         let _frame = crate::frame_log::begin();
-        // And the animation clock: it takes its next step when this frame is done,
-        // which is what keeps a glide off the beat between a timer and the display.
-        let _built = crate::scroll::FrameBuilt;
         // Keep the window's hit test pointed at the maximize control: the
         // rectangle is derived from this shell's own constants, so re-publishing
         // it is a store behind a lock rather than a measurement to keep in step.
@@ -11862,32 +11859,23 @@ impl Shell {
         if !self.animating() {
             return Subscription::none();
         }
-        // A thread and a channel rather than `iced::time::every`, which needs a
-        // futures-runtime feature this build does not enable -- the same
-        // arrangement the old shell's frame clock uses, and for the same reason.
-        // The subscription's life is the animation's: while nothing is moving it
-        // is not asked for, iced drops the receiver, and the thread's next send
-        // fails and ends it. That is also what keeps an idle window from waking
-        // the GPU sixty times a second to redraw the same picture.
-        iced::subscription::channel(FRAME_ID, 1, |mut sender| async move {
-            let _ = std::thread::spawn(move || loop {
-                // One step per frame *built*, not one per 16 ms. See
-                // [`crate::scroll::frame_built`]: a fixed sleep beats against the
-                // display's own present interval, and the beat is a visible hitch
-                // every second or so. The timeout is the fallback for a window that
-                // has stopped drawing.
-                crate::scroll::wait_for_frame(FRAME * 4);
-                match sender.try_send(Message::Tick) {
-                    Ok(()) => {}
-                    // Full: the UI is a frame or two behind. Frames are
-                    // droppable, so the animation skips ahead.
-                    Err(error) if error.is_full() => {}
-                    Err(_) => break,
-                }
-            });
-            loop {
-                futures::future::pending::<()>().await;
+        // **The compositor's own redraw, not a timer.** A thread sleeping 16 ms
+        // against a display presenting every 16.67 ms beats: the tick drifts a
+        // little further out of phase each frame, a step lands just after a
+        // present, and the animation waits a whole extra frame -- a visible hitch
+        // about once a second, which `PALANTIRMC_FRAME_LOG` shows as a p95 far
+        // above the p50 (26-62 ms against 16.1 on the machine that reported it).
+        //
+        // `RedrawRequested` is iced telling the application that a frame is about to
+        // be presented, so a tick per one of those is a step per displayed frame on
+        // any machine: it cannot drift, cannot queue, and cannot outrun the display.
+        // The subscription's life is the animation's -- while nothing moves it is
+        // not asked for, so an idle window draws nothing at all.
+        iced::event::listen_with(|event, _status| match event {
+            iced::Event::Window(_, iced::window::Event::RedrawRequested(_)) => {
+                Some(Message::Tick)
             }
+            _ => None,
         })
     }
 

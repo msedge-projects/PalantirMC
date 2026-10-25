@@ -117,61 +117,6 @@ pub fn id(name: &'static str) -> iced::widget::scrollable::Id {
     iced::widget::scrollable::Id::new(name)
 }
 
-// ---- The animation clock ------------------------------------------------
-
-/// Whether a frame has been built since the clock last took a step.
-static FRAME_BUILT: std::sync::Mutex<bool> = std::sync::Mutex::new(true);
-
-/// Wakes the clock when a frame is built.
-static FRAME_WAKE: std::sync::Condvar = std::sync::Condvar::new();
-
-/// Tell the animation clock that a frame is done.
-///
-/// **The clock steps after a frame, never on a timer**, and that is the whole of
-/// this handshake. A thread sleeping 16 ms against a display presenting every
-/// 16.67 ms beats: the tick drifts a little further out of phase every frame, so a
-/// step lands *just* after a present, misses it, and waits a whole extra frame --
-/// a visible hitch every second or so, and it shows up in `PALANTIRMC_FRAME_LOG` as
-/// a p95 far above the p50. A tick released by the frame that preceded it cannot
-/// drift, cannot queue, and cannot outrun the machine: a slow frame simply delays
-/// the next step.
-pub fn frame_built() {
-    if let Ok(mut built) = FRAME_BUILT.lock() {
-        *built = true;
-        FRAME_WAKE.notify_one();
-    }
-}
-
-/// Wait until a frame has been built, or `timeout` passes.
-///
-/// The timeout is the fallback for a window that has stopped drawing -- minimised,
-/// hidden, occluded -- where no frame will come and an animation would otherwise
-/// wait for ever. It is long enough not to pace anything (the deadline still bounds
-/// the gesture) and short enough that the animation resumes the moment the window
-/// is drawn again.
-pub fn wait_for_frame(timeout: std::time::Duration) {
-    let Ok(mut built) = FRAME_BUILT.lock() else {
-        return;
-    };
-    if !*built {
-        built = match FRAME_WAKE.wait_timeout(built, timeout) {
-            Ok((guard, _)) => guard,
-            Err(poisoned) => poisoned.into_inner().0,
-        };
-    }
-    *built = false;
-}
-
-/// Signals the clock when it is dropped, which is the end of one frame's build.
-#[derive(Debug, Default)]
-pub struct FrameBuilt;
-
-impl Drop for FrameBuilt {
-    fn drop(&mut self) {
-        frame_built();
-    }
-}
-
 /// A command that puts the region `name` where the policy says it is.
 ///
 /// `scroll_to` is the only way a program moves a `Scrollable` in iced -- the
