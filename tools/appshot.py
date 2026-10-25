@@ -1,7 +1,7 @@
 """Capture one of this launcher's own pages, at a stated size.
 
     python tools/appshot.py --page home --size 1280x720 --out shot.png
-    python tools/appshot.py --exe dist/PalantirMC.exe --page home --out shot.png
+    python tools/appshot.py --exe dist/SiftLauncher.exe --page home --out shot.png
     python tools/appshot.py --method shot --page home --out shot.png
 
 Two ways to take the picture, and the default is the one whose pixels a *page*
@@ -18,7 +18,7 @@ gate can read:
   was the default until the pane became a scroll region.
 
 Why the default moved, measured rather than assumed, on `757bbcd` -- the same
-commit that built `dist/msvc/PalantirMC.exe`:
+commit that built `dist/msvc/SiftLauncher.exe`:
 
 * a live window on `/browse/modpack` at a pinned 1280x720 client has **12,236**
   distinct colours in the page pane (x 64..1003, y 70..720): the tabs, the search
@@ -87,7 +87,7 @@ SETTLE = 6.0
 def sandbox(exe: Path) -> tuple[Path, Path]:
     """A throwaway directory holding `portable.dat` and a copy of the launcher.
 
-    The marker is read *next to the executable* (`palantir_core::paths::
+    The marker is read *next to the executable* (`sift_core::paths::
     portable_dir`), so the copy is the point: a run started from the sandbox
     directory but executing the real binary would find the reader's own data
     root and capture their instances.
@@ -257,7 +257,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--exe",
-        default="target/debug/PalantirMC.exe",
+        default="target/debug/SiftLauncher.exe",
         help="the launcher to capture (default: the debug build)",
     )
     parser.add_argument(

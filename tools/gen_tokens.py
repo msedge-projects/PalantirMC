@@ -2,7 +2,7 @@
 """Emit the reference's full token vocabulary as Rust tables.
 
 Reads vendor/modrinth-app's own sheets at the commit UPSTREAM.md pins and
-writes crates/palantir-desktop/src/theme_tokens.rs: every --token the
+writes crates/sift-desktop/src/theme_tokens.rs: every --token the
 reference declares, per mode, resolved through var() chains, classified as a
 colour, a length, a number, a gradient's stops, or raw text where the
 reference's own syntax (hsla() shadows, font stacks) has no Rust answer here.
@@ -47,7 +47,7 @@ TREE = REPO / "vendor" / "modrinth-app"
 VARIABLES = TREE / "assets" / "styles" / "variables.scss"
 DEFAULTS = TREE / "assets" / "styles" / "defaults.scss"
 UPSTREAM = TREE / "UPSTREAM.md"
-OUT = REPO / "crates" / "palantir-desktop" / "src" / "theme_tokens.rs"
+OUT = REPO / "crates" / "sift-desktop" / "src" / "theme_tokens.rs"
 
 # The reference's root font size, the same line the --font-size-* ladder is
 # declared on: `body { font-size: 16px }` in defaults.scss.

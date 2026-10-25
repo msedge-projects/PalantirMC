@@ -9,7 +9,7 @@ them take the colour of whatever they sit in. A rasterised bitmap cannot do that
 and neither can a filled outline -- both are the wrong shape for the job, so this
 emits geometry and lets the toolkit stroke it.
 
-    python tools/gen_icons.py            # write crates/palantir-desktop/src/icons_gen.rs
+    python tools/gen_icons.py            # write crates/sift-desktop/src/icons_gen.rs
     python tools/gen_icons.py --check    # fail if the file on disk is not what this emits
     python tools/gen_icons.py --report   # per-icon command counts, and anything unusual
 
@@ -97,7 +97,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "modrinth-app"
 ICONS = VENDOR / "assets" / "icons"
-OUT = ROOT / "crates" / "palantir-desktop" / "src" / "icons_gen.rs"
+OUT = ROOT / "crates" / "sift-desktop" / "src" / "icons_gen.rs"
 
 # One entry per set the reference keeps under `assets/icons`, in the order the
 # generated file declares them.

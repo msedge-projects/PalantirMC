@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # The workspace's own crates are paths, not versions, and naming one of them is
 # not a dependency declaration to check.
-SKIP_PREFIXES = ("palantir-",)
+SKIP_PREFIXES = ("sift-",)
 
 DEP_SECTION = re.compile(r"^\[(?:target\.[^]]+\.)?(dependencies|dev-dependencies|build-dependencies)\]$")
 DEP_LINE = re.compile(r"^([A-Za-z0-9_-]+)\s*=")

@@ -216,7 +216,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         type=pathlib.Path,
-        default=pathlib.Path("crates/palantir-desktop/assets/fonts"),
+        default=pathlib.Path("crates/sift-desktop/assets/fonts"),
     )
     parser.add_argument(
         "--cache",

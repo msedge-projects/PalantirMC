@@ -9,7 +9,7 @@ having one -- [`gen_text`] is imported, not copied -- because a locale the
 generator accepts and a locale the runtime renders have to agree about what a
 message means.
 
-    python tools/gen_locale.py            # write crates/palantir-desktop/src/locale_gen.rs
+    python tools/gen_locale.py            # write crates/sift-desktop/src/locale_gen.rs
     python tools/gen_locale.py --check    # fail if that file is not what this emits
     python tools/gen_locale.py --report   # what each locale carries, and what it is missing
     python tools/gen_locale.py --only de-DE,pt-BR,few   # a subset, for the size measurement
@@ -84,7 +84,7 @@ TREES = [
     pathlib.Path("vendor/modrinth-app/app-frontend/src/locales"),
     pathlib.Path("vendor/modrinth-app/ui/src/locales"),
 ]
-OUTPUT = pathlib.Path("crates/palantir-desktop/src/locale_gen.rs")
+OUTPUT = pathlib.Path("crates/sift-desktop/src/locale_gen.rs")
 
 # The CLDR cardinal category set per primary language subtag, for the languages
 # this corpus is in. `en` is here because the runtime's fallback is English, and

@@ -266,7 +266,7 @@ def _label_font(ImageFont, draw, texts, panel_width: int):
     The repository's own Inter-600 comes first: it is the face both apps draw
     with, so the label reads in the same type as the screenshots under it. It is
     found by glob off the crate tree rather than by a fixed path because the crate
-    is being renamed (`palantir-desktop` -> `sift-desktop`) and a label strip is
+    is being renamed (`sift-desktop` -> `sift-desktop`) and a label strip is
     not worth breaking over a directory name.
     """
     root = Path(__file__).resolve().parents[2]

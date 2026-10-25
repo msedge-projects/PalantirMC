@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail a release build if the shipped exe needs a DLL Windows does not have.
 
-`PalantirMC.exe` is downloaded by people who will not install a toolchain, so
+`SiftLauncher.exe` is downloaded by people who will not install a toolchain, so
 the one packaging property that must never regress is that the import table
 names nothing but Windows itself. This checks it by parsing the PE headers --
 no execution, no `dumpbin`, no MSVC.
@@ -12,7 +12,7 @@ pulling in dynamically without any manifest change), and merely *reports*
 everything else. An allowlist would turn a future Windows component we have
 not heard of into a broken release; this cannot.
 
-Usage:  python .github/scripts/check_exe.py path/to/PalantirMC.exe
+Usage:  python .github/scripts/check_exe.py path/to/SiftLauncher.exe
 """
 
 from __future__ import annotations

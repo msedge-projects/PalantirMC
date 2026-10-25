@@ -12,9 +12,9 @@ real X server as far as every one of these calls is concerned.
     Xvfb :99 -screen 0 1920x1080x24 &
     export DISPLAY=:99
 
-    python tools/xshot.py --launch target/release/PalantirMC --client 1280x720 --out ours.png
+    python tools/xshot.py --launch target/release/SiftLauncher --client 1280x720 --out ours.png
     python tools/xshot.py --title "Modrinth App" --client 1280x720 --out reference.png
-    python tools/xshot.py --title PalantirMC --script session.txt
+    python tools/xshot.py --title SiftLauncher --script session.txt
 
 Script lines are the same three `winshot.py` takes, so a session recorded there is
 replayable here: `click X Y`, `wait SECONDS`, `shot OUT.png`.
@@ -232,7 +232,7 @@ def main():
         cwd = args.cwd
         if args.portable:
             # The marker is read *next to the executable*, not in the working
-            # directory (`palantir_core::paths::portable_dir`), so the sandbox needs
+            # directory (`sift_core::paths::portable_dir`), so the sandbox needs
             # a copy of the binary inside it rather than merely a different cwd. That
             # lesson is `winshot.py`'s, measured the wrong way round once.
             sandbox = tempfile.mkdtemp(prefix="xshot-")

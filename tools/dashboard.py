@@ -198,13 +198,13 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 // Themes, remembered: the page is left open for hours at a time.
 const html = document.documentElement;
-const wanted = localStorage.getItem('palantir-theme');
+const wanted = localStorage.getItem('sift-theme');
 if (wanted) html.dataset.theme = wanted;
 for (const button of $$('.themes button')) {
   button.setAttribute('aria-pressed', String(button.dataset.theme === html.dataset.theme));
   button.addEventListener('click', () => {
     html.dataset.theme = button.dataset.theme;
-    localStorage.setItem('palantir-theme', button.dataset.theme);
+    localStorage.setItem('sift-theme', button.dataset.theme);
     for (const other of $$('.themes button')) {
       other.setAttribute('aria-pressed', String(other === button));
     }
@@ -465,13 +465,13 @@ def render(root: Path) -> tuple[str, list[str]]:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PalantirMC — the plan</title>
+<title>SiftLauncher — the plan</title>
 <style>{CSS}</style>
 </head>
 <body>
 <header class="bar"><div class="wrap">
   <span class="mark" aria-hidden="true"></span>
-  <span class="wordmark">PalantirMC <small>the plan, and where each stage stands</small></span>
+  <span class="wordmark">SiftLauncher <small>the plan, and where each stage stands</small></span>
   <span class="spacer"></span>
   <span class="stamp">{html.escape(stamps)}</span>
   <span class="themes" role="group" aria-label="Theme">{themes_html}</span>

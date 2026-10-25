@@ -173,7 +173,7 @@ jobs:
       # A live test that is skipped when the network is down is a live test that
       # reports success while proving nothing, so a failure here is a failure.
       - name: Run the live tests
-        run: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1
+        run: cargo test -p sift-net --test live --locked -- --ignored --test-threads=1
 
   # Packaging is the expensive half -- two release builds with LTO, ~14 billed
   # minutes against ~4 for test + lint -- and its result is identical for a
@@ -234,34 +234,34 @@ jobs:
       - name: Build release
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p palantir-desktop --target ${{ matrix.target }}
+        run: cargo build --release --locked -p sift-desktop --target ${{ matrix.target }}
 
       - name: Stage artifact and hash it
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item -Path "target/${{ matrix.target }}/release/PalantirMC.exe" -Destination dist/PalantirMC.exe
+          Copy-Item -Path "target/${{ matrix.target }}/release/SiftLauncher.exe" -Destination dist/SiftLauncher.exe
 
-          $exe = Get-Item -Path dist/PalantirMC.exe
+          $exe = Get-Item -Path dist/SiftLauncher.exe
           $hash = (Get-FileHash -Path $exe.FullName -Algorithm SHA256).Hash.ToLower()
 
           # A debug or half-linked binary is far outside this range; catch it here
           # rather than shipping a broken download.
           if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
-            throw "Unexpected PalantirMC.exe size: $($exe.Length) bytes"
+            throw "Unexpected SiftLauncher.exe size: $($exe.Length) bytes"
           }
 
           # Checksum tools require the hash before the filename; the previous
           # filename-first sidecar was rejected by `sha256sum -c`. Write the
           # standard form with an explicit LF and verify it before uploading.
-          [System.IO.File]::WriteAllText("dist/PalantirMC.exe.sha256", "$hash  PalantirMC.exe`n")
+          [System.IO.File]::WriteAllText("dist/SiftLauncher.exe.sha256", "$hash  SiftLauncher.exe`n")
 
-          $sidecar = [System.IO.File]::ReadAllText("dist/PalantirMC.exe.sha256")
-          if ($sidecar -ne "$hash  PalantirMC.exe`n") {
+          $sidecar = [System.IO.File]::ReadAllText("dist/SiftLauncher.exe.sha256")
+          if ($sidecar -ne "$hash  SiftLauncher.exe`n") {
             throw "sha256 sidecar is not in 'sha256sum -c' form: '$sidecar'"
           }
 
-          "### PalantirMC.exe (${{ matrix.target }})" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "### SiftLauncher.exe (${{ matrix.target }})" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
           "" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
           "| Field | Value |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
           "| --- | --- |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
@@ -272,12 +272,12 @@ jobs:
       # import table may name only Windows' own DLLs. This is checked on the
       # artefact that would actually be shipped, not on the build output.
       - name: Check the exe's DLL dependencies
-        run: python .github/scripts/check_exe.py dist/PalantirMC.exe
+        run: python .github/scripts/check_exe.py dist/SiftLauncher.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: palantirmc-${{ matrix.target }}
+          name: sift-${{ matrix.target }}
           path: dist/
           retention-days: 14
           if-no-files-found: error
@@ -307,20 +307,20 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-egui-${{ hashFiles('crates/palantir-egui/Cargo.toml') }}
+          key: ${{ runner.os }}-egui-${{ hashFiles('crates/sift-ui/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-egui-
 
       - name: Build the slice
-        working-directory: crates/palantir-egui
+        working-directory: crates/sift-ui
         run: cargo build --release
 
       - name: Test the slice
-        working-directory: crates/palantir-egui
+        working-directory: crates/sift-ui
         run: cargo test
 
       - uses: actions/upload-artifact@v4
         with:
-          name: palantir-egui-slice
-          path: crates/palantir-egui/target/release/PalantirEgui.exe
+          name: sift-ui-slice
+          path: crates/sift-ui/target/release/SiftUi.exe
           if-no-files-found: error

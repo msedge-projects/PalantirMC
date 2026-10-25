@@ -103,26 +103,26 @@ jobs:
       - name: Build release
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p palantir-desktop --target ${{ matrix.target }}
+        run: cargo build --release --locked -p sift-desktop --target ${{ matrix.target }}
 
       - name: Stage the exe
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/PalantirMC.exe" dist/PalantirMC.exe
+          Copy-Item "target/${{ matrix.target }}/release/SiftLauncher.exe" dist/SiftLauncher.exe
 
-          $exe = Get-Item dist/PalantirMC.exe
+          $exe = Get-Item dist/SiftLauncher.exe
           if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
-            throw "Unexpected PalantirMC.exe size: $($exe.Length) bytes"
+            throw "Unexpected SiftLauncher.exe size: $($exe.Length) bytes"
           }
 
       - name: Check the exe's DLL dependencies
-        run: python .github/scripts/check_exe.py dist/PalantirMC.exe
+        run: python .github/scripts/check_exe.py dist/SiftLauncher.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: palantirmc-${{ matrix.target }}
+          name: sift-${{ matrix.target }}
           path: dist/
           if-no-files-found: error
 
@@ -163,7 +163,7 @@ jobs:
               default { $target }
             }
 
-            $name = "PalantirMC-$label.exe"
+            $name = "SiftLauncher-$label.exe"
             Copy-Item $_.FullName "release/$name"
 
             # Regenerated after renaming: the sidecar has to name the file it
@@ -207,7 +207,7 @@ jobs:
           } else {
             gh release create $tag @files `
               --verify-tag `
-              --title "PalantirMC $tag" `
+              --title "SiftLauncher $tag" `
               --generate-notes
           }
 

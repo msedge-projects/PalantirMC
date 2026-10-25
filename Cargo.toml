@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/palantir-core",
-    "crates/palantir-net",
-    "crates/palantir-loader",
-    "crates/palantir-desktop",
-    # `crates/palantir-egui` is **not** a member, and cannot be: `iced_winit` 0.12
+    "crates/sift-core",
+    "crates/sift-net",
+    "crates/sift-loader",
+    "crates/sift-desktop",
+    # `crates/sift-ui` is **not** a member, and cannot be: `iced_winit` 0.12
     # pins `web-sys = "=0.3.67"` and `eframe` 0.36 requires `^0.3.103`, so the two
     # UI stacks cannot resolve in one lock file. It is its own workspace (see its
     # `Cargo.toml`) with its own lock, which is what lets the migration have both
@@ -44,7 +44,7 @@ cosmic-text = { path = "vendor/cosmic-text" }
 # for this binary: everything the window does per frame -- laying out the tree,
 # resolving text, rasterising -- is CPU work, and `z` gives up inlining and
 # vectorisation on exactly that work. On a machine drawing through the software
-# rasteriser (see `crates/palantir-desktop/src/gpu.rs`) the frame cost is the
+# rasteriser (see `crates/sift-desktop/src/gpu.rs`) the frame cost is the
 # whole of how responsive the window feels, so the frames are bought back at the
 # price of a larger executable.
 opt-level = 3

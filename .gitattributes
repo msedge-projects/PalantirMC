@@ -15,4 +15,4 @@ vendor/modrinth-app/** -text
 # ~300 KB of `glyf` and `cmap`, and a CRLF normalisation applied to them on a
 # checkout would produce a file that still parses as a directory and renders
 # nothing. `-text` keeps the bytes in the working tree the bytes in the index.
-crates/palantir-desktop/assets/fonts/** -text
+crates/sift-desktop/assets/fonts/** -text

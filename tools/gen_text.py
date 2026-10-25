@@ -12,7 +12,7 @@ whole of the reference's English copy. Compiling them is the same argument as
 `gen_theme.py` and `gen_icons.py`: a string transcribed by hand is a string that
 drifts, and the reference is the only authority on what its own interface says.
 
-    python tools/gen_text.py            # write crates/palantir-desktop/src/text_gen.rs
+    python tools/gen_text.py            # write crates/sift-desktop/src/text_gen.rs
     python tools/gen_text.py --check    # fail if that file is not what this emits
     python tools/gen_text.py --report   # what is in the locale, and what is refused
 
@@ -73,7 +73,7 @@ SOURCES = [
     pathlib.Path("vendor/modrinth-app/app-frontend/src/locales/en-US/index.json"),
     pathlib.Path("vendor/modrinth-app/ui/src/locales/en-US/index.json"),
 ]
-OUTPUT = pathlib.Path("crates/palantir-desktop/src/text_gen.rs")
+OUTPUT = pathlib.Path("crates/sift-desktop/src/text_gen.rs")
 
 # The plural categories English has a rule for. Anything else is refused by
 # default, which is what keeps this tool's English output the same as it was

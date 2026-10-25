@@ -3,10 +3,10 @@
 ; A per-user install: no administrator, no UAC, no machine-wide state. The
 ; launcher goes under %LOCALAPPDATA%\Programs\Sift Launcher, and its data
 ; (instances, worlds, settings) stays where the launcher already keeps it,
-; %APPDATA%\PalantirMC — the uninstaller asks before touching that.
+; %APPDATA%\SiftLauncher — the uninstaller asks before touching that.
 ;
 ; Build (from the workspace root):
-;   cargo build --release --locked -p palantir-desktop
+;   cargo build --release --locked -p sift-desktop
 ;   python3 tools/gen_installer_anim.py            # the header animation
 ;   makensis installer/sift.nsi                    # -> dist/SiftLauncher-<ver>-x64-setup.exe
 ;
@@ -34,15 +34,15 @@ SetCompressorDictSize 64
   !define VERSION "0.0.0"
 !endif
 !ifndef APP_EXE
-  !define APP_EXE "../target/release/PalantirMC.exe"
+  !define APP_EXE "../target/release/SiftLauncher.exe"
 !endif
 
 !define PRODUCT "Sift Launcher"
 !define PUBLISHER "Palantir Studios"
 ; The launcher's own data folder, which is a product decision the launcher
-; already made: `palantir-core`'s data root is %APPDATA%\<name>. It is *not*
+; already made: `sift-core`'s data root is %APPDATA%\<name>. It is *not*
 ; under $INSTDIR, so an uninstall that removed it would delete worlds.
-!define DATA_DIR "$APPDATA\PalantirMC"
+!define DATA_DIR "$APPDATA\SiftLauncher"
 !define APP_KEY "Software\SiftLauncher"
 !define APP_PATH_KEY "Software\Microsoft\Windows\CurrentVersion\App Paths\Sift Launcher.exe"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SiftLauncher"

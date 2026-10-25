@@ -1,4 +1,4 @@
-PalantirMC
+Sift Launcher
 Copyright (c) 2026 Palantir Studios. All rights reserved.
 
 This software is proprietary. No part of it may be copied, modified, adapted,
@@ -14,7 +14,7 @@ licence and its provenance, in THIRD_PARTY_NOTICES.md, and each licence text
 travels with the files it covers:
 
   - the Inter typefaces, at five weights, under the SIL Open Font License 1.1
-    (crates/palantir-desktop/assets/fonts/OFL.txt);
+    (crates/sift-desktop/assets/fonts/OFL.txt);
   - the cosmic-text crate and the vendored patch of it, under MIT OR Apache-2.0
     (vendor/cosmic-text/LICENSE-MIT, LICENSE-APACHE);
   - the icon set, under the ISC licence as Lucide publishes it;

@@ -6,7 +6,7 @@ a requirement nobody measures becomes a slogan the first time a feature wants
 one more texture cache. So the numbers that define it are constants below, and
 every build is asked for them. The iced build is not history either -- it is
 still the thing being replaced, and on the machine this was written on it is
-still on disk as `dist/msvc/PalantirMC.exe`, which is exactly what the size
+still on disk as `dist/msvc/SiftLauncher.exe`, which is exactly what the size
 budget is.
 
 What this measures itself:
@@ -24,8 +24,8 @@ startup and the scrolling p95 arrive in `--measured` -- written by the
 PowerShell harness in `docs/LIGHTNESS.md` -- and this tool only compares them
 against the budgets. A missing measurement is SKIP, never PASS.
 
-    python tools/lightness.py --exe dist/PalantirEgui.exe --baseline dist/PalantirMC.exe
-    python tools/lightness.py --exe dist/PalantirEgui.exe --check
+    python tools/lightness.py --exe dist/SiftUi.exe --baseline dist/SiftLauncher.exe
+    python tools/lightness.py --exe dist/SiftUi.exe --check
 
 `--check` is what turns an exceeded budget into exit status 1. A local run
 without it is a report; a run with nothing measured reports SKIPs and exits 0.
@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MEASURED = ROOT / "tools" / "lightness-measured.json"
 
 # The iced build's release exe, as measured on 2026-10-25: `dist/msvc/
-# PalantirMC.exe`, x86_64-pc-windows-msvc with the static CRT, 28,648,960
+# SiftLauncher.exe`, x86_64-pc-windows-msvc with the static CRT, 28,648,960
 # bytes (28.6 MB). This is the budget, not a percentage of it: the first
 # requirement is that the rewrite is never *bigger* than what it replaces, and
 # `--baseline` re-reads the live file so a newer iced build moves the bar

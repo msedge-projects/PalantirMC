@@ -92,7 +92,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-BRAND = ROOT / "crates" / "palantir-desktop" / "assets" / "brand"
+BRAND = ROOT / "crates" / "sift-desktop" / "assets" / "brand"
 SOURCE = BRAND / "sift-logo-source.png"
 
 # The two embedded PNGs, with the side each is rendered at.

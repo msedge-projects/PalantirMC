@@ -106,14 +106,14 @@ cat <<'NEXT'
 
 Next, on this machine:
 
-  git clone https://github.com/msedge-projects/PalantirMC.git
-  cd PalantirMC
-  CARGO_BUILD_JOBS=1 cargo test -p palantir-desktop --offline --locked
-  cargo build --release -p palantir-desktop
+  git clone https://github.com/msedge-projects/SiftLauncher.git
+  cd SiftLauncher
+  CARGO_BUILD_JOBS=1 cargo test -p sift-desktop --offline --locked
+  cargo build --release -p sift-desktop
 
   Xvfb :99 -screen 0 1920x1080x24 &
   export DISPLAY=:99
-  python tools/xshot.py --launch target/release/PalantirMC --client 1280x720 --out ours.png
+  python tools/xshot.py --launch target/release/SiftLauncher --client 1280x720 --out ours.png
 
   export WEBKIT_DISABLE_DMABUF_RENDERER=1     # blank window without it, on software GL
   modrinth-app &

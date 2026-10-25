@@ -9,7 +9,7 @@ Nothing here touches the mouse. The window is moved beyond the primary desktop
 with `SWP_NOACTIVATE` the moment it appears, so it never covers or focuses the
 user's work, and `SendMessageTimeout(WM_NULL, SMTO_ABORTIFHUNG)` proves the UI
 thread is pumping without activating anything. Parking it is safe to do: the
-app persists only its colour theme (`palantir-desktop`'s `Prefs`), so no window
+app persists only its colour theme (`sift-desktop`'s `Prefs`), so no window
 position is written back that could send the next launch off-screen.
 
 A series of windows is sampled rather than one, because startup work continues
@@ -65,7 +65,7 @@ def find_window(pid, timeout=30.0):
     """The launcher's own top-level window, by title, owned by `pid`."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        hwnd = user32.FindWindowW(None, "PalantirMC")
+        hwnd = user32.FindWindowW(None, "SiftLauncher")
         if hwnd:
             owner = wt.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))

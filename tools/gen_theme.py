@@ -8,7 +8,7 @@ second copy: it reads the reference's own CSS, resolves it the way a browser
 would, and emits one module that is the only place a colour, a radius, a first
 number or a motion value is allowed to come from.
 
-    python tools/gen_theme.py            # write crates/palantir-desktop/src/theme_gen.rs
+    python tools/gen_theme.py            # write crates/sift-desktop/src/theme_gen.rs
     python tools/gen_theme.py --check    # fail if the file on disk is not what this emits
     python tools/gen_theme.py --report   # what could not be classified, and why
 
@@ -65,7 +65,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "modrinth-app"
-OUT = ROOT / "crates" / "palantir-desktop" / "src" / "theme_gen.rs"
+OUT = ROOT / "crates" / "sift-desktop" / "src" / "theme_gen.rs"
 
 VARIABLES = VENDOR / "assets" / "styles" / "variables.scss"
 UTILITIES = VENDOR / "ui" / "src" / "styles" / "tailwind-utilities.css"

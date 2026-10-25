@@ -479,7 +479,7 @@ def main():
             sandbox = tempfile.mkdtemp(prefix="winshot-")
             open(os.path.join(sandbox, "portable.dat"), "w").close()
             # The marker is read *next to the executable*, not in the working
-            # directory (`palantir_core::paths::portable_dir`), so a sandboxed run
+            # directory (`sift_core::paths::portable_dir`), so a sandboxed run
             # needs a copy of the exe inside the sandbox and not merely a cwd.
             # Measured the wrong way round: a `--portable` capture drew the user's
             # own instances, because the app had found its real data root and the

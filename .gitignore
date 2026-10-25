@@ -4,7 +4,7 @@
 # Bytecode the Python helpers in tools/ leave behind.
 __pycache__/
 *.pyc
-.palantir-test-data/
+.sift-test-data/
 /.unlazy/
 /.unlazy-hook-state.json
 # Window captures and one-off pixel probes used by tools/panel_gate.py. They are

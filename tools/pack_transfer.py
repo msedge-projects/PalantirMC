@@ -8,7 +8,7 @@ committed (AGENTS.md forbids committing captures). This puts all of it in one fi
 with a manifest and a digest, so the machine on the other side has the same
 measurements rather than a description of them.
 
-    python tools/pack_transfer.py                 # -> transfer/palantirmc-evidence-<commit>.tar.gz
+    python tools/pack_transfer.py                 # -> transfer/sift-evidence-<commit>.tar.gz
     python tools/pack_transfer.py --recordings ~/oCam
 
 What it packs, and why each one is worth its bytes:
@@ -43,10 +43,10 @@ REPO = Path(__file__).resolve().parents[1]
 # directory holds several gigabytes of unrelated recordings, and a directory listing
 # is not evidence about which client is which. The mapping is the report's own, and
 # it was confirmed by sight — the reference's chrome reads `modrinth`, this
-# launcher's reads `PalantirMC`.
+# launcher's reads `SiftLauncher`.
 RECORDINGS = (
     ("Record_2026_10_01_20_41_35_635.mp4", "reference", "the Modrinth App, 86.8 s, 5202 frames"),
-    ("Record_2026_10_01_20_44_08_212.mp4", "palantir", "this launcher, 41.0 s, 2458 frames"),
+    ("Record_2026_10_01_20_44_08_212.mp4", "sift", "this launcher, 41.0 s, 2458 frames"),
 )
 
 # Derived frames, as whole directories, with the name each keeps inside the archive.
@@ -64,7 +64,7 @@ account is in `tools/scroll_lag.py`'s own docstring):
 
   ffmpeg -hide_banner -loglevel error -ss 44 -t 3 -i <reference>.mp4 \\
       -vf "fps=60,scale=320:180,format=gray" -f image2 burst_o/f_%04d.pgm
-  ffmpeg -hide_banner -loglevel error -ss 19 -t 3 -i <palantir>.mp4 \\
+  ffmpeg -hide_banner -loglevel error -ss 19 -t 3 -i <sift>.mp4 \\
       -vf "fps=60,scale=320:180,format=gray" -f image2 burst_p/f_%04d.pgm
   python tools/scroll_lag.py burst_o burst_p
 
@@ -96,7 +96,7 @@ def pack(archive, recordings_dir):
     branch = git("rev-parse", "--abbrev-ref", "HEAD") or "unknown"
     dirty = bool(git("status", "--porcelain"))
     lines = [
-        f"PalantirMC evidence, packed {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"SiftLauncher evidence, packed {time.strftime('%Y-%m-%d %H:%M:%S')}",
         f"commit      {commit} on {branch}" + (" (working tree dirty)" if dirty else ""),
         "",
         "recordings:",
@@ -157,11 +157,11 @@ def main():
     )
     parser.add_argument("--recordings", default=os.path.expanduser("~/Documents/oCam"),
                         help="where the two recordings live (default ~/Documents/oCam)")
-    parser.add_argument("--out", help="archive to write (default transfer/palantirmc-evidence-<commit>.tar.gz)")
+    parser.add_argument("--out", help="archive to write (default transfer/sift-evidence-<commit>.tar.gz)")
     args = parser.parse_args()
 
     commit = git("rev-parse", "--short", "HEAD") or "unknown"
-    out = Path(args.out) if args.out else REPO / "transfer" / f"palantirmc-evidence-{commit}.tar.gz"
+    out = Path(args.out) if args.out else REPO / "transfer" / f"sift-evidence-{commit}.tar.gz"
     out.parent.mkdir(parents=True, exist_ok=True)
 
     total, count, missing = pack(out, Path(args.recordings).expanduser())
