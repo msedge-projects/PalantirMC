@@ -98,7 +98,7 @@ impl Search {
     /// feed, which is a different request with its own facets and does not belong here yet.
     pub fn request(&mut self, query: &str, project_type: &str, index: &str, limit: u32) {
         let query = query.trim();
-        let asked = format!("{project_type}\u{{1}}{index}\u{{1}}{limit}\u{{1}}{query}");
+        let asked = format!("{project_type}|{index}|{limit}|{query}");
         if query.is_empty() || self.current.as_deref() == Some(asked.as_str()) {
             return;
         }
@@ -165,7 +165,7 @@ fn run(query: &str, project_type: &str, index: &str, limit: u32) -> Result<(Vec<
     // agent as every other request, and a body that never has to fit on this thread's stack.
     let path = std::env::temp_dir().join(format!(
         "sift-search-{:016x}.json",
-        hash(&format!("{project_type}\u{{1}}{index}\u{{1}}{limit}\u{{1}}{query}"))
+        hash(&format!("{project_type}|{index}|{limit}|{query}"))
     ));
     let fetched = sift_net::download_file(&url, &path, Duration::from_secs(20))
         .map_err(|error| error.to_string());
