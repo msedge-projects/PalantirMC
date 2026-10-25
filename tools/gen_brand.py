@@ -322,6 +322,14 @@ class PillowBackend:
     def load(self, path: Path) -> Any:
         return self.Image.open(path).convert("RGBA")
 
+    def decode_pixels(self, blob: bytes) -> tuple[tuple[int, int], bytes]:
+        """Decode an encoded image to (size, RGBA bytes), for the check's fallback."""
+        import io as _io
+
+        with self.Image.open(_io.BytesIO(blob)) as handle:
+            rgba = handle.convert("RGBA")
+            return rgba.size, rgba.tobytes()
+
     def size(self, handle: Any) -> tuple[int, int]:
         return handle.size
 
@@ -413,6 +421,27 @@ class MagickBackend:
         self.label = f"ImageMagick ({exe})"
         self.scratch = tempfile.TemporaryDirectory(prefix="gen_brand_")
         self.count = 0
+
+    def decode_pixels(self, blob: bytes) -> tuple[tuple[int, int], bytes]:
+        """Decode an encoded image to (size, RGBA bytes) through ImageMagick."""
+        identify = subprocess.run(
+            [self.exe, "-", "-format", "%w %h", "info:"],
+            input=blob,
+            capture_output=True,
+            check=False,
+        )
+        if identify.returncode != 0:
+            raise ValueError("ImageMagick could not identify the blob")
+        width, height = (int(part) for part in identify.stdout.split())
+        raw = subprocess.run(
+            [self.exe, "-", "-depth", "8", "rgba:-"],
+            input=blob,
+            capture_output=True,
+            check=False,
+        )
+        if raw.returncode != 0:
+            raise ValueError("ImageMagick could not decode the blob")
+        return (width, height), raw.stdout
 
     def _run(self, arguments: list[str]) -> bytes:
         command = [self.exe, *arguments]
@@ -628,6 +657,24 @@ def self_test(
     return 0
 
 
+def same_pixels(backend, left: bytes, right: bytes) -> bool:
+    """Whether two encoded images decode to the same size and the same pixels.
+
+    `backend` is whatever `choose_backend` returned; each backend knows how to hand an image's
+    pixels back as a flat sequence, which is the only comparison that is about the art rather
+    than about the encoder that wrote it.
+    """
+    try:
+        a_size, a_pixels = backend.decode_pixels(left)
+        b_size, b_pixels = backend.decode_pixels(right)
+    except Exception:
+        # A blob the backend cannot read is not the same picture by definition.
+        return False
+    if a_size != b_size:
+        return False
+    return bytes(a_pixels) == bytes(b_pixels)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -663,15 +710,36 @@ def main() -> int:
         report(backend, facts, outputs, entries=args.report)
 
         if args.check:
-            stale = [
-                path for path, _, blob in outputs
-                if not path.is_file() or path.read_bytes() != blob
-            ]
+            # Byte identity is the first test and the strongest one, but it is also a test of
+            # the *encoder*, not of the art: two Pillow or ImageMagick versions write the same
+            # pixels with different zlib settings, and a gate that fails on that is a gate that
+            # cries wolf on every dependency bump. So a file whose bytes differ is then compared
+            # pixel by pixel, and only a real difference -- different pixels, different size, a
+            # missing file -- fails.
+            stale = []
+            reencoded = []
+            for path, _, blob in outputs:
+                if not path.is_file():
+                    stale.append(path)
+                    continue
+                committed = path.read_bytes()
+                if committed == blob:
+                    continue
+                if same_pixels(backend, committed, blob):
+                    reencoded.append(path)
+                    continue
+                stale.append(path)
+            for path in stale:
+                print(f"{path.relative_to(ROOT)} is not what this tool writes", file=sys.stderr)
             if stale:
-                for path in stale:
-                    print(f"{path.relative_to(ROOT)} is not what this tool writes", file=sys.stderr)
                 print("Run `python tools/gen_brand.py` and commit the result.", file=sys.stderr)
                 return 1
+            for path in reencoded:
+                print(
+                    f"{path.relative_to(ROOT)} has the same pixels but different bytes "
+                    "(the encoder differs); regenerate when convenient",
+                    file=sys.stderr,
+                )
             print(f"{len(outputs)} brand files are current")
             return 0
 
