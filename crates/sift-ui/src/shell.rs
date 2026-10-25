@@ -43,6 +43,17 @@ impl Rail {
         Rail::Servers,
     ];
 
+    /// The name the reference prints in the page header.
+    pub fn title(self) -> &'static str {
+        match self {
+            Rail::Discover => "Discover modpacks",
+            Rail::Search => "Search",
+            Rail::Library => "Instances",
+            Rail::Files => "Files",
+            Rail::Servers => "Servers",
+        }
+    }
+
     /// The glyph the reference draws for this destination.
     pub fn glyph(self) -> Glyph {
         match self {
@@ -94,6 +105,7 @@ impl Shell {
         let mut rail_animating = false;
         rail_animating |= self.rail_column(ui);
         self.right_panel(ui);
+        self.page_header(ui);
         let content = self.content_column(ui);
 
         rail_animating || content
@@ -122,6 +134,75 @@ impl Shell {
             Align2::LEFT_CENTER,
             "Sift Launcher",
             FontId::proportional(14.0),
+            self.theme.CONTRAST,
+        );
+
+        // The running-instance chip, right-aligned before the window controls: the
+        // reference prints `No instances running` in secondary text with a small dot.
+        let controls_left = bar.right() - 3.0 * 44.0;
+        let chip = egui::pos2(controls_left - 16.0, bar.center().y);
+        painter.circle_filled(egui::pos2(chip.x - 8.0, chip.y), 3.0, self.theme.DIVIDER);
+        painter.text(
+            chip,
+            Align2::RIGHT_CENTER,
+            "No instances running",
+            FontId::proportional(12.0),
+            self.theme.SECONDARY,
+        );
+
+        // The three window controls, in the reference's order and pitch.
+        for (index, glyph) in [Glyph::Minus, Glyph::Square, Glyph::X]
+            .into_iter()
+            .enumerate()
+        {
+            let centre = egui::pos2(
+                controls_left + 22.0 + index as f32 * 44.0,
+                bar.center().y,
+            );
+            let target = Rect::from_center_size(centre, Vec2::splat(28.0));
+            let response = ui.interact(
+                target,
+                egui::Id::new(("window-control", index)),
+                Sense::click(),
+            );
+            let ink = if response.hovered() {
+                self.theme.CONTRAST
+            } else {
+                self.theme.SECONDARY
+            };
+            icons::draw(painter, glyph, Rect::from_center_size(centre, Vec2::splat(14.0)), ink);
+        }
+    }
+
+    /// The page header: the back and forward arrows, the route's own icon and its name.
+    ///
+    /// It sits between the title bar and the tab strip because the reference puts it there;
+    /// it is not part of the title bar, which is what the first comparison got wrong.
+    fn page_header(&mut self, ui: &mut Ui) {
+        let header = Rect::from_min_size(
+            egui::pos2(g::CONTENT_LEFT, g::TITLE_BAR),
+            egui::vec2(g::PANEL_LEFT - g::CONTENT_LEFT - 16.0, g::PAGE_HEADER),
+        );
+        let painter = ui.painter();
+        let mut x = header.left() + 4.0;
+        for glyph in [Glyph::ChevronLeft, Glyph::ChevronRight] {
+            let centre = egui::pos2(x + 10.0, header.center().y);
+            icons::draw(painter, glyph, Rect::from_center_size(centre, Vec2::splat(16.0)), self.theme.SECONDARY);
+            x += 32.0;
+        }
+        let badge = egui::pos2(x + 10.0, header.center().y);
+        painter.circle_stroke(badge, 9.0, Stroke::new(1.0, self.theme.SECONDARY));
+        icons::draw(
+            painter,
+            self.rail.glyph(),
+            Rect::from_center_size(badge, Vec2::splat(11.0)),
+            self.theme.SECONDARY,
+        );
+        painter.text(
+            egui::pos2(badge.x + 18.0, header.center().y),
+            Align2::LEFT_CENTER,
+            self.rail.title(),
+            FontId::proportional(15.0),
             self.theme.CONTRAST,
         );
     }
@@ -190,6 +271,30 @@ impl Shell {
                 ink,
             );
         }
+        // The utility group below a separator: settings, reload, account. The reference
+        // pins them to the bottom of the rail, which is why they are positioned from the
+        // rail's own bottom edge rather than continuing the pitch.
+        painter.hline(
+            (rail.left() + 16.0)..=(rail.right() - 16.0),
+            rail.bottom() - 3.0 * g::RAIL_PITCH - 24.0,
+            Stroke::new(1.0, self.theme.DIVIDER),
+        );
+        for (index, glyph) in [Glyph::Settings, Glyph::RefreshCw, Glyph::CircleUser]
+            .into_iter()
+            .enumerate()
+        {
+            let centre = egui::pos2(
+                g::RAIL / 2.0,
+                rail.bottom() - 24.0 - (2 - index) as f32 * g::RAIL_PITCH,
+            );
+            icons::draw(
+                painter,
+                glyph,
+                Rect::from_center_size(centre, Vec2::splat(20.0)),
+                self.theme.SECONDARY,
+            );
+        }
+
         // A hover that changed keeps the loop alive for the transition; once the hover
         // settles there is nothing left to draw.
         if hovered != self.hovered {
@@ -239,6 +344,53 @@ impl Shell {
                 self.theme.BASE,
             );
         }
+
+        // `Hide already installed`, with the switch the reference draws beside it.
+        let toggle = egui::pos2(panel.left() + 24.0, panel.top() + 190.0);
+        painter.text(
+            toggle,
+            Align2::LEFT_CENTER,
+            "Hide already installed",
+            FontId::proportional(13.0),
+            self.theme.BASE,
+        );
+        let switch = Rect::from_center_size(
+            egui::pos2(panel.right() - 32.0, toggle.y),
+            egui::vec2(28.0, 16.0),
+        );
+        painter.rect_filled(switch, 8, self.theme.BUTTON_BG);
+        painter.circle_filled(
+            egui::pos2(switch.left() + 8.0, switch.center().y),
+            6.0,
+            self.theme.SECONDARY,
+        );
+
+        // The news card: a raised block with a heading row and the article title.
+        let news = Rect::from_min_size(
+            egui::pos2(panel.left() + 24.0, panel.top() + 240.0),
+            egui::vec2(g::PANEL - 48.0, 190.0),
+        );
+        painter.rect_filled(news, 12, self.theme.RAISED_BG);
+        icons::draw(
+            painter,
+            Glyph::Newspaper,
+            Rect::from_min_size(news.min + egui::vec2(12.0, 12.0), Vec2::splat(14.0)),
+            self.theme.SECONDARY,
+        );
+        painter.text(
+            egui::pos2(news.left() + 34.0, news.top() + 19.0),
+            Align2::LEFT_CENTER,
+            "Modrinth news",
+            FontId::proportional(12.0),
+            self.theme.SECONDARY,
+        );
+        painter.text(
+            egui::pos2(news.left() + 12.0, news.top() + 44.0),
+            Align2::LEFT_TOP,
+            "Get your next server on Modrinth.",
+            FontId::proportional(16.0),
+            self.theme.CONTRAST,
+        );
     }
 
     /// The tabs, the search row and the scrolling list. Returns whether a glide is running.
@@ -249,11 +401,17 @@ impl Shell {
         );
         let painter = ui.painter();
         painter.rect_filled(content, 0, self.theme.BG);
+        let header = Rect::from_min_size(content.min, egui::vec2(content.width(), g::PAGE_HEADER));
 
-        // The tab strip, with the first label at the measured x.
-        let strip = Rect::from_min_size(content.min, egui::vec2(content.width(), g::TAB_STRIP));
+        // The tab strip, inset inside the content column and below the page header: the
+        // reference's strip is a rounded container with its own margins, not a rule across
+        // the column.
+        let strip = Rect::from_min_size(
+            egui::pos2(content.left() + 8.0, header.bottom() + 8.0),
+            egui::vec2(content.width() - 16.0, g::TAB_STRIP),
+        );
         painter.rect_filled(strip, 8, self.theme.RAISED_BG);
-        let mut x = content.left() + 108.0;
+        let mut x = strip.left() + 20.0;
         for label in ["Mods", "Resource Packs", "Data Packs", "Shaders", "Servers"] {
             let galley = painter.layout_no_wrap(
                 label.to_owned(),

@@ -47,6 +47,10 @@ pub const PANEL_LEFT: f32 = WINDOW.0 - PANEL;
 /// `196,197`. Used as a check on the strip's own padding rather than as a layout input.
 pub const FIRST_TAB_LABEL: f32 = 196.0;
 
+/// The page header's height: the breadcrumb row the reference draws between the title bar
+/// and the tab strip (`Discover modpacks`, with its back and forward arrows).
+pub const PAGE_HEADER: f32 = 44.0;
+
 /// The tab strip's height: the label sits at row 105 and the strip's bottom rule is the
 /// next horizontal edge below it.
 pub const TAB_STRIP: f32 = 36.0;
