@@ -379,6 +379,18 @@ that dropped `project`, `skins`, `screenshots` and `servers` from the page list.
 in this entry had already run, but the next session's would not have. The rewrite is reverted;
 one harness, one schema, and the page list is the authority on which pages exist.
 
+### E-34 closed: the selects are popovers — 2026-10-25
+
+The sort select opens a plate under itself listing Relevance, Downloads, Follows, Newest and
+Updated, with the current one on the brand fill; choosing one re-asks the search. The page-size
+select does the same with 10, 20, 50 and 100.
+
+**The first attempt drew the popover in the wrong layer and a capture caught it**: egui paints in
+call order, and the scroll area paints the result cards after the search row, so the plate
+appeared *underneath* the first card. The fix is not a z-order call — it is drawing and
+interacting the popover after the list, which also gives its items the click instead of letting
+whichever card overlaps them take it.
+
 ### Open after this pass
 
 | # | Region | What differs |
