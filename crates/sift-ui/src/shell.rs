@@ -556,8 +556,10 @@ fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>) {
         theme.SECONDARY,
     );
 
-    // The summary, wrapped to the space the install button leaves.
-    let summary_width = rect.width() - 96.0 - 150.0;
+    // The summary's measure is the reference's, not the space the button leaves: at 2.2x
+    // its first card breaks after "in a", which is a ~440-point line, so the second line
+    // exists for the same reason it does there.
+    let summary_width = (rect.width() - 96.0 - 150.0).min(440.0);
     let summary = painter.layout(
         result.summary.to_owned(),
         crate::fonts::body(13.5),
@@ -605,13 +607,36 @@ fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>) {
         crate::fonts::semibold(13.0),
         theme.BUTTON_TEXT_SELECTED,
     );
-    painter.text(
-        egui::pos2(rect.right() - 16.0, rect.top() + 116.0),
-        Align2::RIGHT_CENTER,
-        format!("{} downloads", result.downloads),
-        crate::fonts::body(11.0),
-        theme.SECONDARY,
-    );
+    // The three stats, right-aligned on the tag row in the reference's order.
+    let mut right = rect.right() - 16.0;
+    for (glyph, value) in [
+        (Glyph::Download, result.downloads),
+        (Glyph::Heart, result.followers),
+        (Glyph::Calendar, result.updated),
+    ] {
+        let label = painter.layout_no_wrap(
+            value.to_owned(),
+            crate::fonts::body(11.0),
+            theme.SECONDARY,
+        );
+        painter.text(
+            egui::pos2(right, rect.top() + 116.0),
+            Align2::RIGHT_CENTER,
+            value,
+            crate::fonts::body(11.0),
+            theme.SECONDARY,
+        );
+        icons::draw(
+            painter,
+            glyph,
+            Rect::from_min_size(
+                egui::pos2(right - label.size().x - 16.0, rect.top() + 116.0 - 6.0),
+                Vec2::splat(12.0),
+            ),
+            theme.SECONDARY,
+        );
+        right -= label.size().x + 28.0;
+    }
 
     ui.add_space(g::CARD_GAP);
 }
@@ -628,6 +653,10 @@ pub struct Card<'a> {
     pub tags: &'a [(&'a str, Glyph)],
     /// The download count, already abbreviated the way the reference shows it.
     pub downloads: &'a str,
+    /// The follower count, abbreviated the same way.
+    pub followers: &'a str,
+    /// When it last changed, in the reference's phrasing.
+    pub updated: &'a str,
 }
 
 /// Six results with the reference's own content, so a capture shows the real anatomy
@@ -647,6 +676,8 @@ fn sample_results() -> [Card<'static>; 6] {
                 ("Fabric", Glyph::Box),
             ],
             downloads: "19.38M",
+            followers: "5,005",
+            updated: "5 days ago",
         },
         Card {
             title: "Zombie Invade 100 Days",
@@ -658,6 +689,8 @@ fn sample_results() -> [Card<'static>; 6] {
                 ("Forge", Glyph::Box),
             ],
             downloads: "15.36M",
+            followers: "9,659",
+            updated: "10 months ago",
         },
         Card {
             title: "Cobblemon Official Modpack [Fabric]",
@@ -670,6 +703,8 @@ fn sample_results() -> [Card<'static>; 6] {
                 ("Fabric", Glyph::Box),
             ],
             downloads: "11.53M",
+            followers: "2,732",
+            updated: "12 hours ago",
         },
         Card {
             title: "COBBLEVERSE - Pokemon Adventure",
@@ -677,6 +712,8 @@ fn sample_results() -> [Card<'static>; 6] {
             summary: "Start a true Pokemon adventure in Minecraft: Cobblemon 1.7.3 [ALL 1025 Pokemon] • Mega Evolutions • Gyms & Badges • Starter Kit.",
             tags: &[("Adventure", Glyph::Compass), ("Fabric", Glyph::Box)],
             downloads: "7.31M",
+            followers: "2,092",
+            updated: "Updated today",
         },
         Card {
             title: "Better MC [FORGE]",
@@ -684,6 +721,8 @@ fn sample_results() -> [Card<'static>; 6] {
             summary: "The kitchen-sink pack that keeps its focus: quests, dungeons and a world that rewards exploring.",
             tags: &[("Adventure", Glyph::Compass), ("Forge", Glyph::Box)],
             downloads: "5.02M",
+            followers: "1,940",
+            updated: "3 days ago",
         },
         Card {
             title: "All the Mods 10",
@@ -691,6 +730,8 @@ fn sample_results() -> [Card<'static>; 6] {
             summary: "Every mod that matters, curated and tested, with a quest book to hold it together.",
             tags: &[("Kitchen sink", Glyph::Boxes), ("NeoForge", Glyph::Box)],
             downloads: "4.88M",
+            followers: "1,512",
+            updated: "6 days ago",
         },
     ]
 }
