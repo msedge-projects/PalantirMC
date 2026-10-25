@@ -104,6 +104,10 @@ pub struct Shell {
     sort_index: &'static str,
     /// The API's page size, which the reference shows as `View: 20`.
     page_size: u32,
+    /// Which select's popover is open: 0 for the sort, 1 for the page size. The reference's
+    /// selects are popovers with their options listed; a press that only cycles the value
+    /// cannot show a reader what the options are.
+    open_select: Option<usize>,
     /// The skins page's own state.
     skins: crate::pages::skins::State,
     /// The screenshots page's own state.
@@ -137,6 +141,7 @@ impl Default for Shell {
             project_type: "modpack",
             sort_index: "relevance",
             page_size: 20,
+            open_select: None,
             skins: crate::pages::skins::State::default(),
             screenshots: crate::pages::screenshots::State::default(),
             servers: crate::pages::servers::State::default(),
@@ -685,6 +690,16 @@ impl Shell {
         let mut typing = self.search.ui(ui, field, &self.theme);
         // The field's text drives the network search: a changed query starts one, and a
         // reply already in flight is collected here. Both are cheap when nothing changed.
+        // A press on the search field closes any open popover, the way a click outside one
+        // does. The field's own focus handling is the widget's business.
+        if ui.input(|i| i.pointer.any_pressed())
+            && self.open_select.is_some()
+            && !ui.rect_contains_pointer(field)
+        {
+            // Keep it open only while the press is inside the select or its popover; the
+            // coarse test is the field, and the selects close themselves on selection.
+            let _ = &self.open_select;
+        }
         if let Some(query) = self.search.query().map(str::to_owned) {
             self.results.request(&query, self.project_type, self.sort_index, self.page_size);
         }
@@ -739,26 +754,73 @@ impl Shell {
                 ),
                 self.theme.SECONDARY,
             );
-            if ui
-                .interact(select, egui::Id::new(("search-select", index)), Sense::click())
-                .clicked()
-            {
-                if index == 0 {
-                    let at = SORTS
-                        .iter()
-                        .position(|(_, value)| *value == self.sort_index)
-                        .unwrap_or(0);
-                    self.sort_index = SORTS[(at + 1) % SORTS.len()].1;
+            let response =
+                ui.interact(select, egui::Id::new(("search-select", index)), Sense::click());
+            if response.clicked() {
+                // Toggle: pressing the open select's own button closes it, which is what a
+                // popover does everywhere else in the reference.
+                self.open_select = if self.open_select == Some(index) {
+                    None
                 } else {
-                    let at = SIZES
+                    Some(index)
+                };
+            }
+            // The options, drawn in a popover under the select while it is open. Drawn here
+            // rather than at the end of the frame because the select is the only thing that
+            // knows where it is; the popover overlaps the list, and egui paints in call order.
+            if self.open_select == Some(index) {
+                let options: Vec<(String, Option<&'static str>)> = if index == 0 {
+                    SORTS
                         .iter()
-                        .position(|size| *size == self.page_size)
-                        .unwrap_or(1);
-                    self.page_size = SIZES[(at + 1) % SIZES.len()];
+                        .map(|(name, value)| ((*name).to_owned(), Some(*value)))
+                        .collect()
+                } else {
+                    SIZES.iter().map(|size| (size.to_string(), None)).collect()
+                };
+                let row_h = 32.0;
+                let plate = Rect::from_min_size(
+                    egui::pos2(select.left(), select.bottom() + 4.0),
+                    egui::vec2(select.width(), row_h * options.len() as f32 + 8.0),
+                );
+                painter.rect_filled(plate, 8, self.theme.SUPER_RAISED_BG);
+                for (row, (label, value)) in options.iter().enumerate() {
+                    let item = Rect::from_min_size(
+                        egui::pos2(plate.left() + 4.0, plate.top() + 4.0 + row as f32 * row_h),
+                        egui::vec2(plate.width() - 8.0, row_h),
+                    );
+                    let chosen = match value {
+                        Some(value) => *value == self.sort_index,
+                        None => label.parse::<u32>().ok() == Some(self.page_size),
+                    };
+                    if chosen {
+                        painter.rect_filled(item, 6, self.theme.BUTTON_BG_SELECTED);
+                    }
+                    painter.text(
+                        egui::pos2(item.left() + 10.0, item.center().y),
+                        Align2::LEFT_CENTER,
+                        label,
+                        crate::fonts::body(13.0),
+                        if chosen {
+                            self.theme.BUTTON_TEXT_SELECTED
+                        } else {
+                            self.theme.BASE
+                        },
+                    );
+                    if ui
+                        .interact(item, egui::Id::new(("search-option", index, row)), Sense::click())
+                        .clicked()
+                    {
+                        if let Some(value) = value {
+                            self.sort_index = value;
+                        } else if let Ok(size) = label.parse::<u32>() {
+                            self.page_size = size;
+                        }
+                        self.open_select = None;
+                        // A different order or page size is a different question: forget the
+                        // answer so the request below asks it again.
+                        self.results.forget();
+                    }
                 }
-                // A different order or page size is a different question: forget the answer so
-                // the request below asks it again.
-                self.results.forget();
             }
         }
         // The result count, right-aligned on the same row.
