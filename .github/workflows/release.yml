@@ -175,8 +175,16 @@ jobs:
           if (-not (Test-Path $makensis)) { throw "makensis is not installed" }
 
           $version = (Select-String -Path crates/sift-ui/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' -List).Matches[0].Groups[1].Value
-          & $makensis /V2 /DVERSION=$version /DAPP_EXE=../dist/SiftUi.exe installer/sift.nsi
-          if ($LASTEXITCODE -ne 0) { throw "makensis exited $LASTEXITCODE" }
+          # Run from inside `installer/`, with the bare script name: the script builds every
+          # path from `${__FILEDIR__}`, and handing makensis `installer/sift.nsi` from the repo
+          # root made it resolve the icon as `installer\installersift.ico` and abort on line 72.
+          Push-Location installer
+          try {
+            & $makensis /V2 /DVERSION=$version /DAPP_EXE=../dist/SiftUi.exe sift.nsi
+            if ($LASTEXITCODE -ne 0) { throw "makensis exited $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
 
           $setup = Get-Item "dist/SiftLauncher-$version-x64-setup.exe"
           # Same bound as the exe it wraps, with room for the NSIS stub and the icon.
