@@ -8,12 +8,13 @@ members = [
     # its own so both UI crates can depend on it -- the egui one is in a separate
     # workspace (see below) and can reach it by path.
     "crates/sift-game",
-    "crates/sift-desktop",
-    # `crates/sift-ui` is **not** a member, and cannot be: `iced_winit` 0.12
-    # pins `web-sys = "=0.3.67"` and `eframe` 0.36 requires `^0.3.103`, so the two
-    # UI stacks cannot resolve in one lock file. It is its own workspace (see its
-    # `Cargo.toml`) with its own lock, which is what lets the migration have both
-    # stacks alive at once instead of a dead product in between.
+    "crates/sift-game",
+    # `crates/sift-ui` is **not** a member: it is the product, and it is its own
+    # workspace with its own lock file. The two cannot share one -- that constraint
+    # is why the egui app was built beside the iced one during the migration, and it
+    # stops mattering now that `crates/sift-desktop` is gone, but the split stays
+    # because splitting the product from the libraries keeps the product's lock
+    # file free of anything only a test needs.
 ]
 
 [workspace.package]

@@ -330,66 +330,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      # --- iced, kept only until `crates/sift-desktop` is deleted --------------
-      #
-      # DELETED WITH `crates/sift-desktop` IN THE NEXT SLICE. It stays for now
-      # because this is the only place the iced exe is built for both targets with
-      # the CRT flag and put through the DLL gate; `test` and `lint` compile the
-      # crate but never link the shipped artefact. The upload is named
-      # `iced-<target>`, not the product's name, so no download can be mistaken for
-      # the one people are meant to run -- and `release.yml` does not publish it.
-      - name: Build the iced launcher (temporary)
-        env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p sift-desktop --target ${{ matrix.target }}
-
-      - name: Stage the iced exe and hash it (temporary)
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist-iced | Out-Null
-          Copy-Item -Path "target/${{ matrix.target }}/release/SiftLauncher.exe" -Destination dist-iced/SiftLauncher.exe
-
-          $exe = Get-Item -Path dist-iced/SiftLauncher.exe
-          $hash = (Get-FileHash -Path $exe.FullName -Algorithm SHA256).Hash.ToLower()
-
-          if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
-            throw "Unexpected SiftLauncher.exe size: $($exe.Length) bytes"
-          }
-
-          [System.IO.File]::WriteAllText("dist-iced/SiftLauncher.exe.sha256", "$hash  SiftLauncher.exe`n")
-
-          "### iced SiftLauncher.exe (${{ matrix.target }}) -- temporary" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
-          "| Field | Value |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
-          "| --- | --- |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
-          "| Size | $($exe.Length) bytes |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
-          "| sha256 | $hash |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
-
-      - name: Check the iced exe's DLL dependencies (temporary)
-        run: python .github/scripts/check_exe.py dist-iced/SiftLauncher.exe
-
-      - name: Upload the iced artifact (temporary)
-        uses: actions/upload-artifact@v4
-        with:
-          name: iced-${{ matrix.target }}
-          path: dist-iced/
-          retention-days: 14
-          if-no-files-found: error
-
-  # The egui workspace's own test and lint job, beside `test` and `lint` because
-  # neither of those can compile this crate: `cargo test --workspace` in the root
-  # directory means the root workspace, and `crates/sift-ui` is not a member of it
-  # (`iced_winit` pins web-sys =0.3.67, eframe needs ^0.3.103, so one lock file
-  # cannot hold both UI stacks).
-  #
-  # `--locked` here too. This job used to build without it because the slice's lock
-  # was uncommitted; the product build in `package` now requires that lock, so a
-  # test job resolving its own versions would be the one place where a green run
-  # meant something other than what ships. `HANDOFF.md`'s note about this build is
-  # out of date and is corrected by the same commit.
-  #
-  # The release build stays even though `package` also builds the app, because
-  # `package` does not run on pull requests -- so on a PR this is the only job that
-  # compiles the product the way it will be shipped.
   egui-slice:
     name: Build egui slice
     runs-on: windows-latest

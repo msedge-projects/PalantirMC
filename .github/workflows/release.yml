@@ -162,39 +162,6 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-      # DELETED WITH `crates/sift-desktop` IN THE NEXT SLICE. `publish` collects only
-      # `sift-launcher-*`, so this artefact is uploaded for inspection and is never
-      # attached to a release -- one release must not carry two launchers. It is
-      # still built here because the DLL gate on the iced exe is the check that
-      # caught VCRUNTIME140.dll, and a tag is the last place that build could
-      # regress unnoticed. Note the cost of keeping it: `publish` needs this job, so
-      # a broken iced build blocks an egui release until the block is deleted.
-      - name: Build the iced launcher (temporary)
-        env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p sift-desktop --target ${{ matrix.target }}
-
-      - name: Stage the iced exe (temporary)
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist-iced | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/SiftLauncher.exe" dist-iced/SiftLauncher.exe
-
-          $exe = Get-Item dist-iced/SiftLauncher.exe
-          if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
-            throw "Unexpected SiftLauncher.exe size: $($exe.Length) bytes"
-          }
-
-      - name: Check the iced exe's DLL dependencies (temporary)
-        run: python .github/scripts/check_exe.py dist-iced/SiftLauncher.exe
-
-      - name: Upload the iced artifact (temporary)
-        uses: actions/upload-artifact@v4
-        with:
-          name: iced-${{ matrix.target }}
-          path: dist-iced/
-          if-no-files-found: error
-
   publish:
     name: Publish release
     needs: build

@@ -3,7 +3,9 @@
 //! **Why this exists.** `AGENTS.md` makes attribution a shipping condition: art taken from
 //! another launcher and code taken under MIT "carry their notice in the source and in the
 //! binary's About page". `THIRD_PARTY_NOTICES.md` is the source half; this is the binary's
-//! half, and it renders the same list rather than a second inventory that could drift.
+//! half, and it renders the rows for what *this* binary contains -- the notices file also
+//! covers the iced build, so copying it whole would name components this exe does not link
+//! (see [`ATTRIBUTION`]).
 //!
 //! **What the reference has, and has not.** There is no About view to copy. The pinned tree
 //! (`vendor/modrinth-app/UPSTREAM.md`) has no `About.vue`, `modrinth/code`'s
@@ -56,12 +58,13 @@ const LICENCE: &str =
 
 /// What this product ships that is somebody else's work, and under which licence.
 ///
-/// The entries are the sections of `THIRD_PARTY_NOTICES.md` in its own order -- the
-/// Modrinth App, Inter, cosmic-text, the adopted art -- plus the crate this shell adopted
-/// from `crmne/fastframe` (`vendor/fastframe-scroll/UPSTREAM.md`), which the notices file
-/// does not carry yet. Each row names the licence, then where the notice or the licence
-/// text lives, so a reader holding the binary can find the terms without this view growing
-/// a scroll area.
+/// The rows are the components `SiftUi.exe` actually contains: the reference tree the window
+/// is ported from, the fonts it embeds, the icon set it strokes, the toolkit that draws it,
+/// and the scroll crate it adopted. `THIRD_PARTY_NOTICES.md` is the long form, and it also
+/// lists **cosmic-text**, which the iced build in `crates/sift-desktop` compiles against --
+/// this exe does not link it, so naming it here would name a component the binary does not
+/// contain. Each row gives the licence, then where the notice or the licence text lives, so
+/// a reader holding the binary can find the terms.
 const ATTRIBUTION: [(&str, &str); 5] = [
     (
         "Modrinth App",
@@ -74,13 +77,12 @@ const ATTRIBUTION: [(&str, &str); 5] = [
          OFL.txt",
     ),
     (
-        "cosmic-text",
-        "MIT OR Apache-2.0 · vendored and patched at vendor/cosmic-text/ · LICENSE-MIT, \
-         LICENSE-APACHE",
-    ),
-    (
         "Lucide icons",
         "ISC · through the Modrinth App's own icon set · THIRD_PARTY_NOTICES.md",
+    ),
+    (
+        "egui / eframe",
+        "MIT OR Apache-2.0 · the toolkit this window is drawn with · Cargo.lock",
     ),
     (
         "fastframe-scroll 0.6.0",
@@ -149,6 +151,10 @@ pub fn draw(ui: &mut Ui, screen: Rect, theme: &Theme, open: &mut bool) -> bool {
 
     let painter = ui.painter();
     painter.rect_filled(screen, 0, Color32::from_black_alpha(SCRIM_ALPHA));
+    // The scrim is a target of its own, and it closes: `NewModal.vue` defaults
+    // `closeOnClickOutside` to true. It is also what keeps a press from reaching the page
+    // behind, which is still drawn this frame and still full of buttons.
+    let scrim = ui.interact(screen, egui::Id::new("about-scrim"), Sense::click());
     // `bg-bg-raised rounded-2xl border border-solid border-surface-5` -- the reference's
     // modal body, in the theme's own tokens: raised background, 16-point radius, surface-5
     // edge. The shadow is not drawn: egui has no drop shadow, and faking one with

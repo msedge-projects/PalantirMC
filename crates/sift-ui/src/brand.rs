@@ -9,7 +9,7 @@
 //! makes the drawing part of the binary, so the picture cannot be separated from the program
 //! that draws it.
 //!
-//! **What it costs.** `logo512.png` is **148,607 bytes -- 145 KB -- measured on the file**
+//! **What it costs.** `logo512.png` is **148,607 bytes -- 145.1 KiB -- measured on the file**
 //! that `tools/gen_brand.py` writes. `include_bytes!` places the PNG in the binary's
 //! read-only data verbatim: the linker neither compresses nor re-encodes it, so that is the
 //! whole cost of embedding. The 512-pixel copy rather than `icon256.png` (46,465 bytes)
