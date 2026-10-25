@@ -4966,6 +4966,9 @@ impl Shell {
         // `PALANTIRMC_FRAME_LOG` names a file, so the shipped launcher pays one
         // environment lookup and an `Option` check per frame and nothing else.
         let _frame = crate::frame_log::begin();
+        // And the animation clock: it takes its next step when this frame is done,
+        // which is what keeps a glide off the beat between a timer and the display.
+        let _built = crate::scroll::FrameBuilt;
         // Keep the window's hit test pointed at the maximize control: the
         // rectangle is derived from this shell's own constants, so re-publishing
         // it is a store behind a lock rather than a measurement to keep in step.
@@ -11868,7 +11871,12 @@ impl Shell {
         // the GPU sixty times a second to redraw the same picture.
         iced::subscription::channel(FRAME_ID, 1, |mut sender| async move {
             let _ = std::thread::spawn(move || loop {
-                std::thread::sleep(FRAME);
+                // One step per frame *built*, not one per 16 ms. See
+                // [`crate::scroll::frame_built`]: a fixed sleep beats against the
+                // display's own present interval, and the beat is a visible hitch
+                // every second or so. The timeout is the fallback for a window that
+                // has stopped drawing.
+                crate::scroll::wait_for_frame(FRAME * 4);
                 match sender.try_send(Message::Tick) {
                     Ok(()) => {}
                     // Full: the UI is a frame or two behind. Frames are
