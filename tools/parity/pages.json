@@ -1,0 +1,80 @@
+{
+  "_comment": [
+    "Pages and the pointer work that reaches them, for tools/parity/capture.py.",
+    "Coordinates are WINDOW-RELATIVE: client-area pixels, measured from the top-left",
+    "of the page inside the window, at the 1440x900 client area capture.py pins.",
+    "EVERY NUMBER HERE IS A GUESS. They were written from screenshots of the Modrinth",
+    "desktop app on another machine and none of them has been confirmed against this",
+    "one. Tune them with both apps up: take one capture, look where the pointer ended,",
+    "move the constant it came from, take the capture again. A step that lands on a",
+    "control shows up as that control's hover state in a capture that should be idle.",
+    "A step is exactly one of: {\"move\": [x, y]}, {\"click\": [x, y]},",
+    "{\"wheel\": [x, y, notches]}, {\"key\": \"ctrl+l\"}, {\"wait\": milliseconds}.",
+    "Any [x, y] may instead be [\"NAME\"], one point from `constants` below, so a target",
+    "two pages share is written down once and tuned in one place. `wheel` takes the",
+    "point plus a notches number: [\"NAME\", -3] or [720, 400, -3], negative scrolling",
+    "down. `key` takes a combination, modifiers first: \"ctrl+l\", \"ctrl+shift+i\".",
+    "`wait` is milliseconds.",
+    "Every page navigates to itself first. A capture has to describe the page, not",
+    "whatever page the app happened to be showing when the loop began -- otherwise two",
+    "runs of the same command are not comparable and the diff is between two accidents.",
+    "States: capture.py adds --state to the filename, so `discover` and `discover-hover`",
+    "are two pictures of one page and the second is the pointer resting on a card."
+  ],
+  "constants": {
+    "_comment": [
+      "Named client-area points. Some are not used by a page yet: they are the targets",
+      "the next pages (library, settings sub-pages) will want, kept here so the tuning",
+      "pass has one map to correct instead of four files to correct."
+    ],
+    "PARK": [1400, 12],
+    "RAIL_HOME": [32, 64],
+    "RAIL_DISCOVER": [32, 120],
+    "RAIL_LIBRARY": [32, 176],
+    "RAIL_SETTINGS": [32, 812],
+    "DISCOVER_CARD_FEATURED_1": [470, 240],
+    "DISCOVER_CARD_FEATURED_2": [800, 240],
+    "DISCOVER_CATEGORY_MODPACKS": [180, 104],
+    "HOME_CARD_INSTANCE_1": [500, 260],
+    "HOME_CARD_INSTANCE_2": [860, 260],
+    "SETTINGS_NAV_APPEARANCE": [420, 60]
+  },
+  "pages": {
+    "discover": {
+      "title_hint": "Discover",
+      "steps": [
+        { "click": ["RAIL_DISCOVER"] },
+        { "wait": 500 },
+        { "move": ["PARK"] },
+        { "wait": 300 }
+      ]
+    },
+    "discover-hover": {
+      "title_hint": "Discover",
+      "steps": [
+        { "click": ["RAIL_DISCOVER"] },
+        { "wait": 500 },
+        { "move": ["DISCOVER_CARD_FEATURED_1"] },
+        { "wait": 600 }
+      ]
+    },
+    "home": {
+      "title_hint": "Home",
+      "steps": [
+        { "click": ["RAIL_HOME"] },
+        { "wait": 500 },
+        { "move": ["PARK"] },
+        { "wait": 300 }
+      ]
+    },
+    "settings": {
+      "title_hint": "Settings",
+      "steps": [
+        { "click": ["RAIL_SETTINGS"] },
+        { "wait": 600 },
+        { "move": ["PARK"] },
+        { "wait": 300 }
+      ]
+    }
+  }
+}
