@@ -455,9 +455,9 @@ impl Shell {
             egui::pos2(g::CONTENT_LEFT, g::TITLE_BAR),
             egui::vec2(g::PANEL_LEFT - g::CONTENT_LEFT - 16.0, g::WINDOW.1 - g::TITLE_BAR),
         );
-        let painter = ui.painter();
-        painter.rect_filled(content, 0, self.theme.BG);
+        ui.painter().rect_filled(content, 0, self.theme.BG);
 
+        let painter = ui.painter();
         // The tab strip: a rounded container holding six pills, the first of which is the
         // page's own type and is active. Measured at 2x from `top.jpg`: the container starts
         // 8 px left of the content column at 48 down, its pills are 36 tall and start 6 in.
@@ -505,6 +505,9 @@ impl Shell {
         // Its return value is frame debt -- true while it is focused, because the caret is
         // the one thing in this window that moves without being asked to.
         let mut typing = self.search.ui(ui, field, &self.theme);
+        // `search.ui` took `ui` mutably, which ended the painter borrow taken above; the
+        // painter is re-acquired here, and the compiler is what said so.
+        let painter = ui.painter();
         // The two selects: `Sort by: Relevance` and `View: 20`, each its own rounded box.
         let select_w = 150.0;
         for (index, label) in ["Sort by:  Relevance", "View: 20"]
