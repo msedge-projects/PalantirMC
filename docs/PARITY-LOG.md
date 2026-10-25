@@ -120,6 +120,29 @@ weights** (400/500/600/700/800 as separate families), which is what made the str
 looking "lighter and smaller": egui ships one proportional face, so without registering the
 weights every heading renders at 400.
 
+### Third pass: E-6 closed, and the CDN taught two lessons
+
+The card now carries the reference's anatomy and content: a 64-point icon tile, the title
+with its author and link glyph on one baseline, a summary wrapped at the reference's own
+measure (both cards break after "in a"), a row of tag pills with their glyphs, the three
+stats right-aligned on that row, and the `Install` button at the top-right. The card is 148
+tall -- the 2.2x crop said so, after the first guess of 116.
+
+Two things about icons that only a live run could have found:
+
+| Assumption | Measured |
+| --- | --- |
+| Icons live at `https://cdn.modrinth.com/data/<id>/icon.png` | **400 on every id.** The API's own `icon_url` is a hashed `.../<sha>_96.webp`, and some projects still serve `.png` |
+| PNG and JPEG decoders are enough | **WebP is the common case**, so a decoder without it turns every icon into a grey tile |
+
+Both are now constants in the sample data with the reason beside them, and the image
+dependency names the three formats it needs and says why each is there.
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-11 | Card tile | the icon is drawn into a square; the reference's 64-point tile is rounded, so a light icon shows square corners against the plate |
+| E-12 | Card | the reference's title row carries a small follower glyph on hover, and its `Install` button has a border rather than a fill |
+
 ### Open after this pass
 
 | # | Region | What differs |
