@@ -2103,48 +2103,57 @@ mod tests {
         assert!(narrow.right() <= 800.0 - DIALOG_MARGIN + 0.001);
     }
 
-    /// The rail's rows sit on one pitch inside a category: 40 of row and 4 of `gap-1`. A
-    /// category heading is not a row, so the row after one is a heading's height further
-    /// down -- 20 of line, 6 of `pb-1.5` and 12 of `mt-3`.
+    /// The rail keeps the reference's pitch when it fits and tightens it when it does not, and
+    /// either way every tab is inside the rail and on one pitch within its category.
+    ///
+    /// The absolute numbers the earlier version of this test asserted were the *uncompressed*
+    /// layout — which is exactly the layout that put three tabs past the dialog's edge and made
+    /// them unselectable. What has to hold is the relationship, not the constant.
     #[test]
-    fn the_rail_rows_sit_on_one_pitch() {
-        let dialog = dialog_rect(screen());
-        let rows = rail_rows(dialog);
-        assert_eq!(rows.len(), TAB_COUNT);
+    fn the_rail_fits_its_pane_and_keeps_one_pitch_per_category() {
+        for screen_size in [vec2(1440.0, 900.0), vec2(1600.0, 1200.0), vec2(1280.0, 800.0)] {
+            let dialog = dialog_rect(Rect::from_min_size(pos2(0.0, 0.0), screen_size));
+            let rail = rail_rect(dialog);
+            let rows = rail_rows(dialog);
+            assert_eq!(rows.len(), TAB_COUNT);
 
-        let first = rows[0];
-        // The first row is under the Display heading: the rail's `p-4`, the heading's 20-point
-        // line and its `pb-1.5`.
-        let first_row_top =
-            dialog.top() + HEADER_HEIGHT + RAIL_PADDING + CATEGORY_LINE + CATEGORY_PADDING;
-        assert!((first.row.top() - first_row_top).abs() < 0.001);
-        assert!((first.row.height() - RAIL_ROW_HEIGHT).abs() < 0.001);
-        assert!(first.heading.is_some(), "the first row opens the Display group");
-
-        let mut crossings = 0;
-        for pair in rows.windows(2) {
-            let pitch = pair[1].row.top() - pair[0].row.top();
-            if pair[0].tab.category() == pair[1].tab.category() {
+            // Every row starts and ends inside the rail: a row outside it is drawn past the
+            // dialog and skipped as a target, which is the bug this layout was changed for.
+            for row in rows {
                 assert!(
-                    (pitch - (RAIL_ROW_HEIGHT + RAIL_ROW_GAP)).abs() < 0.001,
-                    "same-category pitch: {pitch}"
-                );
-                assert!(pair[1].heading.is_none(), "a category is headed once");
-            } else {
-                crossings += 1;
-                assert!(
-                    pair[1].heading.is_some(),
-                    "a new category starts with its heading"
-                );
-                let heading_pitch =
-                    RAIL_ROW_HEIGHT + RAIL_ROW_GAP + CATEGORY_TOP_GAP + CATEGORY_LINE + CATEGORY_PADDING;
-                assert!(
-                    (pitch - heading_pitch).abs() < 0.001,
-                    "crossing pitch: {pitch} against {heading_pitch}"
+                    row.row.top() >= rail.top() - 0.001
+                        && row.row.bottom() <= rail.bottom() + 0.001,
+                    "{} falls outside the rail at {screen_size:?}",
+                    row.tab.label()
                 );
             }
+
+            // One positive pitch per step, and a heading wherever the category changes.
+            let mut crossings = 0;
+            for pair in rows.windows(2) {
+                let pitch = pair[1].row.top() - pair[0].row.top();
+                assert!(pitch > 0.0, "rows advance downward");
+                if pair[0].tab.category() == pair[1].tab.category() {
+                    assert!(pair[1].heading.is_none(), "a category is headed once");
+                } else {
+                    crossings += 1;
+                    assert!(pair[1].heading.is_some(), "a new category is headed");
+                }
+            }
+            assert_eq!(crossings, 3, "Display, Account, Instance defaults, System");
         }
-        assert_eq!(crossings, 3, "Display, Account, Instance defaults, System");
+    }
+
+    /// The rail only compresses when it has to: a window with room keeps the reference's own
+    /// 40-point rows, which is the layout every capture was measured against.
+    #[test]
+    fn a_tall_window_keeps_the_reference_pitch() {
+        let tall = dialog_rect(Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 1400.0)));
+        let rows = rail_rows(tall);
+        assert!(
+            (rows[0].row.height() - RAIL_ROW_HEIGHT).abs() < 0.001,
+            "a window with room keeps the source's row height"
+        );
     }
 
     /// The knob starts at the `p-1` inset, ends a knob short of the far inset, and moves
