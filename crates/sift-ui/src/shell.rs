@@ -432,9 +432,69 @@ impl Shell {
             x = pill.right() + 8.0;
         }
 
+        // The search row: the field, the sort and view selects, the result count and the
+        // pager, in the reference's order. Heights are the reference's 40-point controls.
+        let row = Rect::from_min_size(
+            egui::pos2(content.left(), strip.bottom() + 12.0),
+            egui::vec2(content.width(), g::SEARCH_ROW),
+        );
+        let field = Rect::from_min_size(
+            row.min,
+            egui::vec2(row.width() * 0.62, g::SEARCH_ROW),
+        );
+        painter.rect_filled(field, 8, self.theme.RAISED_BG);
+        painter.circle_stroke(
+            egui::pos2(field.left() + 18.0, field.center().y),
+            6.0,
+            Stroke::new(1.5, self.theme.SECONDARY),
+        );
+        painter.text(
+            egui::pos2(field.left() + 34.0, field.center().y),
+            Align2::LEFT_CENTER,
+            "Search modpacks...",
+            crate::fonts::body(13.0),
+            self.theme.SECONDARY,
+        );
+        // The two selects: `Sort by: Relevance` and `View: 20`, each its own rounded box.
+        let select_w = 150.0;
+        for (index, label) in ["Sort by:  Relevance", "View: 20"]
+            .into_iter()
+            .enumerate()
+        {
+            let select = Rect::from_min_size(
+                egui::pos2(field.right() + 12.0 + index as f32 * (select_w + 8.0), row.top()),
+                egui::vec2(select_w, g::SEARCH_ROW),
+            );
+            painter.rect_filled(select, 8, self.theme.RAISED_BG);
+            painter.text(
+                egui::pos2(select.left() + 12.0, select.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                crate::fonts::body(13.0),
+                self.theme.BASE,
+            );
+            icons::draw(
+                painter,
+                Glyph::ChevronDown,
+                Rect::from_center_size(
+                    egui::pos2(select.right() - 16.0, select.center().y),
+                    Vec2::splat(12.0),
+                ),
+                self.theme.SECONDARY,
+            );
+        }
+        // The result count and the pager, right-aligned on the same row.
+        painter.text(
+            egui::pos2(row.right() - 110.0, row.center().y),
+            Align2::LEFT_CENTER,
+            "1  -  946",
+            crate::fonts::body(13.0),
+            self.theme.SECONDARY,
+        );
+
         // The list, via fastframe's scrolling: 120 points per notch rather than egui's 40.
         let list = Rect::from_min_max(
-            egui::pos2(content.left(), strip.bottom() + 12.0),
+            egui::pos2(content.left(), row.bottom() + 12.0),
             content.max,
         );
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));

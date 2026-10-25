@@ -63,6 +63,9 @@ pub const TAB_CONTAINER: f32 = 52.0;
 /// One tab pill's height.
 pub const TAB_PILL: f32 = 36.0;
 
+/// The search row's height: the field and the two selects are the same 40-point control.
+pub const SEARCH_ROW: f32 = 40.0;
+
 /// The tab strip's height: the label sits at row 105 and the strip's bottom rule is the
 /// next horizontal edge below it.
 pub const TAB_STRIP: f32 = 36.0;
