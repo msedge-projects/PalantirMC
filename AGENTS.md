@@ -10,7 +10,7 @@ task with a commit, pushed to both remotes, without asking first and without
 leaving the work uncommitted for a later session to rediscover:
 
 ```
-git push origin <branch>   # msedge-projects/PalantirMC (repointed 2026-10-15)
+git push origin <branch>   # msedge-projects/SiftLauncher (renamed 2026-10-25; old URLs redirect)
 git push public <branch>   # msedge-projects/PalantirMC, public, where CI runs
 ```
 

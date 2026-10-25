@@ -319,3 +319,20 @@ a smaller lie than a four-thousand-line extraction done to avoid it, and it puts
 results on screen in the stack that scrolls at 18 ms p95. The `Store` extraction
 becomes what it is: a separate slice that both stacks will want, to be planned on its
 own numbers rather than as a prerequisite.
+
+## 8. The repository is `SiftLauncher` now
+
+Renamed 2026-10-25, the first of the rename's surfaces to move:
+
+- **`msedge-projects/SiftLauncher`** is this repository. Its history, CI and one open pull
+  request came with the name.
+- **`msedge-projects/SiftLauncher-archive`** is the 2026-10-08 stub that already held the
+  name: one commit (`Add phase 1 core metadata model`), 44 KB, kept rather than deleted so
+  nothing was destroyed to free a string.
+- GitHub redirects `msedge-projects/PalantirMC` to the new name, so old links and old
+  `gh run ...` commands still resolve.
+- The default branch is still `master`; the local remote was repointed in the same session.
+
+Still owed on this surface: the binary is still `SiftLauncher.exe` (it was renamed with the
+crates), the product strings inside it already say `Sift Launcher`, and the data directories
+are still the old ones until the paths slice lands.
