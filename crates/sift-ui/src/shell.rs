@@ -360,7 +360,8 @@ impl Shell {
         animating
     }
 
-    /// The right panel: the getting-started rows and the news card.
+    /// The right panel: the page's own sections first, then the shared getting-started and
+    /// news. The reference teleports project sections into this panel, so both live here.
     fn right_panel(&mut self, ui: &mut Ui) {
         let panel = Rect::from_min_size(
             egui::pos2(g::PANEL_LEFT, g::TITLE_BAR),
@@ -420,6 +421,23 @@ impl Shell {
             6.0,
             self.theme.SECONDARY,
         );
+
+        // A project page's compatibility block sits above the shared sections, which is
+        // where the reference teleports it. The shared panel is then drawn below it.
+        let mut shared_top = panel.top();
+        if let Some(project) = self.open_project.clone() {
+            let used = crate::pages::project::panel(
+                ui,
+                Rect::from_min_size(
+                    egui::pos2(panel.left() + 24.0, panel.top() + 20.0),
+                    egui::vec2(g::PANEL - 48.0, 400.0),
+                ),
+                &self.theme,
+                &project,
+            );
+            shared_top = panel.top() + 20.0 + used + 12.0;
+        }
+        let _ = shared_top;
 
         // The news card: a raised block with a heading row and the article title.
         let news = Rect::from_min_size(
