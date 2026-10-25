@@ -19,7 +19,7 @@ use crate::images::Images;
 use crate::theme::Theme;
 
 /// What the reader asked for by pressing something on this page.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Action {
     /// Nothing was pressed.
     #[default]
