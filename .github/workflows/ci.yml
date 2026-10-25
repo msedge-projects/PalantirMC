@@ -108,29 +108,25 @@ jobs:
       # than something a session is asked to remember. It needs the vendored
       # reference tree, which is in the repository, and Python, which the runner
       # has -- `check_exe.py` already relies on it.
-      - name: Design system regeneration
-        run: python tools/gen_theme.py --check
+      # The four iced generators (`gen_theme`, `gen_icons`, `gen_text`, `gen_locale`) are
+      # gone with `crates/sift-desktop`: their outputs were files in that crate, so a gate
+      # that regenerates them could only fail. Their replacements are the egui steps below,
+      # which generate into the crate that actually ships.
 
       # Same argument, for the icon set: 313 SVGs are compiled into 20k lines of
       # geometry, and the way that file stops matching its source is an edit to
       # one of them. Regeneration is the check that cannot be forgotten.
-      - name: Icon set regeneration
-        run: python tools/gen_icons.py --check
 
       # And the same for the strings. The reference's English locale is the only
       # authority on what its interface says, so the table the pages read from is
       # compiled from it -- including the ICU plurals and choices, which a
       # generator that silently got one arm wrong would hide. Regeneration is the
       # check: byte-identical output, or this step fails.
-      - name: String table regeneration
-        run: python tools/gen_text.py --check
 
       # And the same for the other 33 locale trees, which are compiled into the
       # sparse tables the language setting reads from. Same argument as the
       # English table above; the generator refuses a locale whose ICU it cannot
       # render rather than emitting a message that would be filled in wrongly.
-      - name: Locale table regeneration
-        run: python tools/gen_locale.py --check
 
       # The egui side has generators of its own, and a generated file nobody checks is a
       # generated file that drifts silently: theme.rs is 1,382 lines of tokens read out of

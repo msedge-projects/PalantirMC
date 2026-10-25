@@ -14,7 +14,8 @@ first is exactly the thing that drifts from it, so this tool **imports** that on
 What does change is the shape vocabulary at the far end. iced's `Path::builder`
 takes a sequence of subpaths and cubic Beziers; egui's `epaint::PathShape` takes a
 `Vec<Pos2>` -- one polyline, no curves, no subpaths -- plus a fill and a
-`PathStroke`. So this tool does the two conversions egui needs and iced did not:
+`PathStroke`, and a fill has no fill rule at all. So this tool does the
+conversions egui needs and iced did not:
 
 * **Flatten the cubics.** Each Bezier is subdivided until its control points are
   within `FLATNESS_FRACTION` of the view box's long side from its chord. At the
@@ -29,8 +30,8 @@ takes a sequence of subpaths and cubic Beziers; egui's `epaint::PathShape` takes
   a triangle fan from the first point, so a concave outline is painted outside
   itself and a hole is painted solid. Filled elements are triangulated here --
   ear clipping with hole bridging, honouring the element's own `fill-rule` -- and
-  emitted as `egui::Shape::Mesh`. See "Triangulating a filled element" below and
-  `docs/PARITY-LOG.md`, "Two fidelity gaps in the icon set".
+  emitted as `egui::Shape::Mesh`. See "Filled elements: why epaint cannot be handed
+  one" below and `docs/PARITY-LOG.md`, "Two fidelity gaps in the icon set".
 * **Round the joins and caps.** epaint miters every corner and butts every line
   end. A stroke turns by more than `JOIN_DEGREES` at a corner, so a disc of the
   stroke's width is emitted at that vertex, and a half-disc at each open end;
@@ -1467,6 +1468,10 @@ def main() -> int:
     add("// harness rather than the launcher. Delete this line the day the last icon is")
     add("// drawn from here.")
     add("#![allow(dead_code)]")
+    add("// Two icon paths round to coordinates of 3.141 and 3.142, which clippy reads as")
+    add("// approximations of pi. They are geometry inside a view box, not a numeric constant,")
+    add("// and changing them to satisfy the lint would move the drawing.")
+    add("#![allow(clippy::approx_constant)]")
     add("")
     add("use std::cell::RefCell;")
     add("")
