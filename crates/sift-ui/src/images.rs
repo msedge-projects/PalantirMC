@@ -10,7 +10,7 @@
 //! frames so the upload happens promptly), `Ready` (a texture), `Failed` (no retry this run
 //! -- a missing icon is a grey tile, not a loop of requests).
 //!
-//! The fetch goes through `palantir_net::download_file`, the launcher's own client, so the
+//! The fetch goes through `sift_net::download_file`, the launcher's own client, so the
 //! timeout, the user agent and the proxy settings are the ones the rest of the app uses
 //! rather than a second opinion.
 
@@ -127,7 +127,7 @@ fn fetch(url: &str) -> Result<ColorImage, String> {
     // is the launcher's own client and keeps a large icon off this thread's stack. The file
     // is removed whatever happens.
     let path = std::env::temp_dir().join(format!("sift-icon-{:016x}.bin", hash(url)));
-    let result = palantir_net::download_file(url, &path, Duration::from_secs(20))
+    let result = sift_net::download_file(url, &path, Duration::from_secs(20))
         .map_err(|error| error.to_string());
     let bytes = match result {
         Ok(()) => std::fs::read(&path).map_err(|error| error.to_string()),
