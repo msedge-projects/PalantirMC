@@ -73,7 +73,7 @@ artifacts are the authority. Do not compile locally and call that current —
 download the artifact:
 
 ```
-gh run download <run-id> -n palantirmc-x86_64-pc-windows-msvc -D dist/
+gh run download <run-id> -n sift-launcher-x86_64-pc-windows-msvc -D dist/
 ```
 
 A tag `v*` publishes a Release (`.github/workflows/release.yml`); pushing such a

@@ -1,7 +1,8 @@
 name: Release
 
 # Publishing is tag-driven on purpose: the tag names the version, the guard job
-# checks it agrees with `Cargo.toml`, and the same commit is what CI tested.
+# checks it agrees with the product's own manifest (`crates/sift-ui/Cargo.toml`),
+# and the same commit is what CI tested.
 # `workflow_dispatch` exists to re-publish a tag whose upload failed -- it does
 # not invent one, because `gh release create --verify-tag` refuses to create a
 # tag that isn't already in the repository.
@@ -28,7 +29,11 @@ env:
 
 jobs:
   guard:
-    name: Check tag against Cargo.toml
+    # Renamed from `Check tag against Cargo.toml` because it no longer reads that
+    # file's version: `crates/sift-ui` is a workspace of its own and declares its
+    # own `version`, so the root manifest's `[workspace.package] version` does not
+    # reach the exe that ships.
+    name: Check tag against crates/sift-ui/Cargo.toml
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -37,7 +42,7 @@ jobs:
       # Fails in ten seconds rather than after a fifteen-minute build, and it
       # fails on the thing that is otherwise only noticed by whoever downloads
       # the file and finds the version inside it is not the version it claims.
-      - name: Compare tag and workspace version
+      - name: Compare tag and product version
         shell: pwsh
         env:
           REQUESTED: ${{ inputs.tag || github.ref_name }}
@@ -47,25 +52,44 @@ jobs:
             throw "Release tags must look like v0.1.0 (got '$tag')"
           }
 
-          $declared = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' -List).Matches[0].Groups[1].Value
+          # The rule is unchanged -- the tag is `v` plus the declared version --
+          # but the file it reads moved with the product. The exe in the release is
+          # built from `crates/sift-ui/Cargo.toml`, so that is the number the tag
+          # has to match; the root workspace's version does not apply to it, and
+          # bumping one does not move the other.
+          $declared = (Select-String -Path crates/sift-ui/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' -List).Matches[0].Groups[1].Value
           if ($tag -ne "v$declared") {
-            throw "Tag '$tag' does not match the workspace version '$declared' in Cargo.toml"
+            throw "Tag '$tag' does not match the product version '$declared' in crates/sift-ui/Cargo.toml"
           }
 
-          "Releasing $tag (workspace version $declared)" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          # Reported, not enforced: the root manifest still carries the iced crates,
+          # whose version is not what this tag publishes. A warning keeps the drift
+          # visible without failing a release over a crate that no longer ships --
+          # when `crates/sift-desktop` goes, this check goes with it.
+          $root = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' -List).Matches[0].Groups[1].Value
+          if ($root -ne $declared) {
+            Write-Warning "Root workspace version is '$root'; the product in crates/sift-ui is '$declared'."
+          }
+
+          "Releasing $tag (product version $declared, from crates/sift-ui/Cargo.toml)" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
 
   build:
     name: Build exe (${{ matrix.target }})
     needs: guard
     runs-on: windows-latest
-    timeout-minutes: 45
+    # 60 rather than 45: this leg now builds the egui product *and*, for one more
+    # slice, the iced launcher, each with its own release compile on top of the
+    # root workspace's test run.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
           # The static CRT is what makes both downloads runnable on a machine
           # with no Visual C++ redistributable installed; see the same matrix
-          # in `ci.yml` for the measurement that showed it was needed.
+          # in `ci.yml` for the measurement that showed it was needed. The flag
+          # applies to the egui build too, and the DLL gate below is what proves
+          # it: eframe links the same C runtime iced did.
           - target: x86_64-pc-windows-msvc
             rustflags: "-C target-feature=+crt-static"
           - target: x86_64-pc-windows-gnu
@@ -91,7 +115,9 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('Cargo.lock') }}
+          # Both lock files: this job builds both workspaces, for the same reason
+          # `ci.yml`'s package job does.
+          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('Cargo.lock', 'crates/sift-ui/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-release-
 
@@ -100,30 +126,73 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-targets --locked
 
+      # And the product's own suite, which `--workspace` above cannot reach: the
+      # egui app is a separate workspace with its own lock file.
+      - name: Test the egui workspace
+        working-directory: crates/sift-ui
+        run: cargo test --locked
+
       - name: Build release
+        working-directory: crates/sift-ui
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p sift-desktop --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Stage the exe
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/SiftLauncher.exe" dist/SiftLauncher.exe
+          Copy-Item "crates/sift-ui/target/${{ matrix.target }}/release/SiftUi.exe" dist/SiftUi.exe
 
-          $exe = Get-Item dist/SiftLauncher.exe
-          if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
-            throw "Unexpected SiftLauncher.exe size: $($exe.Length) bytes"
+          $exe = Get-Item dist/SiftUi.exe
+          # 60MB: the workspace declares its own release profile and the binary it
+          # produces measured 11,981,120 bytes. Same bound, same reason, as the
+          # package job in `ci.yml`.
+          if ($exe.Length -lt 1MB -or $exe.Length -gt 60MB) {
+            throw "Unexpected SiftUi.exe size: $($exe.Length) bytes"
           }
 
       - name: Check the exe's DLL dependencies
-        run: python .github/scripts/check_exe.py dist/SiftLauncher.exe
+        run: python .github/scripts/check_exe.py dist/SiftUi.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sift-${{ matrix.target }}
+          name: sift-launcher-${{ matrix.target }}
           path: dist/
+          if-no-files-found: error
+
+      # DELETED WITH `crates/sift-desktop` IN THE NEXT SLICE. `publish` collects only
+      # `sift-launcher-*`, so this artefact is uploaded for inspection and is never
+      # attached to a release -- one release must not carry two launchers. It is
+      # still built here because the DLL gate on the iced exe is the check that
+      # caught VCRUNTIME140.dll, and a tag is the last place that build could
+      # regress unnoticed. Note the cost of keeping it: `publish` needs this job, so
+      # a broken iced build blocks an egui release until the block is deleted.
+      - name: Build the iced launcher (temporary)
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release --locked -p sift-desktop --target ${{ matrix.target }}
+
+      - name: Stage the iced exe (temporary)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-iced | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/SiftLauncher.exe" dist-iced/SiftLauncher.exe
+
+          $exe = Get-Item dist-iced/SiftLauncher.exe
+          if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
+            throw "Unexpected SiftLauncher.exe size: $($exe.Length) bytes"
+          }
+
+      - name: Check the iced exe's DLL dependencies (temporary)
+        run: python .github/scripts/check_exe.py dist-iced/SiftLauncher.exe
+
+      - name: Upload the iced artifact (temporary)
+        uses: actions/upload-artifact@v4
+        with:
+          name: iced-${{ matrix.target }}
+          path: dist-iced/
           if-no-files-found: error
 
   publish:
@@ -146,6 +215,9 @@ jobs:
       # which. The MSVC build is the recommended one; the GNU build is what the
       # project is developed against locally, and publishing both means a
       # regression in either is visible to users immediately.
+      #
+      # Only `sift-launcher-*` is collected: the `iced-*` artifacts the build job
+      # still produces are for inspection and are deliberately not release files.
       - name: Collect and rename release files
         shell: pwsh
         run: |
@@ -156,6 +228,11 @@ jobs:
           "| --- | --- | --- |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
 
           Get-ChildItem -Path artifacts -Recurse -File -Filter *.exe | ForEach-Object {
+            # `return` inside a ForEach-Object script block skips this item and
+            # continues with the next one, which is what keeps the temporary iced
+            # artefacts out of the release without changing the loop body below.
+            if ($_.Directory.Name -notlike 'sift-launcher-*') { return }
+
             $target = $_.Directory.Name
             $label = switch -Wildcard ($target) {
               "*msvc" { "x64-msvc" }
@@ -163,6 +240,10 @@ jobs:
               default { $target }
             }
 
+            # Named after the product rather than after the file inside it: the exe
+            # in the zip is `SiftUi.exe` (crates/sift-ui's `[[bin]]`), and the
+            # published name is the one the README and the download instructions
+            # refer to.
             $name = "SiftLauncher-$label.exe"
             Copy-Item $_.FullName "release/$name"
 
@@ -187,7 +268,16 @@ jobs:
               -DestinationPath ($_.FullName -replace '\.exe$', '.zip') -Force
           }
 
-          if (Test-Path LICENSE) { Copy-Item LICENSE release/ }
+          # The licence and the readme are release files, not repository decoration:
+          # the binary ships under `LicenseRef-Proprietary`, so its terms travel with
+          # the download, and a release missing either is a failed release rather
+          # than a shorter file list.
+          foreach ($doc in 'LICENSE', 'README.md') {
+            if (-not (Test-Path $doc)) {
+              throw "$doc is missing; the release would ship without it."
+            }
+            Copy-Item $doc release/
+          }
 
           Get-ChildItem release | Format-Table Name, Length | Out-String | Write-Host
 

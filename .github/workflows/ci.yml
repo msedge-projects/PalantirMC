@@ -195,11 +195,19 @@ jobs:
       - name: Run the live tests
         run: cargo test -p sift-net --test live --locked -- --ignored --test-threads=1
 
-  # Packaging is the expensive half -- two release builds with LTO, ~14 billed
-  # minutes against ~4 for test + lint -- and its result is identical for a
-  # given tree, so a pull request gets the fast questions only and `master`
-  # gets the artefacts. The DLL gate therefore fires after merge rather than
-  # before it; the alternative was paying for it on every push to every branch.
+  # Packaging is the expensive half -- release builds for both targets, against
+  # ~4 billed minutes for test + lint -- and its result is identical for a given
+  # tree, so a pull request gets the fast questions only and `master` gets the
+  # artefacts. The DLL gate therefore fires after merge rather than before it;
+  # the alternative was paying for it on every push to every branch.
+  #
+  # What ships from here on is the egui app in `crates/sift-ui`. That crate is a
+  # workspace of its own -- the root lock file cannot hold eframe and iced at the
+  # same time, see its `Cargo.toml` -- so the build runs in that directory, its
+  # `--locked` is checked against `crates/sift-ui/Cargo.lock` rather than the root
+  # one, and the binary is written under `crates/sift-ui/target/`. The iced exe is
+  # still built beside it for one more slice, in a block marked as temporary and
+  # uploaded as `iced-<target>` so nothing mistakes it for the product.
   package:
     name: Build exe (${{ matrix.target }})
     needs: test
@@ -239,6 +247,15 @@ jobs:
           rustc -vV
           cargo -vV
 
+      # This is the only job that builds both workspaces, so its key hashes both
+      # lock files; keyed on the root one alone it would restore a registry
+      # snapshot from before the egui lock changed.
+      #
+      # The root `target` is what the iced build writes. The egui build writes
+      # `crates/sift-ui/target`, which is deliberately not cached: an eframe
+      # dependency tree is gigabytes and would evict the caches the other jobs
+      # restore from, while the slow half of a cold build is the registry
+      # download, and that is cached here.
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -247,41 +264,49 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('Cargo.lock', 'crates/sift-ui/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-release-
 
+      # `working-directory`, not `-p sift-ui`: the crate sits at the root of its
+      # own workspace, so that directory is what decides which `Cargo.lock`
+      # `--locked` is checked against and where the binary is written.
       - name: Build release
+        working-directory: crates/sift-ui
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p sift-desktop --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Stage artifact and hash it
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item -Path "target/${{ matrix.target }}/release/SiftLauncher.exe" -Destination dist/SiftLauncher.exe
+          Copy-Item -Path "crates/sift-ui/target/${{ matrix.target }}/release/SiftUi.exe" -Destination dist/SiftUi.exe
 
-          $exe = Get-Item -Path dist/SiftLauncher.exe
+          $exe = Get-Item -Path dist/SiftUi.exe
           $hash = (Get-FileHash -Path $exe.FullName -Algorithm SHA256).Hash.ToLower()
 
-          # A debug or half-linked binary is far outside this range; catch it here
-          # rather than shipping a broken download.
-          if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
-            throw "Unexpected SiftLauncher.exe size: $($exe.Length) bytes"
+          # A half-linked binary is far outside this range; catch it here rather
+          # than shipping a broken download. The ceiling is 60MB because the
+          # workspace now declares its own `[profile.release]` (`lto`, `strip`,
+          # `panic=abort`) and the binary that profile produces measured 11,981,120
+          # bytes -- so 60MB is five times the real size and still rejects a
+          # debug or unstripped build, which is the mistake this check exists for.
+          if ($exe.Length -lt 1MB -or $exe.Length -gt 60MB) {
+            throw "Unexpected SiftUi.exe size: $($exe.Length) bytes"
           }
 
           # Checksum tools require the hash before the filename; the previous
           # filename-first sidecar was rejected by `sha256sum -c`. Write the
           # standard form with an explicit LF and verify it before uploading.
-          [System.IO.File]::WriteAllText("dist/SiftLauncher.exe.sha256", "$hash  SiftLauncher.exe`n")
+          [System.IO.File]::WriteAllText("dist/SiftUi.exe.sha256", "$hash  SiftUi.exe`n")
 
-          $sidecar = [System.IO.File]::ReadAllText("dist/SiftLauncher.exe.sha256")
-          if ($sidecar -ne "$hash  SiftLauncher.exe`n") {
+          $sidecar = [System.IO.File]::ReadAllText("dist/SiftUi.exe.sha256")
+          if ($sidecar -ne "$hash  SiftUi.exe`n") {
             throw "sha256 sidecar is not in 'sha256sum -c' form: '$sidecar'"
           }
 
-          "### SiftLauncher.exe (${{ matrix.target }})" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "### SiftUi.exe (${{ matrix.target }})" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
           "" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
           "| Field | Value |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
           "| --- | --- |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
@@ -290,30 +315,90 @@ jobs:
 
       # The download has to run on a machine with no toolchain installed, so the
       # import table may name only Windows' own DLLs. This is checked on the
-      # artefact that would actually be shipped, not on the build output.
+      # artefact that would actually be shipped, not on the build output, and the
+      # MSVC leg still needs `+crt-static` to pass it: eframe links the same C
+      # runtime iced did, and the flag in the matrix above is what keeps
+      # VCRUNTIME140.dll out of the table.
       - name: Check the exe's DLL dependencies
-        run: python .github/scripts/check_exe.py dist/SiftLauncher.exe
+        run: python .github/scripts/check_exe.py dist/SiftUi.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sift-${{ matrix.target }}
+          name: sift-launcher-${{ matrix.target }}
           path: dist/
           retention-days: 14
           if-no-files-found: error
 
-  # The egui slice: the other side of the migration, built on its own because its
-  # workspace cannot be the root one (`iced_winit` pins web-sys =0.3.67 and eframe
-  # needs ^0.3.103, so one lock file cannot hold both UI stacks).
+      # --- iced, kept only until `crates/sift-desktop` is deleted --------------
+      #
+      # DELETED WITH `crates/sift-desktop` IN THE NEXT SLICE. It stays for now
+      # because this is the only place the iced exe is built for both targets with
+      # the CRT flag and put through the DLL gate; `test` and `lint` compile the
+      # crate but never link the shipped artefact. The upload is named
+      # `iced-<target>`, not the product's name, so no download can be mistaken for
+      # the one people are meant to run -- and `release.yml` does not publish it.
+      - name: Build the iced launcher (temporary)
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release --locked -p sift-desktop --target ${{ matrix.target }}
+
+      - name: Stage the iced exe and hash it (temporary)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-iced | Out-Null
+          Copy-Item -Path "target/${{ matrix.target }}/release/SiftLauncher.exe" -Destination dist-iced/SiftLauncher.exe
+
+          $exe = Get-Item -Path dist-iced/SiftLauncher.exe
+          $hash = (Get-FileHash -Path $exe.FullName -Algorithm SHA256).Hash.ToLower()
+
+          if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
+            throw "Unexpected SiftLauncher.exe size: $($exe.Length) bytes"
+          }
+
+          [System.IO.File]::WriteAllText("dist-iced/SiftLauncher.exe.sha256", "$hash  SiftLauncher.exe`n")
+
+          "### iced SiftLauncher.exe (${{ matrix.target }}) -- temporary" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| Field | Value |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| --- | --- |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| Size | $($exe.Length) bytes |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| sha256 | $hash |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
+      - name: Check the iced exe's DLL dependencies (temporary)
+        run: python .github/scripts/check_exe.py dist-iced/SiftLauncher.exe
+
+      - name: Upload the iced artifact (temporary)
+        uses: actions/upload-artifact@v4
+        with:
+          name: iced-${{ matrix.target }}
+          path: dist-iced/
+          retention-days: 14
+          if-no-files-found: error
+
+  # The egui workspace's own test and lint job, beside `test` and `lint` because
+  # neither of those can compile this crate: `cargo test --workspace` in the root
+  # directory means the root workspace, and `crates/sift-ui` is not a member of it
+  # (`iced_winit` pins web-sys =0.3.67, eframe needs ^0.3.103, so one lock file
+  # cannot hold both UI stacks).
   #
-  # Not `--locked`: the slice's own lock is not committed yet, and a migration
-  # branch that fails on a lock it has not earned is noise. Owed in `HANDOFF.md`.
+  # `--locked` here too. This job used to build without it because the slice's lock
+  # was uncommitted; the product build in `package` now requires that lock, so a
+  # test job resolving its own versions would be the one place where a green run
+  # meant something other than what ships. `HANDOFF.md`'s note about this build is
+  # out of date and is corrected by the same commit.
+  #
+  # The release build stays even though `package` also builds the app, because
+  # `package` does not run on pull requests -- so on a PR this is the only job that
+  # compiles the product the way it will be shipped.
   egui-slice:
     name: Build egui slice
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install components
+        run: rustup component add clippy
 
       - name: Show toolchain
         run: |
@@ -327,17 +412,25 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-egui-${{ hashFiles('crates/sift-ui/Cargo.toml') }}
+          key: ${{ runner.os }}-egui-${{ hashFiles('crates/sift-ui/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-egui-
 
       - name: Build the slice
         working-directory: crates/sift-ui
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Test the slice
         working-directory: crates/sift-ui
-        run: cargo test
+        run: cargo test --locked
+
+      # Advisory, not blocking, for the same reason `lint`'s formatting step is:
+      # `sift-ui` has never been through a clippy run, so `-D clippy::correctness`
+      # here would be a gate the crate has not earned yet. A compile error still
+      # fails this step, which is the part worth having on a PR today.
+      - name: Clippy the slice
+        working-directory: crates/sift-ui
+        run: cargo clippy --locked --all-targets
 
       - uses: actions/upload-artifact@v4
         with:

@@ -77,7 +77,7 @@ jobs never leave the queue.
 
 | Trigger | Workflow | What it produces |
 | --- | --- | --- |
-| Push to the mirror's PR branch | `.github/workflows/ci.yml` | `test`, `lint`, `live`, then the `package` job builds both Windows targets and uploads `palantirmc-x86_64-pc-windows-msvc` / `-gnu` artifacts (14 days) |
+| Push to the mirror's PR branch | `.github/workflows/ci.yml` | `test`, `lint`, `live`, then the `package` job builds both Windows targets and uploads `sift-launcher-x86_64-pc-windows-msvc` / `-gnu` artifacts (14 days) |
 | Push to the mirror's `master` | `.github/workflows/ci.yml` | the same list, without needing a PR — answered on 2026-09-30 by the landing that carried the rewrite there: `36756417601`, all five jobs, the first `ci.yml` run a push to `master` has ever scheduled |
 | Tag `v*` | `.github/workflows/release.yml` | `guard` checks the tag against `Cargo.toml`, `build` retests and rebuilds, `publish` attaches both exes, `.sha256` sidecars, zips and `LICENSE` to a **public** Release |
 | `workflow_dispatch` | either | Re-run without a new commit; `release.yml` needs an existing tag |
@@ -111,12 +111,12 @@ push, then
 
 ```
 gh run download <run-id> --repo msedge-projects/PalantirMC \
-  -n palantirmc-x86_64-pc-windows-msvc -D dist/msvc
+  -n sift-launcher-x86_64-pc-windows-msvc -D dist/msvc
 gh run download <run-id> --repo msedge-projects/PalantirMC \
-  -n palantirmc-x86_64-pc-windows-gnu  -D dist/gnu
+  -n sift-launcher-x86_64-pc-windows-gnu  -D dist/gnu
 ```
 
-Both artifacts contain a file called `PalantirMC.exe`, so one directory cannot
+Both artifacts contain a file called `SiftUi.exe`, so one directory cannot
 hold both: the second download fails with `error extracting "PalantirMC.exe":
 The file exists` and leaves the first target's exe in place, which reads as a
 successful download of the wrong binary. The `.sha256` beside each one is what
