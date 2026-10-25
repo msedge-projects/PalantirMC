@@ -223,18 +223,10 @@ mod tests {
         let images = Images::default();
         assert!(!images.loading());
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The cache never grows past its limit, and the entry it drops is the coldest one.
-    ///
-    /// Built without textures: the eviction only reads the stamps and the variant tag, so a
-    /// test that plants `Ready` entries with fake handles would need a GPU context. Instead
-    /// this pins the rule on the stamps the rule uses -- coldest first, `Loading` and `Failed`
-    /// never candidates -- which is what a wrong eviction would get wrong.
+    /// The eviction rule takes the coldest stamp first, and `Loading`/`Failed` are never
+    /// candidates -- a test that planted `Ready` entries would need a GPU context, so this
+    /// pins the rule on the stamps the rule reads.
     #[test]
     fn eviction_drops_the_coldest_ready_entry_first() {
         let mut stamps = vec![(7u64, "a"), (1, "b"), (9, "c")];
@@ -246,8 +238,8 @@ mod tests {
         );
     }
 
-    /// The limit is a real number and larger than any single screen of cards: a value that
-    /// fell under 20 would evict icons the reader is still looking at.
+    /// The limit is a real bound and larger than any single screen of cards: a value under 20
+    /// would evict icons the reader is still looking at.
     #[test]
     fn the_cache_limit_is_larger_than_a_screen_of_cards() {
         assert!(CACHE_LIMIT >= 20, "a screen of Discover cards is 12 to 20 icons");
