@@ -27,7 +27,7 @@
       "the next pages (library, settings sub-pages) will want, kept here so the tuning",
       "pass has one map to correct instead of four files to correct."
     ],
-    "PARK": [1400, 12],
+    "PARK": [900, 14],
     "RAIL_HOME": [32, 64],
     "RAIL_DISCOVER": [32, 120],
     "RAIL_LIBRARY": [32, 176],
