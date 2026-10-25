@@ -22,6 +22,7 @@ mod fonts;
 mod frame_log;
 mod geometry;
 mod icons;
+mod pages;
 mod images;
 mod shell;
 /// The reference's palette, geometry, type and motion as egui values.

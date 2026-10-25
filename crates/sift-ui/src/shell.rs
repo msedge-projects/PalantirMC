@@ -21,10 +21,10 @@ use crate::theme::Theme;
 /// A rail destination. The reference has five, separated from the utility group below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rail {
+    /// The welcome screen and the instance list.
+    Home,
     /// Find modpacks and content.
     Discover,
-    /// Search everything at once.
-    Search,
     /// The installed instances.
     Library,
     /// Files the launcher knows about.
@@ -36,8 +36,8 @@ pub enum Rail {
 impl Rail {
     /// Every destination, in the reference's order.
     pub const ALL: [Rail; 5] = [
+        Rail::Home,
         Rail::Discover,
-        Rail::Search,
         Rail::Library,
         Rail::Files,
         Rail::Servers,
@@ -46,8 +46,8 @@ impl Rail {
     /// The name the reference prints in the page header.
     pub fn title(self) -> &'static str {
         match self {
+            Rail::Home => "Home",
             Rail::Discover => "Discover modpacks",
-            Rail::Search => "Search",
             Rail::Library => "Instances",
             Rail::Files => "Files",
             Rail::Servers => "Servers",
@@ -57,8 +57,8 @@ impl Rail {
     /// The glyph the reference draws for this destination.
     pub fn glyph(self) -> Glyph {
         match self {
+            Rail::Home => Glyph::Home,
             Rail::Discover => Glyph::Compass,
-            Rail::Search => Glyph::Search,
             Rail::Library => Glyph::Library,
             Rail::Files => Glyph::Folder,
             Rail::Servers => Glyph::Server,
@@ -79,6 +79,8 @@ pub struct Shell {
     pub theme: Theme,
     /// Project icons, fetched off the frame thread and cached as textures.
     icons: crate::images::Images,
+    /// The instances on disk, read when the shell starts and when the rail returns to Home.
+    instances: Vec<crate::data::Entry>,
 }
 
 impl Default for Shell {
@@ -89,6 +91,7 @@ impl Default for Shell {
             scrolling: fastframe_scroll::Scrolling::default(),
             theme: crate::theme::dark(),
             icons: crate::images::Images::default(),
+            instances: crate::data::load().0,
         }
     }
 }
@@ -108,7 +111,13 @@ impl Shell {
         let mut rail_animating = false;
         rail_animating |= self.rail_column(ui);
         self.right_panel(ui);
-        let content = self.content_column(ui);
+        let content = if self.rail == Rail::Home {
+            let rect = crate::pages::Page::Home.rect();
+            ui.painter().rect_filled(rect, 0, self.theme.BG);
+            crate::pages::home::draw(ui, rect, &self.theme, &mut self.icons, &self.instances)
+        } else {
+            self.content_column(ui)
+        };
 
         // An icon in flight is a reason to draw the next frame, exactly like a hover.
         rail_animating || content || self.icons.loading()
@@ -245,6 +254,11 @@ impl Shell {
             }
             if response.clicked() {
                 self.rail = destination;
+                // Coming home re-reads the folder: an instance may have been created,
+                // imported or deleted while the reader was elsewhere.
+                if destination == Rail::Home {
+                    self.instances = crate::data::load().0;
+                }
             }
 
             let selected = destination == self.rail;
