@@ -66,6 +66,29 @@ impl Rail {
     }
 }
 
+/// What the shell is showing, and what is moving.
+pub struct Shell {
+    /// The selected rail destination.
+    pub rail: Rail,
+    /// The hovered rail destination, if any. A press animates between the two, which is
+    /// why this is state rather than a per-frame read.
+    hovered: Option<Rail>,
+    /// fastframe's scroll state: the wheel step, the touchpad scale and the glide.
+    scrolling: fastframe_scroll::Scrolling,
+    /// The colour scheme, from the generated tokens.
+    pub theme: Theme,
+    /// Project icons, fetched off the frame thread and cached as textures.
+    icons: crate::images::Images,
+    /// The instances on disk, read when the shell starts and when the rail returns to Home.
+    instances: Vec<crate::data::Entry>,
+    /// The project whose page is open, if any. `None` means the rail's own page is showing.
+    open_project: Option<crate::pages::project::Project>,
+    /// The open project's tab.
+    project_state: crate::pages::project::State,
+    /// The Discover search field: its text, its focus and its blink phase.
+    search: crate::widgets::search::Search,
+}
+
 impl Default for Shell {
     fn default() -> Shell {
         Shell {
