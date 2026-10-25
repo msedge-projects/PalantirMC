@@ -17,6 +17,7 @@
 //! `ctx.request_repaint()` every frame, which is the behaviour `docs/LIGHTNESS.md` names as
 //! the idle-CPU budget's failure mode.
 
+mod data;
 mod fonts;
 mod frame_log;
 mod geometry;

@@ -44,6 +44,8 @@ eframe = { version = "0.36.1", default-features = false, features = [
 fastframe-scroll = { path = "../../vendor/fastframe-scroll" }
 # The launcher's own client, for project icons: one HTTP path in the product, not two.
 sift-net = { path = "../sift-net" }
+# The core crate: instances on disk, the pack profile, and the paths a launcher shares.
+sift-core = { path = "../sift-core" }
 # The formats the project CDN actually serves. Measured, not assumed: asking for
 # `.../icon.png` answers **400**, and the API's own `icon_url` is a hashed `.webp` (with
 # some projects still on `.png`), so both decoders are needed and neither is speculative.
