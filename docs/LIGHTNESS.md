@@ -156,3 +156,24 @@ budget appears to pass while the thing that ships was never checked.
 Release build time is 1m55s with LTO on one core. The two fixes that turned a 0.2 MB margin
 into 5.4 MB were bounding the icon texture cache (256 entries, coldest evicted, `Loading` and
 `Failed` never candidates) and the profile itself.
+
+## Scroll: measured at last, 2026-10-25
+
+`SIFT_FRAME_LOG` on during a Discover scroll (40 notches down, 40 up, on the debug build --
+the one captures use, so this is the pessimistic reading):
+
+| Window | interval p95 | view p95 |
+| --- | --- | --- |
+| Own worst scrolling window | **18.53 ms** | 1.00 ms |
+| Typical scrolling window | 16.13 - 16.33 ms | 0.99 ms |
+| Two windows that are not scrolling | 63.64 ms, 1885.02 ms | -- |
+
+The budget is <= 20 ms and the worst scrolling window is 18.53, so it passes -- and the two
+outliers are worth naming rather than averaging away: they are the startup windows, where the
+first frames carry the font atlas, the logo decode and the first icon uploads. A frame budget
+that quietly included them would look like a 1.9-second scroll.
+
+**`view_ms` is the number that says the scroll container is not the cost.** The paint half of a
+frame is about a millisecond at p95; the rest of the 16 ms interval is the vsync the compositor
+imposes. That is the `fastframe-scroll` decision paying off: the reference's faster notch needed
+a vendored container, and the container is not what the budget was afraid of.
