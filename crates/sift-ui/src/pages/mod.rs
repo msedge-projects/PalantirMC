@@ -12,6 +12,7 @@
 
 pub mod home;
 pub mod library;
+pub mod skins;
 pub mod project;
 
 use eframe::egui::Rect;
@@ -28,6 +29,8 @@ pub enum Page {
     Project,
     /// The installed instances.
     Library,
+    /// Skins: the player's own and the catalogue's.
+    Skins,
 }
 
 impl Page {
@@ -39,6 +42,7 @@ impl Page {
             // A project page's breadcrumb is its own name, which the shell supplies.
             Page::Project => "Project",
             Page::Library => "Library",
+            Page::Skins => "Skins",
         }
     }
 

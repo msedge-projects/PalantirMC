@@ -89,6 +89,8 @@ pub struct Shell {
     search: crate::widgets::search::Search,
     /// The network search behind that field.
     results: crate::search::Search,
+    /// The skins page's own state.
+    skins: crate::pages::skins::State,
 }
 
 impl Default for Shell {
@@ -106,6 +108,7 @@ impl Default for Shell {
             project_state: crate::pages::project::State::default(),
             search: crate::widgets::search::Search::default(),
             results: crate::search::Search::default(),
+            skins: crate::pages::skins::State::default(),
         }
     }
 }
@@ -147,6 +150,20 @@ impl Shell {
                 }
                 None => false,
             }
+        } else if self.rail == Rail::Skins {
+            // The skins page owns its own state; the shell keeps it beside the others so the
+            // selection survives a trip to another page.
+            let rect = crate::pages::Page::Skins.rect();
+            ui.painter().rect_filled(rect, 0, self.theme.BG);
+            let theme = self.theme;
+            let result = crate::pages::skins::draw(
+                ui,
+                rect,
+                &theme,
+                &mut self.icons,
+                &mut self.skins,
+            );
+            result
         } else if self.rail == Rail::Home {
             let rect = crate::pages::Page::Home.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);
@@ -847,3 +864,37 @@ fn ellipsise(text: &str, limit: usize) -> String {
     cut
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A summary inside the limit is returned untouched: a card must not pay for an
+    /// ellipsis it does not need.
+    #[test]
+    fn a_short_summary_is_not_touched() {
+        assert_eq!(ellipsise("Lightweight optimization modpack", 150), "Lightweight optimization modpack");
+    }
+
+    /// A long one is cut at a word boundary and marked, rather than sliced mid-word: the
+    /// reference's cards end on a word.
+    #[test]
+    fn a_long_summary_is_cut_at_a_word_boundary() {
+        let long = "word ".repeat(80);
+        let cut = ellipsise(&long, 150);
+        assert!(cut.chars().count() <= 150, "the cut respects the limit");
+        assert!(cut.ends_with('\u{2026}'), "and says it was cut");
+        assert!(!cut.trim_end_matches('\u{2026}').ends_with(' '), "no dangling space");
+        assert!(!cut.contains("wor\u{2026}"), "never half a word");
+    }
+
+    /// The sample list is what a capture with an empty search box shows, so it must not be
+    /// empty and must keep the reference's order.
+    #[test]
+    fn the_sample_list_carries_the_reference_six() {
+        let sample = sample_results();
+        assert_eq!(sample.len(), 6);
+        assert_eq!(sample[0].title, "Fabulously Optimized");
+        assert_eq!(sample[5].title, "All the Mods 10");
+    }
+}

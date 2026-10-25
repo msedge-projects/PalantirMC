@@ -49,8 +49,9 @@
 //! the locale rather than invented — see the `Strings` block for where each one comes from.
 //!
 //! **The grid arithmetic is the library page's, by instruction.** The skins source measures
-//! its own list column and switches *fixed* column counts at 1300/1750/2050
-//! (`VirtualSkinSectionList.vue:114-128`: 4/5/6, else 3). This page instead mirrors
+//! its own list column and switches *fixed* column counts by window width
+//! (`VirtualSkinSectionList.vue:114-128`: three by default, four at 1300, five at 1750 and
+//! six at 2050). This page instead mirrors
 //! `pages/library.rs`'s `grid_layout` and the expressions behind it —
 //! `gap = remSize * 0.75`, `columnCount = max(1, floor((gridWidth + gap) / (minWidth + gap)))`,
 //! `cardWidth = (gridWidth - gap * (n - 1)) / n`, and the
@@ -81,8 +82,9 @@
 //! with `p-4` (1rem = 16), where the library's route container pads with `p-6` (24,
 //! `pages/Index.vue:96`). This page takes the 24 for two reasons: `geometry::CONTENT_INSET`
 //! is 24 — the column's measured inset — and the grid arithmetic has to resolve to the same
-//! numbers as the library's to keep the two pages' tiles aligned. With 16 the six would be
-//! five 183.2-point columns, which is neither the source's grid nor the library's.
+//! numbers as the library's to keep the two pages' tiles aligned. At 16 the same 996-point
+//! page would give five 183.2-point columns, which is neither the source's grid nor the
+//! library's.
 //!
 //! **No renderer, so no preview column and no skin faces.** The source's whole left column
 //! is a 3D `SkinPreviewRenderer` (`Skins.vue:1093-1237`), and each card's face is a baked
@@ -91,8 +93,8 @@
 //! with the shirt glyph, the skin's name, its author and its model tag.
 //!
 //! **This file is not wired into the shell yet.** `pages/mod.rs` declares no `skins` module
-//! and `Page` has no `Skins` variant, so nothing calls [`draw`]; the brief for this file is
-//! the file, and both of those are somebody else's edit.
+//! and `Page` has no `Skins` variant, so nothing calls [`draw`]. Declaring the module and
+//! adding the route are outside this file's brief.
 //!
 //! [`draw`] returns `false`: nothing on this page animates, and the search plate is a
 //! painted stand-in for the widget another agent owns (see [`search_plate`]).
@@ -1415,13 +1417,19 @@ mod tests {
     /// the same rule the shell's search field states (`widgets/search.rs:254-267`).
     #[test]
     fn a_whitespace_query_is_no_query() {
-        let mut state = State::default();
-        state.query = "   ".to_owned();
-        assert_eq!(state.query(), None);
-        state.query = "  mossy ".to_owned();
-        assert_eq!(state.query(), Some("mossy"));
+        let blank = State {
+            query: "   ".to_owned(),
+            ..State::default()
+        };
+        assert_eq!(blank.query(), None);
+
+        let padded = State {
+            query: "  mossy ".to_owned(),
+            ..State::default()
+        };
+        assert_eq!(padded.query(), Some("mossy"));
         assert_eq!(
-            state.query, "  mossy ",
+            padded.query, "  mossy ",
             "the stored text keeps what was typed"
         );
     }
