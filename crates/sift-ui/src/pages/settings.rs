@@ -1467,7 +1467,7 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
             egui::StrokeKind::Inside,
         );
         draw_header(painter, dialog, theme);
-        draw_rail(painter, dialog, theme, state.tab);
+        draw_rail(painter, dialog, theme, state.tab, state.rail_scroll);
         let body_height = draw_body(painter, dialog, theme, state.tab, state.scroll);
     state.last_body_height = body_height;
 
@@ -1690,7 +1690,13 @@ fn draw_header(painter: &egui::Painter, dialog: Rect, theme: &theme::Theme) {
 }
 
 /// The rail: its divider, a category heading per group, and one row per tab.
-fn draw_rail(painter: &egui::Painter, dialog: Rect, theme: &theme::Theme, selected: Tab) {
+fn draw_rail(
+    painter: &egui::Painter,
+    dialog: Rect,
+    theme: &theme::Theme,
+    selected: Tab,
+    scroll: f32,
+) {
     let rail = rail_rect(dialog);
     let clipped = painter.with_clip_rect(rail);
 
@@ -1701,7 +1707,7 @@ fn draw_rail(painter: &egui::Painter, dialog: Rect, theme: &theme::Theme, select
         Stroke::new(RULE_STROKE, theme.DIVIDER),
     );
 
-    for entry in rail_rows(dialog) {
+    for entry in rail_rows(dialog, scroll) {
         if let Some(heading) = entry.heading {
             clipped.text(
                 pos2(heading.left(), heading.top()),
