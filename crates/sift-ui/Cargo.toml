@@ -42,3 +42,8 @@ eframe = { version = "0.36.1", default-features = false, features = [
 # Vendored at `vendor/fastframe-scroll`: the 120-point wheel step, the touchpad
 # scale and the glide that make spotifast's scrolling feel like the platform's.
 fastframe-scroll = { path = "../../vendor/fastframe-scroll" }
+# The launcher's own client, for project icons: one HTTP path in the product, not two.
+palantir-net = { path = "../sift-net" }
+# PNG and JPEG only: those are what the project CDN serves, and the decoders the other
+# formats would add are bytes in the binary for a picture the launcher never sees.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

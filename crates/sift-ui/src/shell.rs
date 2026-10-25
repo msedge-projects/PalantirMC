@@ -77,6 +77,8 @@ pub struct Shell {
     scrolling: fastframe_scroll::Scrolling,
     /// The colour scheme, from the generated tokens.
     pub theme: Theme,
+    /// Project icons, fetched off the frame thread and cached as textures.
+    icons: crate::images::Images,
 }
 
 impl Default for Shell {
@@ -86,6 +88,7 @@ impl Default for Shell {
             hovered: None,
             scrolling: fastframe_scroll::Scrolling::default(),
             theme: crate::theme::dark(),
+            icons: crate::images::Images::default(),
         }
     }
 }
@@ -107,7 +110,8 @@ impl Shell {
         self.right_panel(ui);
         let content = self.content_column(ui);
 
-        rail_animating || content
+        // An icon in flight is a reason to draw the next frame, exactly like a hover.
+        rail_animating || content || self.icons.loading()
     }
 
     /// The top bar: the mark and the page's name at the left, window controls at the right.
@@ -505,7 +509,7 @@ impl Shell {
                 // enough to scroll: a capture compares anatomy, not the catalogue.
                 let results = sample_results();
                 for index in 0..12 {
-                    card(ui, &self.theme, &results[index % results.len()]);
+                    card(ui, &self.theme, &results[index % results.len()], &mut self.icons);
                 }
             });
         false
@@ -520,7 +524,7 @@ impl Shell {
 /// 96,104; the stats right-aligned on that same row; and the install button at the card's
 /// top-right corner. The card itself is 148 tall with a 12-point gap, which is what the
 /// reference's pitch between two card tops measures.
-fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>) {
+fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>, icons: &mut crate::images::Images) {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, g::CARD), Sense::hover());
     let painter = ui.painter();
@@ -530,6 +534,18 @@ fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>) {
     // plate in the accent carries the same weight and the same 12-point radius.
     let tile = Rect::from_min_size(rect.min + egui::vec2(16.0, 16.0), Vec2::splat(64.0));
     painter.rect_filled(tile, 12, theme.BUTTON_BG);
+    // The project's own icon once it has arrived; the plate until then, and for ever if the
+    // fetch failed. Rounded corners are the tile's: a texture drawn into a square rect inside
+    // a rounded plate keeps the plate's corner showing, which is what the reference does.
+    if let Some(texture) = icons.get(ui.ctx(), result.icon) {
+        let inner = tile.shrink(2.0);
+        painter.image(
+            texture.id(),
+            inner,
+            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
 
     // The title, the author and the link glyph, on one baseline.
     let title = painter.layout_no_wrap(
@@ -657,6 +673,8 @@ pub struct Card<'a> {
     pub followers: &'a str,
     /// When it last changed, in the reference's phrasing.
     pub updated: &'a str,
+    /// The project icon's URL.
+    pub icon: &'a str,
 }
 
 /// Six results with the reference's own content, so a capture shows the real anatomy
@@ -678,6 +696,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "19.38M",
             followers: "5,005",
             updated: "5 days ago",
+            icon: "https://cdn.modrinth.com/data/1KVo5zza/icon.png",
         },
         Card {
             title: "Zombie Invade 100 Days",
@@ -691,6 +710,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "15.36M",
             followers: "9,659",
             updated: "10 months ago",
+            icon: "https://cdn.modrinth.com/data/9J2O4k6X/icon.png",
         },
         Card {
             title: "Cobblemon Official Modpack [Fabric]",
@@ -705,6 +725,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "11.53M",
             followers: "2,732",
             updated: "12 hours ago",
+            icon: "https://cdn.modrinth.com/data/5FFgwNNP/icon.png",
         },
         Card {
             title: "COBBLEVERSE - Pokemon Adventure",
@@ -714,6 +735,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "7.31M",
             followers: "2,092",
             updated: "Updated today",
+            icon: "https://cdn.modrinth.com/data/8M2h1kPq/icon.png",
         },
         Card {
             title: "Better MC [FORGE]",
@@ -723,6 +745,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "5.02M",
             followers: "1,940",
             updated: "3 days ago",
+            icon: "https://cdn.modrinth.com/data/4Z9m0aJx/icon.png",
         },
         Card {
             title: "All the Mods 10",
@@ -732,6 +755,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "4.88M",
             followers: "1,512",
             updated: "6 days ago",
+            icon: "https://cdn.modrinth.com/data/6Vj7dN4w/icon.png",
         },
     ]
 }
