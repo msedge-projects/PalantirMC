@@ -442,8 +442,8 @@ pub struct Theme {
 /// that moved and a stale value cannot hide behind its alias.
 ///
 /// The `.dark-mode, .dark, :root[data-theme='dark']` block at
-/// `assets/styles/variables.scss:230` supplies it, over the `.light-properties` base at
-/// line 1 and the shared `html` block at line 190, in
+/// `assets/styles/variables.scss:230` supplies it, over the `.light-properties` base
+/// at line 1 and the shared `html` block at line 190, in
 /// cascade order. This is the scheme the reference opens in (`:root { color-scheme:
 /// dark }`, `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one
 /// the numbers in `REFERENCE.md` were taken in.
@@ -861,13 +861,14 @@ pub const EASE_IN_OUT: Easing = Easing {
     curve: [0.42, 0.0, 0.58, 1.0],
 };
 
-/// The curve written inline at `ui/src/styles/tailwind-utilities.css:2`.
+/// `--ease-out-expo`, declared at `ui/src/styles/tailwind-utilities.css:2`.
 pub const EASE_OUT_EXPO: Easing = Easing {
     name: "--ease-out-expo",
     curve: [0.16, 1.0, 0.3, 1.0],
 };
 
-/// The curve written inline at `ui/src/styles/tailwind-utilities.css:31`.
+/// The curve written inline at `ui/src/styles/tailwind-utilities.css:31`, on the action bar whose
+/// transition names it.
 pub const EASE_FLOATING_BAR: Easing = Easing {
     name: "cubic-bezier(0.15, 1.4, 0.64, 0.96)",
     curve: [0.15, 1.4, 0.64, 0.96],

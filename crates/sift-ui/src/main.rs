@@ -18,6 +18,10 @@
 //! Run it with `SIFT_FRAME_LOG` naming a file, exactly as the iced build.
 
 mod frame_log;
+/// The reference's palette, geometry, type and motion as egui values.
+mod theme;
+/// The reference's icon set as egui shapes.
+mod icons;
 
 use eframe::egui;
 use fastframe_scroll::Scrolling;

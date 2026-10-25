@@ -27,7 +27,7 @@ takes a sequence of subpaths and cubic Beziers; egui's `epaint::PathShape` takes
   with holes cannot be expressed here at all: see `--report` and the module
   docstring of the generated file.
 
-    python tools/gen_icons_egui.py            # write crates/palantir-egui/src/icons.rs
+    python tools/gen_icons_egui.py            # write crates/sift-ui/src/icons.rs
     python tools/gen_icons_egui.py --check    # fail if the file on disk is not this
     python tools/gen_icons_egui.py --report   # glyph/shape counts and what cannot be drawn
 
@@ -57,7 +57,7 @@ if str(TOOLS) not in sys.path:
 import gen_icons  # noqa: E402  -- after the path fix-up above, and it is the point
 
 ROOT = gen_icons.ROOT
-OUT = ROOT / "crates" / "palantir-egui" / "src" / "icons.rs"
+OUT = ROOT / "crates" / "sift-ui" / "src" / "icons.rs"
 
 # How flat a flattened cubic has to be, as a fraction of the view box's long side.
 #
@@ -562,7 +562,7 @@ def main() -> int:
     add("//! egui already runs at the end of the frame. Where icons do not move, the")
     add("//! shape route's cache hit is already a memcpy.")
     add("")
-    add("// Nothing draws these yet: `crates/palantir-egui` is the first slice of the")
+    add("// Nothing draws these yet: `crates/sift-ui` is the first slice of the")
     add("// move from iced to egui (see its `Cargo.toml`), and it is a frame-time")
     add("// harness rather than the launcher. Delete this line the day the last icon is")
     add("// drawn from here.")

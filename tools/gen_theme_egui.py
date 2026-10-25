@@ -1073,8 +1073,8 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     emit_scheme(
         "DARK", "dark",
         "/// The `.dark-mode, .dark, :root[data-theme='dark']` block at\n"
-        f"/// `{VARIABLES}:{dark_block.line}` supplies it, over the `.light-properties` base at\n"
-        f"/// line {light_block.line} and the shared `html` block at line {html_block.line}, in\n"
+        f"/// `{VARIABLES}:{dark_block.line}` supplies it, over the `.light-properties` base\n"
+        f"/// at line {light_block.line} and the shared `html` block at line {html_block.line}, in\n"
         "/// cascade order. This is the scheme the reference opens in (`:root { color-scheme:\n"
         "/// dark }`, `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one\n"
         "/// the numbers in `REFERENCE.md` were taken in.",
@@ -1173,14 +1173,14 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     add("}")
     add("")
     for name, (display, curve, source) in easings.items():
-        if display.startswith("var("):
-            variable = display[4:-1]
-            add(f"/// `{variable}`, declared at `{source}`.")
+        if display.startswith("--"):
+            add(f"/// `{display}`, declared at `{source}`.")
         elif display in NAMED_EASINGS:
             add(f"/// CSS's `{display}`, named by the transitions below (`{source}`) and")
             add("/// transcribed from the specification rather than from this tree.")
         else:
-            add(f"/// The curve written inline at `{source}`.")
+            add(f"/// The curve written inline at `{source}`, on the action bar whose")
+            add("/// transition names it.")
         points = ", ".join(fnum(part) for part in curve)
         add(f"pub const {name}: Easing = Easing {{")
         add(f"    name: \"{escape(display)}\",")
