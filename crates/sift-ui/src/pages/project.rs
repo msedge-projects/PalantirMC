@@ -22,7 +22,8 @@ use crate::theme::Theme;
 
 /// What the page shows. The Discover card carries the same fields, plus what a full project
 /// page needs.
-#[derive(Clone)]\npub struct Project {
+#[derive(Clone)]
+pub struct Project {
     /// The project's name.
     pub title: &'static str,
     /// The team that publishes it.
