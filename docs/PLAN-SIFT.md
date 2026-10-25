@@ -32,15 +32,49 @@ fighting the next feature, not just this session's scrollbar.
 
 ---
 
-## 1. What "custom GUI by user" is going to require
+## 1. What the interface has to grow into: dynamic elements, and optionally a GUI the user shapes
 
 Designed now, because it decides how pages get ported — not something bolted on after.
+The driving requirement is §1a (dynamic elements like a Dynamic Island); the rest of the
+section is what that architecture gives for free once it exists.
 
 **A registry, and layouts as data.** Every page is rendered from a layout document (a
 list of sections) through a registry of named renderers (`search`, `cards`,
 `instance-list`, `hero`, `news`, `stat-tiles`, …). Default layouts ship with the app;
 a user's copy in the data directory replaces them. An unknown section name renders as
 a labelled placeholder and logs once — never a panic, never a blank window.
+
+### 1a. The requirement that actually decides it: dynamic elements
+
+Owner, 2026-10-25: *"in future i may add like dynamic island or something which is a
+dynamic element so egui is better."* That is the concrete case, and it is worth
+spelling out because it is the one a retained tree genuinely fights.
+
+A Dynamic Island is a **persistent overlay that morphs in place**: a compact pill that
+grows into a panel, swaps what it is showing (a download, a launch, a mod update)
+*without* being torn down and rebuilt, animates between those states frame by frame,
+and never disturbs the page beneath it. In egui that is `Area` on its own `LayerId`
+plus a spring per animated property — the widget is a function of the island's state,
+so interruption, re-targeting and mid-flight content changes are ordinary assignments.
+In a retained tree the same feature means re-deriving a subtree and diffing it against
+the last one for every animation frame, and every content swap is a new element with
+fresh state: it can be approximated — this shell already stacks overlays — but the
+animation is fought for rather than written.
+
+So the plan gains an **overlay lane**, designed in Phase A and used from Phase C on:
+
+- `sift-ui::overlay` — a layer stack above page content with explicit z-order,
+  hit-testing that never eats a click outside the island's own rect, and one
+  `request_repaint` while anything animates and none when nothing does;
+- `sift-ui::anim` — springs and tweens over plain f32s, stepped by the frame clock,
+  each with a deadline so a stalled machine still lands (the same rule
+  `scroll.rs` learned the hard way);
+- an `Island` state machine — collapsed / peek / expanded / dismissed — with the
+  transitions as data, so a second dynamic element (`Toast`, `Chip`, `UpdateBadge`)
+  reuses the lane rather than growing its own;
+- gates: an island never swallows a click outside its rect, a transition lands inside
+  its declared duration, and the frame log's p95 stays under 20 ms with an island
+  animating over the heaviest page.
 
 **Theme as data.** The tokens (colours, radii, spacing, fonts) already come from the
 reference's CSS through `tools/gen_theme.py`. In egui they become a `theme.json` the
@@ -146,8 +180,11 @@ widget registry, then (and only then, as its own decision) a plugin lane.
    (recommended — instances and caches are the user's), or start clean?
 3. **Crate rename to `sift-*`** in the same pass as the repo (recommended), or keep
    `palantir-*` internally and rename only what users see?
-4. **"Custom GUI by user"** means layouts and themes as data (§1) — not user-supplied
-   code. Confirm, because the second one is a sandbox project of its own.
+4. ~~**"Custom GUI by user"** means layouts and themes as data, not user code?~~
+   **Answered 2026-10-25:** the driver is *dynamic elements* — a Dynamic Island and its
+   kin — which is a framework capability rather than a scripting surface (§1a).
+   User-authored layouts stay in the plan because they cost little once the registry
+   exists, but they are not the reason for the switch, and no plugin lane is promised.
 5. **Releases during the migration:** keep shipping the iced launcher until the egui one
    has all nine routes (recommended), or freeze releases and ship the egui one when it is
    whole?
