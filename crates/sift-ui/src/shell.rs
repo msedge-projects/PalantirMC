@@ -20,6 +20,12 @@ use crate::theme::Theme;
 
 /// A rail destination. The reference has five, separated from the utility group below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The Minecraft version a quick-created instance gets.
+///
+/// The reference asks in a modal; until that modal exists, a version the launcher can resolve
+/// is better than none, and it is one constant to change when the modal lands.
+const DEFAULT_MC_VERSION: &str = "1.21.4";
+
 pub enum Rail {
     /// The welcome screen and the instance list.
     Home,

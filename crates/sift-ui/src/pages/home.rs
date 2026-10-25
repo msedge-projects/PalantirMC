@@ -10,7 +10,7 @@
 //! the state a new player sees and the state the parity capture compares, and the list comes
 //! in the slice that ports instance cards.
 
-use eframe::egui::{Align2, Color32, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{Align2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::data::Entry;
 use crate::fonts;
