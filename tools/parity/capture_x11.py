@@ -111,11 +111,15 @@ def apply_step(step: dict) -> list[str]:
     raise ValueError(f"unknown step {step!r}")
 
 
-def sample_corners(png: Path, inset: int = 8) -> list[tuple[int, int, int]]:
-    """The RGB of four inset corners, in reading order: TL, TR, BL, BR.
+def sample_points(png: Path, inset: int = 8) -> list[tuple[int, int, int]]:
+    """The RGB of five points, in the order `capture.py` uses: centre, then the four
+    inset corners (TL, TR, BL, BR).
 
-    Sampled from the saved file rather than from the display so the report describes
-    the artifact that will be compared, not a moment that has already passed.
+    Five rather than four because the centre is the one point that samples the page's
+    own background in every page, so it catches a whole-theme drift that four corners
+    of a window could all miss. Sampled from the saved file rather than from the
+    display so the report describes the artifact that will be compared, not a moment
+    that has already passed.
     """
     geometry = run(["identify", "-format", "%w %h", str(png)], timeout=20)
     try:
@@ -123,12 +127,13 @@ def sample_corners(png: Path, inset: int = 8) -> list[tuple[int, int, int]]:
     except ValueError:
         return []
     points = [
+        (width // 2, height // 2),
         (inset, inset),
         (width - inset, inset),
         (inset, height - inset),
         (width - inset, height - inset),
     ]
-    corners = []
+    samples = []
     for x, y in points:
         probe = run(
             ["convert", str(png), "-format", f"%[pixel:p{{{x},{y}}}]", "info:"],
@@ -136,10 +141,14 @@ def sample_corners(png: Path, inset: int = 8) -> list[tuple[int, int, int]]:
         )
         text = probe.stdout.strip()
         # `srgb(15,15,15)` in ImageMagick 7, `srgb(15,15,15)` or `#0F0F0F` in 6.
-        numbers = [int(n) for n in text.replace("srgb(", "").replace(")", "").split(",")[:3] if n.strip().isdigit()]
+        numbers = [
+            int(n)
+            for n in text.replace("srgb(", "").replace(")", "").split(",")[:3]
+            if n.strip().isdigit()
+        ]
         if len(numbers) == 3:
-            corners.append((numbers[0], numbers[1], numbers[2]))
-    return corners
+            samples.append((numbers[0], numbers[1], numbers[2]))
+    return samples
 
 
 def main() -> int:
@@ -202,7 +211,7 @@ def main() -> int:
         return 3
 
     x, y, width, height = rect_of(window)
-    corners = ";".join(f"{r},{g},{b}" for r, g, b in sample_corners(png))
+    corners = ";".join(f"{r},{g},{b}" for r, g, b in sample_points(png))
     line = (
         f"app={slug} page={args.page} state={args.state} "
         f"rect={x},{y},{width},{height} corners={corners}\n"
