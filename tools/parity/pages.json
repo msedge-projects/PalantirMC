@@ -27,53 +27,167 @@
       "the next pages (library, settings sub-pages) will want, kept here so the tuning",
       "pass has one map to correct instead of four files to correct."
     ],
-    "PARK": [900, 14],
-    "RAIL_HOME": [32, 64],
-    "RAIL_DISCOVER": [32, 120],
-    "RAIL_LIBRARY": [32, 176],
-    "RAIL_SETTINGS": [32, 812],
-    "DISCOVER_CARD_FEATURED_1": [470, 240],
-    "DISCOVER_CARD_FEATURED_2": [800, 240],
-    "DISCOVER_CATEGORY_MODPACKS": [180, 104],
-    "HOME_CARD_INSTANCE_1": [500, 260],
-    "HOME_CARD_INSTANCE_2": [860, 260],
-    "SETTINGS_NAV_APPEARANCE": [420, 60]
+    "PARK": [
+      900,
+      14
+    ],
+    "RAIL_HOME": [
+      32,
+      64
+    ],
+    "RAIL_DISCOVER": [
+      32,
+      120
+    ],
+    "RAIL_LIBRARY": [
+      32,
+      176
+    ],
+    "RAIL_SETTINGS": [
+      32,
+      812
+    ],
+    "DISCOVER_CARD_FEATURED_1": [
+      470,
+      240
+    ],
+    "DISCOVER_CARD_FEATURED_2": [
+      800,
+      240
+    ],
+    "DISCOVER_CATEGORY_MODPACKS": [
+      180,
+      104
+    ],
+    "HOME_CARD_INSTANCE_1": [
+      500,
+      260
+    ],
+    "HOME_CARD_INSTANCE_2": [
+      860,
+      260
+    ],
+    "SETTINGS_NAV_APPEARANCE": [
+      420,
+      60
+    ],
+    "FIRST_CARD": [
+      400,
+      300
+    ]
   },
   "pages": {
     "discover": {
       "title_hint": "Discover",
       "steps": [
-        { "click": ["RAIL_DISCOVER"] },
-        { "wait": 500 },
-        { "move": ["PARK"] },
-        { "wait": 300 }
+        {
+          "click": [
+            "RAIL_DISCOVER"
+          ]
+        },
+        {
+          "wait": 500
+        },
+        {
+          "move": [
+            "PARK"
+          ]
+        },
+        {
+          "wait": 300
+        }
       ]
     },
     "discover-hover": {
       "title_hint": "Discover",
       "steps": [
-        { "click": ["RAIL_DISCOVER"] },
-        { "wait": 500 },
-        { "move": ["DISCOVER_CARD_FEATURED_1"] },
-        { "wait": 600 }
+        {
+          "click": [
+            "RAIL_DISCOVER"
+          ]
+        },
+        {
+          "wait": 500
+        },
+        {
+          "move": [
+            "DISCOVER_CARD_FEATURED_1"
+          ]
+        },
+        {
+          "wait": 600
+        }
       ]
     },
     "home": {
       "title_hint": "Home",
       "steps": [
-        { "click": ["RAIL_HOME"] },
-        { "wait": 500 },
-        { "move": ["PARK"] },
-        { "wait": 300 }
+        {
+          "click": [
+            "RAIL_HOME"
+          ]
+        },
+        {
+          "wait": 500
+        },
+        {
+          "move": [
+            "PARK"
+          ]
+        },
+        {
+          "wait": 300
+        }
       ]
     },
     "settings": {
       "title_hint": "Settings",
       "steps": [
-        { "click": ["RAIL_SETTINGS"] },
-        { "wait": 600 },
-        { "move": ["PARK"] },
-        { "wait": 300 }
+        {
+          "click": [
+            "RAIL_SETTINGS"
+          ]
+        },
+        {
+          "wait": 600
+        },
+        {
+          "move": [
+            "PARK"
+          ]
+        },
+        {
+          "wait": 300
+        }
+      ]
+    },
+    "project": {
+      "title_hint": "project",
+      "steps": [
+        {
+          "click": [
+            "RAIL_DISCOVER"
+          ]
+        },
+        {
+          "wait": 900
+        },
+        {
+          "click": [
+            "FIRST_CARD"
+          ]
+        },
+        {
+          "wait": 1600
+        },
+        {
+          "move": [
+            "PARK"
+          ]
+        },
+        {
+          "wait": 400
+        }
       ]
     }
   }
