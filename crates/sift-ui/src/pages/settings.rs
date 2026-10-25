@@ -89,6 +89,10 @@ pub struct State {
     pub scroll: f32,
     /// The height the body reported last frame, so the clamp knows where the end is.
     pub last_body_height: f32,
+    /// How far the rail is scrolled. Fourteen rows fit a tall window at the source's pitch and
+    /// a short one not at all -- the reference scrolls its rail in that case, and a rail whose
+    /// last tabs cannot be reached is a settings screen with unreachable settings.
+    pub rail_scroll: f32,
     /// The shell keeps drawing while this is true, and stops when it is false.
     pub open: bool,
     /// The selected tab. The source opens on the first one (`index.vue:88-96`).
@@ -1482,7 +1486,15 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
     // The rail's rows are the only navigation. A row clipped away by the rail's overflow is
     // not a target: its centre has to be inside the rail for the click to count.
     let rail = rail_rect(dialog);
-    for (index, entry) in rail_rows(dialog).into_iter().enumerate() {
+    // The wheel over the rail moves it, clamped against how far its rows actually reach.
+    let rail_overflow = (rail_needed_height() - (rail.height() - 2.0 * RAIL_PADDING)).max(0.0);
+    let wheel = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+    if wheel != 0.0 && rail_overflow > 0.0 && ui.rect_contains_pointer(rail) {
+        state.rail_scroll = (state.rail_scroll - wheel).clamp(0.0, rail_overflow);
+    }
+    state.rail_scroll = state.rail_scroll.min(rail_overflow);
+
+    for (index, entry) in rail_rows(dialog, state.rail_scroll).into_iter().enumerate() {
         if entry.row.center().y <= rail.top() || entry.row.center().y >= rail.bottom() {
             continue;
         }
@@ -1586,7 +1598,7 @@ fn rail_needed_height() -> f32 {
 
 /// Lay the rail out: category headings first, then a 40-point row and a 4-point gap for
 /// every tab.
-fn rail_rows(dialog: Rect) -> [RailRow; TAB_COUNT] {
+fn rail_rows(dialog: Rect, scroll: f32) -> [RailRow; TAB_COUNT] {
     let rail = rail_rect(dialog);
     let width = rail.width() - 2.0 * RAIL_PADDING;
     let mut rows = [RailRow {
@@ -1616,7 +1628,7 @@ fn rail_rows(dialog: Rect) -> [RailRow; TAB_COUNT] {
     let row_height = (per_row - RAIL_ROW_GAP).clamp(30.0, RAIL_ROW_HEIGHT);
     let row_gap = (per_row - row_height).clamp(0.0, RAIL_ROW_GAP);
 
-    let mut y = rail.top() + RAIL_PADDING;
+    let mut y = rail.top() + RAIL_PADDING - scroll;
     let mut previous: Option<Tab> = None;
     for (index, tab) in Tab::ALL.into_iter().enumerate() {
         let starts_category = previous.map_or(true, |last| last.category() != tab.category());
@@ -2117,16 +2129,22 @@ mod tests {
         for screen_size in [vec2(1440.0, 900.0), vec2(1600.0, 1200.0), vec2(1280.0, 800.0)] {
             let dialog = dialog_rect(Rect::from_min_size(pos2(0.0, 0.0), screen_size));
             let rail = rail_rect(dialog);
-            let rows = rail_rows(dialog);
+            let rows = rail_rows(dialog, 0.0);
             assert_eq!(rows.len(), TAB_COUNT);
 
-            // Every row starts and ends inside the rail: a row outside it is drawn past the
-            // dialog and skipped as a target, which is the bug this layout was changed for.
-            for row in rows {
+            // Every row is reachable: visible at the top of the rail's scroll, or visible once
+            // it is scrolled to the bottom. A row in neither place is a tab nobody can select,
+            // which is the bug this layout was changed for.
+            let overflow = (rail_needed_height() - (rail.height() - 2.0 * RAIL_PADDING)).max(0.0);
+            let bottom = rail_rows(dialog, overflow);
+            for (index, row) in rows.iter().enumerate() {
+                let visible_top = row.row.top() >= rail.top() - 0.001
+                    && row.row.bottom() <= rail.bottom() + 0.001;
+                let visible_bottom = bottom[index].row.top() >= rail.top() - 0.001
+                    && bottom[index].row.bottom() <= rail.bottom() + 0.001;
                 assert!(
-                    row.row.top() >= rail.top() - 0.001
-                        && row.row.bottom() <= rail.bottom() + 0.001,
-                    "{} falls outside the rail at {screen_size:?}",
+                    visible_top || visible_bottom,
+                    "{} is unreachable at {screen_size:?} (overflow {overflow})",
                     row.tab.label()
                 );
             }
@@ -2168,7 +2186,7 @@ mod tests {
         // with, because the ratio was what produced 29-point rows.
         let _ = (available, needed);
 
-        let rows = rail_rows(dialog);
+        let rows = rail_rows(dialog, 0.0);
         for row in rows {
             assert!(
                 row.row.height() >= 30.0,
