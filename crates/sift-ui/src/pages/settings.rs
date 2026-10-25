@@ -80,6 +80,15 @@ use crate::theme;
 /// Whether the modal is up, and which tab it is showing.
 #[derive(Debug, Default)]
 pub struct State {
+    /// How far the selected tab's body is scrolled, in points.
+    ///
+    /// Every ported tab's body is taller than the pane, so without this the last rows of
+    /// Behavior, Resources and Troubleshooting are unreachable -- the body clips, it does not
+    /// scroll (`TabbedModal.vue:244-246` is the reference's own scroller). Kept as an offset
+    /// rather than a `ScrollArea` because the body is drawn through a painter, not a `Ui`.
+    pub scroll: f32,
+    /// The height the body reported last frame, so the clamp knows where the end is.
+    pub last_body_height: f32,
     /// The shell keeps drawing while this is true, and stops when it is false.
     pub open: bool,
     /// The selected tab. The source opens on the first one (`index.vue:88-96`).
@@ -1455,7 +1464,19 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
         );
         draw_header(painter, dialog, theme);
         draw_rail(painter, dialog, theme, state.tab);
-        draw_body(painter, dialog, theme, state.tab);
+        let body_height = draw_body(painter, dialog, theme, state.tab, state.scroll);
+    state.last_body_height = body_height;
+
+    // The wheel, over the content pane, moves the body. Clamped both ways: above zero is the
+    // top of the tab, and the bottom is the last row sitting at the pane's lower edge.
+    let content = content_rect(dialog);
+    let pane = content.height() - 2.0 * CONTENT_PADDING;
+    let limit = (body_height - pane).max(0.0);
+    let wheel = ui.ctx().input(|i| i.raw_scroll_delta.y);
+    if wheel != 0.0 && ui.rect_contains_pointer(content) {
+        state.scroll = (state.scroll - wheel).clamp(0.0, limit);
+    }
+    state.scroll = state.scroll.min(limit);
     }
 
     // The rail's rows are the only navigation. A row clipped away by the rail's overflow is
@@ -1672,14 +1693,24 @@ fn draw_rail(painter: &egui::Painter, dialog: Rect, theme: &theme::Theme, select
 }
 
 /// The selected tab's body: its pane, its heading, and its rows.
-fn draw_body(painter: &egui::Painter, dialog: Rect, theme: &theme::Theme, tab: Tab) {
+/// Draw the tab's body, scrolled by `scroll`, and return its total height.
+///
+/// The height is returned so the caller can clamp the offset against the pane: a scroll bar
+/// that let a reader go past the last row by a screenful is as wrong as no scrolling at all.
+fn draw_body(
+    painter: &egui::Painter,
+    dialog: Rect,
+    theme: &theme::Theme,
+    tab: Tab,
+    scroll: f32,
+) -> f32 {
     let content = content_rect(dialog);
     painter.rect_filled(content, PANE_RADIUS, theme.SURFACE_2);
     let body = painter.with_clip_rect(content);
 
     let left = content.left() + CONTENT_PADDING;
     let right = content.right() - CONTENT_PADDING;
-    let mut y = content.top() + CONTENT_PADDING;
+    let mut y = content.top() + CONTENT_PADDING - scroll;
 
     let blocks = blocks(tab);
     if blocks.is_empty() {
@@ -1696,7 +1727,7 @@ fn draw_body(painter: &egui::Painter, dialog: Rect, theme: &theme::Theme, tab: T
             None,
             GROUP_HEADING_SIZE,
         );
-        return;
+        return y + scroll - content.top();
     }
 
     // The gap owed by the block above; a rule brings its own margins.
