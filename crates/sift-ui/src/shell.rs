@@ -105,7 +105,6 @@ impl Shell {
         let mut rail_animating = false;
         rail_animating |= self.rail_column(ui);
         self.right_panel(ui);
-        self.page_header(ui);
         let content = self.content_column(ui);
 
         rail_animating || content
@@ -134,6 +133,37 @@ impl Shell {
             Align2::LEFT_CENTER,
             "Sift Launcher",
             FontId::proportional(14.0),
+            self.theme.CONTRAST,
+        );
+
+        // The breadcrumb row, on the same line as the brand: back and forward in their
+        // circles, the route's badge, then the page's name. Measured from the reference at
+        // 2x (`top.jpg`): the arrows' circles start at 167, the badge at 240, the title 265.
+        for (index, glyph) in [Glyph::ChevronLeft, Glyph::ChevronRight]
+            .into_iter()
+            .enumerate()
+        {
+            let centre = egui::pos2(
+                g::BREADCRUMB_ARROWS + index as f32 * 34.0,
+                bar.center().y,
+            );
+            let circle = Rect::from_center_size(centre, Vec2::splat(24.0));
+            painter.circle_stroke(circle.center(), 12.0, Stroke::new(1.0, self.theme.DIVIDER));
+            icons::draw(painter, glyph, Rect::from_center_size(centre, Vec2::splat(13.0)), self.theme.SECONDARY);
+        }
+        let badge = egui::pos2(g::BREADCRUMB_BADGE, bar.center().y);
+        painter.circle_stroke(badge, 10.0, Stroke::new(1.0, self.theme.SECONDARY));
+        icons::draw(
+            painter,
+            self.rail.glyph(),
+            Rect::from_center_size(badge, Vec2::splat(12.0)),
+            self.theme.SECONDARY,
+        );
+        painter.text(
+            egui::pos2(badge.x + 18.0, bar.center().y),
+            Align2::LEFT_CENTER,
+            self.rail.title(),
+            FontId::proportional(15.0),
             self.theme.CONTRAST,
         );
 
@@ -172,39 +202,6 @@ impl Shell {
             };
             icons::draw(painter, glyph, Rect::from_center_size(centre, Vec2::splat(14.0)), ink);
         }
-    }
-
-    /// The page header: the back and forward arrows, the route's own icon and its name.
-    ///
-    /// It sits between the title bar and the tab strip because the reference puts it there;
-    /// it is not part of the title bar, which is what the first comparison got wrong.
-    fn page_header(&mut self, ui: &mut Ui) {
-        let header = Rect::from_min_size(
-            egui::pos2(g::CONTENT_LEFT, g::TITLE_BAR),
-            egui::vec2(g::PANEL_LEFT - g::CONTENT_LEFT - 16.0, g::PAGE_HEADER),
-        );
-        let painter = ui.painter();
-        let mut x = header.left() + 4.0;
-        for glyph in [Glyph::ChevronLeft, Glyph::ChevronRight] {
-            let centre = egui::pos2(x + 10.0, header.center().y);
-            icons::draw(painter, glyph, Rect::from_center_size(centre, Vec2::splat(16.0)), self.theme.SECONDARY);
-            x += 32.0;
-        }
-        let badge = egui::pos2(x + 10.0, header.center().y);
-        painter.circle_stroke(badge, 9.0, Stroke::new(1.0, self.theme.SECONDARY));
-        icons::draw(
-            painter,
-            self.rail.glyph(),
-            Rect::from_center_size(badge, Vec2::splat(11.0)),
-            self.theme.SECONDARY,
-        );
-        painter.text(
-            egui::pos2(badge.x + 18.0, header.center().y),
-            Align2::LEFT_CENTER,
-            self.rail.title(),
-            FontId::proportional(15.0),
-            self.theme.CONTRAST,
-        );
     }
 
     /// The five destinations and the utility group, at the measured pitch.
@@ -403,23 +400,37 @@ impl Shell {
         painter.rect_filled(content, 0, self.theme.BG);
         let header = Rect::from_min_size(content.min, egui::vec2(content.width(), g::PAGE_HEADER));
 
-        // The tab strip, inset inside the content column and below the page header: the
-        // reference's strip is a rounded container with its own margins, not a rule across
-        // the column.
+        // The tab strip: a rounded container holding six pills, the first of which is the
+        // page's own type and is active. Measured at 2x from `top.jpg`: the container starts
+        // 8 px left of the content column at 48 down, its pills are 36 tall and start 6 in.
         let strip = Rect::from_min_size(
-            egui::pos2(content.left() + 8.0, header.bottom() + 8.0),
-            egui::vec2(content.width() - 16.0, g::TAB_STRIP),
+            egui::pos2(content.left() - 8.0, g::TAB_CONTAINER_TOP),
+            egui::vec2(content.width() + 8.0, g::TAB_CONTAINER),
         );
-        painter.rect_filled(strip, 8, self.theme.RAISED_BG);
-        let mut x = strip.left() + 20.0;
-        for label in ["Mods", "Resource Packs", "Data Packs", "Shaders", "Servers"] {
+        painter.rect_filled(strip, 12, self.theme.RAISED_BG);
+        let mut x = strip.left() + 6.0;
+        for (index, label) in ["Modpacks", "Mods", "Resource Packs", "Data Packs", "Shaders", "Servers"]
+            .into_iter()
+            .enumerate()
+        {
             let galley = painter.layout_no_wrap(
                 label.to_owned(),
                 FontId::proportional(14.0),
+                if index == 0 { self.theme.BUTTON_TEXT_SELECTED } else { self.theme.BASE },
+            );
+            let pill = Rect::from_min_size(
+                egui::pos2(x, strip.top() + 8.0),
+                egui::vec2(galley.size().x + 32.0, g::TAB_PILL),
+            );
+            if index == 0 {
+                painter.rect_filled(pill, 18, self.theme.BUTTON_BG_SELECTED);
+            }
+            painter.galley(
+                egui::pos2(pill.center().x - galley.size().x / 2.0, pill.center().y - galley.size().y / 2.0),
+                galley.clone(),
                 self.theme.BASE,
             );
-            painter.galley(egui::pos2(x, strip.center().y - galley.size().y / 2.0), galley.clone(), self.theme.BASE);
-            x += galley.size().x + 24.0;
+            x = pill.right() + 8.0;
         }
 
         // The list, via fastframe's scrolling: 120 points per notch rather than egui's 40.

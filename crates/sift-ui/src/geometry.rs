@@ -47,9 +47,21 @@ pub const PANEL_LEFT: f32 = WINDOW.0 - PANEL;
 /// `196,197`. Used as a check on the strip's own padding rather than as a layout input.
 pub const FIRST_TAB_LABEL: f32 = 196.0;
 
-/// The page header's height: the breadcrumb row the reference draws between the title bar
-/// and the tab strip (`Discover modpacks`, with its back and forward arrows).
-pub const PAGE_HEADER: f32 = 44.0;
+/// Where the first back/forward circle's centre sits, on the title bar's own row. Measured
+/// at 2x from the reference: the circles begin at 167 window pixels.
+pub const BREADCRUMB_ARROWS: f32 = 180.0;
+
+/// The route badge's centre on the title bar, 240 window pixels in the reference.
+pub const BREADCRUMB_BADGE: f32 = 253.0;
+
+/// Where the tab strip's rounded container begins, below the title bar.
+pub const TAB_CONTAINER_TOP: f32 = 48.0;
+
+/// The tab container's height: 36-point pills inside 8-point padding.
+pub const TAB_CONTAINER: f32 = 52.0;
+
+/// One tab pill's height.
+pub const TAB_PILL: f32 = 36.0;
 
 /// The tab strip's height: the label sits at row 105 and the strip's bottom rule is the
 /// next horizontal edge below it.
