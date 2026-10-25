@@ -92,7 +92,9 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-BRAND = ROOT / "crates" / "sift-desktop" / "assets" / "brand"
+# The brand art lives at the repository root now. It used to sit inside the iced crate,
+# which is why this path named it; that crate is deleted and the art belongs to the product.
+BRAND = ROOT / "assets" / "brand"
 SOURCE = BRAND / "sift-logo-source.png"
 
 # The two embedded PNGs, with the side each is rendered at.
