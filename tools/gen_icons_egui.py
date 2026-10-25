@@ -23,13 +23,24 @@ takes a sequence of subpaths and cubic Beziers; egui's `epaint::PathShape` takes
   512-unit tag icons and the 14x2 one get the same visual accuracy.
 * **Split the subpaths.** A `PathShape` is a single polyline, so one SVG element
   with three subpaths becomes three shapes. This is exact for strokes -- stroking
-  a subpath is independent of its siblings -- and it is the reason a filled element
-  with holes cannot be expressed here at all: see `--report` and the module
-  docstring of the generated file.
+  a subpath is independent of its siblings -- and it is why each stroked subpath
+  can be given its own round joins without disturbing the pen of its siblings.
+* **Triangulate the fills.** `PathShape` has no fill rule and epaint fills it with
+  a triangle fan from the first point, so a concave outline is painted outside
+  itself and a hole is painted solid. Filled elements are triangulated here --
+  ear clipping with hole bridging, honouring the element's own `fill-rule` -- and
+  emitted as `egui::Shape::Mesh`. See "Triangulating a filled element" below and
+  `docs/PARITY-LOG.md`, "Two fidelity gaps in the icon set".
+* **Round the joins and caps.** epaint miters every corner and butts every line
+  end. A stroke turns by more than `JOIN_DEGREES` at a corner, so a disc of the
+  stroke's width is emitted at that vertex, and a half-disc at each open end;
+  together they are one small mesh drawn over the path. Why a disc rather than a
+  miter is the whole point: the reference declares round joins and caps, and
+  epaint has no attribute that would ask for them. Same parity-log entry.
 
     python tools/gen_icons_egui.py            # write the egui crate's src/icons.rs
     python tools/gen_icons_egui.py --check    # fail if the file on disk is not this
-    python tools/gen_icons_egui.py --report   # glyph/shape counts and what cannot be drawn
+    python tools/gen_icons_egui.py --report   # glyph/shape/triangle counts and the area check
 
 The glyph list, its order and its names are the iced generator's, not a second
 opinion about them: both iterate `gen_icons.SOURCES` in the same order with the
@@ -46,6 +57,7 @@ import argparse
 import math
 import os
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # The parser lives in the sibling tool; put its directory on the path rather than
@@ -112,6 +124,30 @@ MAX_SUBDIVISION = 16
 # that is *not* that idiom is 0.41 units, seventeen times this limit, so the two are
 # not close enough to confuse. See `disc`.
 DOT_FRACTION = 1e-3
+
+# How sharply a stroked subpath has to turn before the corner is rounded, in
+# degrees, and how many sides the disc that rounds it has.
+#
+# `stroke-linejoin="round"` replaces a corner with an arc of the stroke's radius,
+# so the disc is only needed where the corner is visible at icon size: a 20-degree
+# turn moves the outer corner by a hundredth of the stroke's width, well under
+# epaint's half-pixel feathering. Flattened curves are the reason for a threshold
+# rather than "every vertex": a tight arc is many small turns and rounding each of
+# them would add a mesh per flattened point. Eight sides put every disc vertex
+# within 7.6% of the radius of the circle it stands in for -- 0.08 px for a 2-unit
+# pen at 24 px.
+JOIN_DEGREES = 20.0
+JOIN_SIDES = 8
+
+# Segments in the half-disc that stands in for a round line cap. Half of a
+# twelve-sided disc: the cap is a 180-degree arc plus its diameter, and the
+# diameter is the stroke's own butt end, so only the arc has to be approximated.
+CAP_SIDES = 6
+
+# The absolute tolerance for "is this triangle degenerate", in view-box units
+# squared. Coordinates are emitted at a thousandth of a unit, so a triangle with
+# less than this area is round-off, not geometry.
+AREA_EPSILON = 1e-12
 
 # Decimals kept on a coordinate. A view-box unit is at most one device pixel for
 # the 24-unit icons, so three decimals is a thousandth of a pixel; it also keeps
@@ -231,28 +267,40 @@ def bounding_extent(points: list[tuple[float, float]]) -> float:
     return math.hypot(max(xs) - min(xs), max(ys) - min(ys))
 
 
-def subpaths(element, tolerance: float,
-             dot_limit: float) -> list[tuple[list[tuple[float, float]], bool, bool]]:
-    """One element's geometry as the polylines egui can express.
+@dataclass
+class Piece:
+    """One drawable piece of an icon, and how to paint it.
+
+    A `Piece` is one `Shape` in the generated file: a stroke polyline, a filled
+    mesh, a dot, or the small mesh of round joins and caps that belongs to the
+    stroke just before it. `round` is how many discs that last kind holds and
+    `caps` how many of them are half-discs; both are zero for everything else.
+    """
+
+    points: list[tuple[float, float]]
+    closed: bool
+    dot: bool = False
+    triangles: list[int] = field(default_factory=list)
+    round: int = 0
+    caps: int = 0
+    holes: int = 0
+    concave: bool = False
+    outer_area: float = 0.0
+    hole_area: float = 0.0
+    mesh_area: float = 0.0
+    outer_triangles: int = 0
+
+
+def element_contours(element, tolerance: float) -> list[tuple[list[tuple[float, float]], bool]]:
+    """One element's polylines and whether each closes, in document order.
 
     An element the reference paints nothing for (`Cmd::NoPaint`, the clamp path an
-    exported icon carries) has no shape at all and comes back empty: SVG draws
-    nothing for it, and so does this.
-
-    `closed` is true for a subpath that ends in `Close` *and* for every filled one,
-    because a fill closes its contour whether the SVG says so or not.
-
-    `dot` marks the one conversion that is not a polyline of the reference's points:
-    a stroked subpath shorter than `dot_limit` is the reference's dot idiom, drawn by
-    a round cap that epaint does not have, so it becomes the disc the cap would have
-    painted. Nothing that is longer than `dot_limit` is converted -- a thousandth of
-    the view box is a fiftieth of a pixel at 24 px, and the shortest real stroke in
-    the set is seventeen times longer than that.
+    exported icon carries) has no geometry and comes back empty: SVG draws nothing
+    for it, and so does this. `closed` is true for a subpath that ends in `Close`
+    *and* for every filled one, because a fill closes its contour whether the SVG
+    says so or not.
     """
-    if element.commands and element.commands[0][0] == "NoPaint":
-        return []
-
-    out: list[tuple[list[tuple[float, float]], bool, bool]] = []
+    out: list[tuple[list[tuple[float, float]], bool]] = []
     points: list[tuple[float, float]] = []
     current = (0.0, 0.0)
     closed = False
@@ -260,19 +308,8 @@ def subpaths(element, tolerance: float,
     def flush() -> None:
         nonlocal points, closed
         cleaned = tidy(points, closed or element.filled)
-        if element.filled:
-            if len(cleaned) >= 3:
-                out.append((cleaned, True, False))
-        elif bounding_extent(cleaned) <= dot_limit and cleaned:
-            middle = (
-                sum(point[0] for point in cleaned) / len(cleaned),
-                sum(point[1] for point in cleaned) / len(cleaned),
-            )
-            blob = disc(middle, element.stroke_width * 0.5, tolerance)
-            if blob:
-                out.append((blob, True, True))
-        elif len(cleaned) >= 2:
-            out.append((cleaned, closed, False))
+        if cleaned:
+            out.append((cleaned, closed))
         points, closed = [], False
 
     for command in element.commands:
@@ -298,8 +335,209 @@ def subpaths(element, tolerance: float,
     return out
 
 
+@dataclass
+class RoundTally:
+    """The joins and caps the strokes asked for, against the ones that were built.
+
+    This is the generator's refusal to emit a silently unrounded set: every
+    stroked subpath reports its own expected count to `round_pieces`, and `gate`
+    checks the whole run after the last icon. A code path that stops inserting
+    discs -- a changed turn test, a tolerance that swallowed a corner -- fails the
+    run with the total, rather than producing a file that is subtly more mitered
+    than the one before it.
+    """
+
+    expected: int = 0
+    produced: int = 0
+    strokes: int = 0
+
+    def gate(self) -> None:
+        if self.strokes and not self.produced:
+            raise SystemExit(
+                f"{self.strokes} stroked subpaths needed {self.expected} round joins/caps, "
+                "but none were produced; refusing to emit a mitered set"
+            )
+        if self.produced < self.expected:
+            raise SystemExit(
+                f"{self.expected} round joins/caps were expected but only {self.produced} "
+                "were produced; refusing to emit an under-rounded set"
+            )
+
+
+def turn_degrees(previous, current, following) -> float:
+    """How sharply a polyline turns at `current`, in degrees."""
+    incoming = (current[0] - previous[0], current[1] - previous[1])
+    outgoing = (following[0] - current[0], following[1] - current[1])
+    first = math.hypot(*incoming)
+    second = math.hypot(*outgoing)
+    if first == 0.0 or second == 0.0:
+        return 0.0
+    cosine = (incoming[0] * outgoing[0] + incoming[1] * outgoing[1]) / (first * second)
+    return math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
+
+
+def join_disc(center, radius: float) -> list[tuple[float, float]]:
+    """The polygon that stands in for a round join at `center`.
+
+    Why a disc rather than a miter: the reference declares
+    `stroke-linejoin="round"` on 413 of the 441 glyphs, and epaint has no cap or
+    join attribute at all -- its stroker miters every corner. A disc of the
+    stroke's radius, centred on the vertex, is the arc SVG would have drawn there;
+    it is painted over the miter, and the miter's tip outside the disc is the one
+    thing this cannot remove. Eight sides is `JOIN_SIDES`; a regular polygon is
+    convex, so its fan is exact.
+    """
+    return [
+        (center[0] + radius * math.cos(math.tau * side / JOIN_SIDES),
+         center[1] + radius * math.sin(math.tau * side / JOIN_SIDES))
+        for side in range(JOIN_SIDES)
+    ]
+
+
+def round_cap(center, radius: float, outward) -> list[tuple[float, float]]:
+    """The half-disc that stands in for a round cap at an open end.
+
+    Half, not whole: the inner half of a disc at the endpoint is already under the
+    stroke's own butt end, and a full disc there would double-blend when the
+    element carries an opacity below one. The diameter is the stroke's end, so only
+    the 180-degree arc is approximated (`CAP_SIDES` segments).
+    """
+    base = math.atan2(outward[1], outward[0])
+    return [
+        (center[0] + radius * math.cos(base + math.pi * 0.5 - math.pi * step / CAP_SIDES),
+         center[1] + radius * math.sin(base + math.pi * 0.5 - math.pi * step / CAP_SIDES))
+        for step in range(CAP_SIDES + 1)
+    ]
+
+
+def round_pieces(points: list[tuple[float, float]], closed: bool, width: float,
+                 tally: RoundTally, label: str
+                 ) -> tuple[list[list[tuple[float, float]]], int, int]:
+    """The discs and half-discs that round one stroked subpath's corners and ends.
+
+    Every interior vertex -- every vertex, for a closed subpath, including the one
+    where it closes -- whose turn is sharper than `JOIN_DEGREES` gets a disc. Every
+    *open* end gets a half-disc; a closed subpath has no ends, so it gets none.
+    The returned list is what the caller turns into one small mesh; the two
+    integers are joins and caps, so the report can tell them apart.
+    """
+    radius = width * 0.5
+    polygons: list[list[tuple[float, float]]] = []
+    joins = 0
+    caps = 0
+    if radius <= 0.0:
+        return polygons, joins, caps
+    count = len(points)
+    if closed:
+        corners = range(count)
+    else:
+        corners = range(1, count - 1)
+        if count >= 2:
+            for center, inward in ((points[0], points[1]),
+                                   (points[-1], points[-2])):
+                outward = (center[0] - inward[0], center[1] - inward[1])
+                length = math.hypot(*outward)
+                if length == 0.0:
+                    continue
+                polygons.append(round_cap(center, radius,
+                                          (outward[0] / length, outward[1] / length)))
+                caps += 1
+    for index in corners:
+        previous = points[index - 1]
+        current = points[index]
+        following = points[(index + 1) % count]
+        if turn_degrees(previous, current, following) > JOIN_DEGREES:
+            polygons.append(join_disc(current, radius))
+            joins += 1
+    expected = joins + caps
+    tally.expected += expected
+    tally.produced += len(polygons)
+    if expected:
+        tally.strokes += 1
+    if expected and not polygons:
+        raise SystemExit(
+            f"{label}: a stroked subpath turned at {joins} corner(s) and has {caps} "
+            "open end(s), but no round pieces were produced"
+        )
+    if len(polygons) != expected:
+        raise SystemExit(
+            f"{label}: expected {expected} round pieces for one stroked subpath, "
+            f"built {len(polygons)}"
+        )
+    return polygons, joins, caps
+
+
+def merge_convex(polygons: list[list[tuple[float, float]]]
+                 ) -> tuple[list[tuple[float, float]], list[int]]:
+    """Concatenate convex polygons into one mesh.
+
+    One mesh per stroked subpath rather than one shape per disc: the discs share an
+    ink and an order, both are already over the path, and a glyph with twenty
+    corners would otherwise cost twenty paint-list entries to say what one
+    triangle list says. The vertices are not welded -- two discs that touch keep
+    their own points -- because welding would need a tolerance and buys nothing.
+    """
+    points: list[tuple[float, float]] = []
+    triangles: list[int] = []
+    for polygon in polygons:
+        start = len(points)
+        points.extend(polygon)
+        triangles.extend(start + index for index in fan_triangles(len(polygon)))
+    return points, triangles
+
+
+def subpaths(element, tolerance: float, dot_limit: float,
+             tally: RoundTally, label: str) -> list[Piece]:
+    """One element's geometry as the pieces egui can express.
+
+    Filled elements become triangulated meshes -- see `triangulate_fill` -- because
+    a `PathShape` fill cannot leave a hole. Stroked elements become one polyline
+    each, plus, where the line turns or ends, one mesh of discs and half-discs that
+    supplies the round joins and caps the reference declares and epaint lacks. A
+    stroked subpath shorter than `dot_limit` is the reference's dot idiom (`M12
+    12h.01`, a zero-length line whose round cap is the whole picture) and becomes
+    the disc that cap painted; that conversion predates the round-cap work and is
+    left exactly as it was.
+    """
+    if element.commands and element.commands[0][0] == "NoPaint":
+        return []
+    contours = element_contours(element, tolerance)
+    if element.filled:
+        filled = [points for points, _closed in contours if len(points) >= 3]
+        return [
+            Piece(points=mesh.points, closed=True, triangles=mesh.triangles,
+                  holes=mesh.holes, concave=mesh.concave,
+                  outer_area=mesh.outer_area, hole_area=mesh.hole_area,
+                  mesh_area=mesh.mesh_area, outer_triangles=mesh.outer_triangles)
+            for mesh in triangulate_fill(filled, element.even_odd, label)
+        ]
+
+    pieces: list[Piece] = []
+    for points, closed in contours:
+        if bounding_extent(points) <= dot_limit:
+            middle = (
+                sum(point[0] for point in points) / len(points),
+                sum(point[1] for point in points) / len(points),
+            )
+            blob = disc(middle, element.stroke_width * 0.5, tolerance)
+            if blob:
+                pieces.append(Piece(points=blob, closed=True, dot=True,
+                                    triangles=fan_triangles(len(blob))))
+            continue
+        if len(points) < 2:
+            continue
+        pieces.append(Piece(points=points, closed=closed))
+        round_polygons, joins, caps = round_pieces(points, closed, element.stroke_width,
+                                                   tally, label)
+        if round_polygons:
+            rounded_points, triangles = merge_convex(round_polygons)
+            pieces.append(Piece(points=rounded_points, closed=True, triangles=triangles,
+                                round=joins + caps, caps=caps))
+    return pieces
+
+
 # --------------------------------------------------------------------------
-# What epaint's fill cannot express
+# Contour predicates
 # --------------------------------------------------------------------------
 
 
@@ -324,7 +562,9 @@ def fan_covers(points: list[tuple[float, float]]) -> bool:
     away from that point. That weaker test is the one used here, because it is what
     the tessellator actually draws.
 
-    The tolerance is a perpendicular distance, so it does not move with the icon's
+    Kept after the move to meshes because it is the measurement of which elements
+    the old `PathShape` fill could not draw; `--report` still names them. The
+    tolerance is a perpendicular distance, so it does not move with the icon's
     units, and it is far below the emitted coordinates' precision.
     """
     area = signed_area(points)
@@ -371,55 +611,443 @@ def on_segment(a, b, c) -> bool:
             and min(a[1], b[1]) - 1e-9 <= c[1] <= max(a[1], b[1]) + 1e-9)
 
 
-def edges_cross(a, b, c, d) -> bool:
+# --------------------------------------------------------------------------
+# Filled elements: why epaint cannot be handed one, and what is done instead
+# --------------------------------------------------------------------------
+#
+# `PathShape` carries a fill colour and no fill rule. epaint tessellates it with
+# the triangle fan `(0, i-1, i)` around its first point, which is exact only while
+# the contour is star-shaped as seen from that point, and a second, nested contour
+# is filled solid instead of cutting a hole. That is measured and recorded in
+# `docs/PARITY-LOG.md` ("Two fidelity gaps in the icon set"): 16 glyphs came out as
+# blobs. The answer here is to do the tessellation at generation time, where the
+# SVG's own `fill-rule` is available, and to emit a `Shape::Mesh` whose triangles
+# are already decided. `PathShape` stays for strokes.
+#
+# THE ALGORITHM is ear clipping with hole bridging -- the standard approach the SVG
+# and CSS fill rules are written against, and the shape of the one mapbox's
+# `earcut` implements:
+#
+#   * every contour is wound counter-clockwise, its nesting depth is found by
+#     point-in-polygon, and the fill rule decides which contours bound filled
+#     ground and which are holes (`evenodd`: even depth is filled; `nonzero`: a
+#     non-zero winding number is filled);
+#   * each hole is cut into its filled parent by a bridge to the nearest *visible*
+#     vertex, turning the polygon into a weakly-simple "keyhole" polygon. The
+#     corridor is traversed twice, so it has zero width and contributes no area;
+#   * the resulting ring is clipped ear by ear: a convex corner whose triangle
+#     contains no other vertex is a triangle, and removing it leaves a smaller
+#     simple polygon. Clipping stops at the last three vertices.
+#
+# The area of the resulting triangles is checked against the outer contour minus
+# its holes for every filled element, which is what catches a bad bridge instead of
+# letting it draw a wedge of ground the reference does not paint. `--report` prints
+# it for each glyph that needed the treatment.
+
+
+def cross3(origin, first, second) -> float:
+    """Twice the signed area of `origin, first, second`; its sign is the turn."""
+    return ((first[0] - origin[0]) * (second[1] - origin[1])
+            - (first[1] - origin[1]) * (second[0] - origin[0]))
+
+
+def triangle_area(a, b, c) -> float:
+    return 0.5 * abs(cross3(a, b, c))
+
+
+def counter_clockwise(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """The contour wound the way ear clipping wants it, reversing if needed.
+
+    Winding is a property of the reference's path, not of the picture -- SVG's
+    fill rules read it -- so it is measured before it is normalised and only the
+    normalised copy is clipped.
+    """
+    return list(points) if signed_area(points) >= 0.0 else list(reversed(points))
+
+
+def interior_point(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """A point just inside a simple contour, whatever way it is wound.
+
+    The midpoint of the longest edge nudged along its inward normal -- the left
+    normal for a counter-clockwise contour, the right one for a clockwise one. A
+    vertex would sit on the boundary of a sibling contour that touches it, where a
+    ray cast is a coin toss; the midpoint of the longest edge is as far from the
+    rounding of a short edge as the contour offers.
+    """
+    count = len(points)
+    longest = max(
+        range(count),
+        key=lambda index: math.dist(points[index], points[(index + 1) % count]),
+    )
+    first, second = points[longest], points[(longest + 1) % count]
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length = math.hypot(dx, dy)
+    if length == 0.0:
+        return first
+    # The left normal of each edge points into a counter-clockwise polygon and out
+    # of a clockwise one, so the sign of the contour's area decides which way is in.
+    sign = 1.0 if signed_area(points) >= 0.0 else -1.0
+    inward = (-dy / length * sign, dx / length * sign)
+    step = 1e-4 * max(bounding_extent(points), 1.0)
+    middle = ((first[0] + second[0]) * 0.5, (first[1] + second[1]) * 0.5)
+    return (middle[0] + inward[0] * step, middle[1] + inward[1] * step)
+
+
+def nesting(contours: list[list[tuple[float, float]]]) -> tuple[list[int], list[int]]:
+    """Each contour's depth, and the index of its immediate container (-1 for none).
+
+    Depth is the number of contours that contain a point just inside this one.
+    The icons' filled elements are a handful of contours each, so the quadratic
+    probe is cheaper than a sweep line and far easier to be sure of.
+    """
+    probes = [interior_point(contour) for contour in contours]
+    contains = [
+        [other_index != index and point_inside(probe, contours[other_index])
+         for other_index in range(len(contours))]
+        for index, probe in enumerate(probes)
+    ]
+    depth = [sum(row) for row in contains]
+    parent = []
+    for index in range(len(contours)):
+        containers = [other for other in range(len(contours)) if contains[index][other]]
+        parent.append(max(containers, key=lambda other: depth[other]) if containers else -1)
+    return depth, parent
+
+
+def filled_contours(contours: list[list[tuple[float, float]]], even_odd: bool
+                    ) -> list[bool]:
+    """Which contours bound filled ground, under the element's own `fill-rule`.
+
+    `evenodd` fills where an odd number of contours enclose the point, so the
+    nesting parity is the answer. `nonzero` fills where the winding number is not
+    zero, so a contour nested the same way as its parent is redundant (still
+    filled) and one wound the other way is a hole.
+    """
+    _, parent = nesting(contours)
+    windings = [1 if signed_area(contour) > 0.0 else -1 for contour in contours]
+    filled: list[bool] = []
+    for index in range(len(contours)):
+        if even_odd:
+            # `nesting` is not returned by this call; depth is the chain length.
+            depth = 0
+            ancestor = parent[index]
+            while ancestor >= 0:
+                depth += 1
+                ancestor = parent[ancestor]
+            filled.append(depth % 2 == 0)
+            continue
+        winding = windings[index]
+        ancestor = parent[index]
+        while ancestor >= 0:
+            winding += windings[ancestor]
+            ancestor = parent[ancestor]
+        filled.append(winding != 0)
+    return filled
+
+
+@dataclass
+class Group:
+    """One filled region: an outer contour and the holes cut out of it."""
+
+    outer: int
+    holes: list[int] = field(default_factory=list)
+
+
+def fill_groups(contours: list[list[tuple[float, float]]], even_odd: bool,
+                label: str) -> list[Group]:
+    """The region each filled contour belongs to, holes attached to their parent.
+
+    A contour that is filled but sits inside another filled contour adds no ground
+    of its own; its holes still cut the outer region, so they are promoted to the
+    nearest filled ancestor. That is what makes an island inside a hole work (a
+    `nonzero` path can alternate more than once) and it leaves the `evenodd`
+    case -- strictly alternating -- as the simple special case.
+    """
+    depth, parent = nesting(contours)
+    filled = filled_contours(contours, even_odd)
+    groups: list[Group] = []
+    group_of: list[int] = [-1] * len(contours)
+    for index in sorted(range(len(contours)), key=lambda candidate: depth[candidate]):
+        if filled[index]:
+            # A filled contour inside another filled one adds no ground of its
+            # own, so it joins that region and its holes are promoted to it. A
+            # filled contour whose parent is a *hole* is an island: the hole
+            # separates it from the outer region, so it starts a region of its
+            # own. (Nested windings can alternate more than once; `evenodd` can
+            # only alternate, which is the simple case.)
+            if parent[index] >= 0 and filled[parent[index]]:
+                group_of[index] = group_of[parent[index]]
+            else:
+                group_of[index] = len(groups)
+                groups.append(Group(outer=index))
+            continue
+        ancestor = parent[index]
+        while ancestor >= 0 and not filled[ancestor]:
+            ancestor = parent[ancestor]
+        if ancestor < 0:
+            raise SystemExit(f"{label}: a hole outside every filled contour")
+        group_of[index] = group_of[ancestor]
+        groups[group_of[index]].holes.append(index)
+    if not groups:
+        raise SystemExit(f"{label}: filled element with no filled contour")
+    return groups
+
+
+def segments_cross(a, b, c, d) -> bool:
+    """Whether two segments cross *through* each other, ignoring shared ends.
+
+    A bridge is allowed to end on a vertex -- that is the point of a bridge -- so
+    touching must not count as crossing. Only a proper interior intersection does.
+    """
     first, second = orientation(a, b, c), orientation(a, b, d)
     third, fourth = orientation(c, d, a), orientation(c, d, b)
-    if first != second and third != fourth:
-        return True
-    return ((first == 0 and on_segment(a, b, c))
-            or (second == 0 and on_segment(a, b, d))
-            or (third == 0 and on_segment(c, d, a))
-            or (fourth == 0 and on_segment(c, d, b)))
+    return (first != 0 and second != 0 and third != 0 and fourth != 0
+            and first != second and third != fourth)
 
 
-def contours_cross(first: list[tuple[float, float]],
-                   second: list[tuple[float, float]]) -> bool:
-    for outer_index in range(len(first)):
-        for inner_index in range(len(second)):
-            if edges_cross(first[outer_index], first[(outer_index + 1) % len(first)],
-                           second[inner_index], second[(inner_index + 1) % len(second)]):
-                return True
-    return False
+def segment_is_visible(first, second, outer, holes) -> bool:
+    """Can `first`--`second` be a bridge without leaving the filled ground?
 
-
-def fill_limitation(shape_list: list[tuple[list[tuple[float, float]], bool]],
-                    even_odd: bool) -> str | None:
-    """Why epaint cannot draw this filled element, or `None` if it can.
-
-    `PathShape` has a fill colour and no fill rule, and epaint's fill is a triangle
-    fan from the first point of each contour. So an element is exact here when
-    every contour is one the fan covers (see `fan_covers`) and the element has no
-    hole; disjoint contours are then exact as one shape each. An element is not
-    exact when a hole is cut -- by `fill-rule="evenodd"`, which punches one at
-    every second nesting, or by a nested contour wound the other way, which
-    `nonzero` subtracts -- because the hole would be filled solid.
+    A bridge may land on a vertex (that is the point) but must not cross an edge or
+    pass through a vertex of any contour, and its middle must lie in the filled
+    region: inside the outer contour and outside every hole.
     """
-    for points, *_rest in shape_list:
-        if not fan_covers(points):
-            return "concave outline the fan cannot cover"
-    for first_index in range(len(shape_list)):
-        for second_index in range(first_index + 1, len(shape_list)):
-            first, second = shape_list[first_index][0], shape_list[second_index][0]
-            if contours_cross(first, second):
-                return "two contours that cross"
-            nested = any(point_inside(point, first) for point in second) \
-                or any(point_inside(point, second) for point in first)
-            if not nested:
+    if first == second:
+        return False
+    for contour in [outer, *holes]:
+        count = len(contour)
+        for index in range(count):
+            a, b = contour[index], contour[(index + 1) % count]
+            if a in (first, second) or b in (first, second):
                 continue
-            same_winding = signed_area(first) * signed_area(second) > 0.0
-            if even_odd or not same_winding:
-                return "hole (a nested subpath)"
+            if segments_cross(first, second, a, b):
+                return False
+            if orientation(first, second, a) == 0 and on_segment(first, second, a):
+                return False
+    middle = ((first[0] + second[0]) * 0.5, (first[1] + second[1]) * 0.5)
+    if not point_inside(middle, outer):
+        return False
+    return not any(point_inside(middle, hole) for hole in holes)
+
+
+def bridge(ring: list[int], hole: list[int], points: list[tuple[float, float]],
+           outer: list[tuple[float, float]],
+           holes: list[list[tuple[float, float]]]) -> tuple[int, int] | None:
+    """A ring position and hole position that can be joined by a visible bridge.
+
+    The hole's rightmost vertex is the usual choice (it is the one whose ray to
+    the right leaves the polygon through the fewest edges), and from it the
+    nearest visible vertex of the current ring is used -- "bridge to the nearest
+    visible vertex". Ties are broken by the sort order, which is stable.
+    """
+    hole_position = max(range(len(hole)), key=lambda index: (points[hole[index]][0],
+                                                             points[hole[index]][1]))
+    hole_point = points[hole[hole_position]]
+    candidates = sorted(range(len(ring)), key=lambda index: math.dist(points[ring[index]], hole_point))
+    for ring_position in candidates:
+        if segment_is_visible(hole_point, points[ring[ring_position]], outer, holes):
+            return ring_position, hole_position
     return None
+
+
+def ear_clip(ring: list[int], points: list[tuple[float, float]], label: str
+             ) -> list[tuple[int, int, int]]:
+    """Triangulate a weakly-simple counter-clockwise ring by clipping ears.
+
+    A vertex is an ear when the triangle of its neighbours turns the same way as
+    the ring and no other vertex lies strictly inside it. Removing ears until
+    three vertices remain is the classic O(n^2) ear clip; n here is at most a few
+    hundred, once, at generation time.
+
+    Bridge corridors make the ring weakly simple: the two bridge vertices appear
+    twice. Their ears are zero-area spurs, so the fallback pass removes a
+    collinear or repeated vertex instead of failing -- that is what lets a
+    keyhole polygon be clipped at all.
+    """
+    ring = list(ring)
+    triangles: list[tuple[int, int, int]] = []
+    while len(ring) > 3:
+        count = len(ring)
+        clipped = False
+        for position in range(count):
+            previous, current, following = (ring[position - 1], ring[position],
+                                            ring[(position + 1) % count])
+            if len({previous, current, following}) < 3:
+                continue
+            if cross3(points[previous], points[current], points[following]) <= AREA_EPSILON:
+                continue
+            blocked = False
+            for other in range(count):
+                if other in (position - 1, position, (position + 1) % count):
+                    continue
+                # Only a reflex (or flat) vertex can invalidate an ear: a convex
+                # one inside the triangle is a vertex of the outline the diagonal
+                # can safely leave on the other side. This is what lets a
+                # keyhole polygon be clipped at all -- the bridge corridor leaves
+                # pairs of vertices on every candidate diagonal.
+                if cross3(points[ring[other - 1]], points[ring[other]],
+                          points[ring[(other + 1) % count]]) > AREA_EPSILON:
+                    continue
+                if inside_triangle(points[ring[other]], points[previous],
+                                   points[current], points[following]):
+                    blocked = True
+                    break
+            if blocked:
+                continue
+            triangles.append((previous, current, following))
+            del ring[position]
+            clipped = True
+            break
+        if clipped:
+            continue
+        for position in range(len(ring)):
+            previous, current, following = (ring[position - 1], ring[position],
+                                            ring[(position + 1) % len(ring)])
+            if (len({previous, current, following}) < 3
+                    or abs(cross3(points[previous], points[current], points[following]))
+                    <= AREA_EPSILON):
+                del ring[position]
+                clipped = True
+                break
+        if not clipped:
+            raise SystemExit(f"{label}: could not clip an ear, so the fill is not a simple polygon")
+    if len(ring) == 3 and len(set(ring)) == 3:
+        triangles.append((ring[0], ring[1], ring[2]))
+    return triangles
+
+
+def inside_triangle(point, a, b, c) -> bool:
+    """Whether `point` is inside a counter-clockwise triangle, edges included.
+
+    Edges have to count. A diagonal that passes exactly through another vertex is
+    the classic failure of strict ear clipping: the triangle looks empty, is
+    clipped, and the vertex it grazed ends up in two triangles at once -- the
+    triangulated area comes out larger than the polygon's. `entities.svg` has a
+    plus whose diagonal does exactly that, which is why the test is closed.
+    """
+    return (cross3(a, b, point) >= -AREA_EPSILON
+            and cross3(b, c, point) >= -AREA_EPSILON
+            and cross3(c, a, point) >= -AREA_EPSILON)
+
+
+@dataclass
+class FillMesh:
+    """One triangulated filled region, ready to become a `Shape::Mesh`."""
+
+    points: list[tuple[float, float]]
+    triangles: list[int]
+    holes: int
+    concave: bool
+    outer_area: float
+    hole_area: float
+    mesh_area: float
+    outer_triangles: int
+
+
+def triangulate_fill(contours: list[list[tuple[float, float]]], even_odd: bool,
+                     label: str) -> list[FillMesh]:
+    """Every filled region of one SVG element, triangulated, holes subtracted.
+
+    Returns one mesh per filled region. Disjoint contours of the same element stay
+    separate meshes exactly as they were separate `PathShape`s before, while a
+    contour nested as a hole is merged into the mesh of the contour that contains
+    it -- that merge is the whole change.
+    """
+    for index in range(len(contours)):
+        for other in range(index + 1, len(contours)):
+            first, second = contours[index], contours[other]
+            if any(
+                segments_cross(first[edge], first[(edge + 1) % len(first)],
+                               second[side], second[(side + 1) % len(second)])
+                for edge in range(len(first))
+                for side in range(len(second))
+            ):
+                raise SystemExit(
+                    f"{label}: two filled contours cross; even-odd/nonzero fill of "
+                    "a self-overlapping path needs a full tessellator, not ear clipping"
+                )
+    normalized = [counter_clockwise(contour) for contour in contours]
+    # Grouping runs on the *original* windings: `nonzero` is defined by them, and
+    # normalising every contour to counter-clockwise first would turn every
+    # opposite-wound hole into a second solid blob. Only the clipping copy is
+    # normalised.
+    groups = fill_groups(contours, even_odd, label)
+    concave = any(not fan_covers(contour) for contour in normalized)
+    meshes: list[FillMesh] = []
+    for group in groups:
+        outer = normalized[group.outer]
+        holes = [list(reversed(normalized[index])) for index in group.holes]
+        # The vertex array is the outer contour followed by each hole; the bridge
+        # ring below indexes into it, and repeats an index at each end of a
+        # corridor rather than duplicating the coordinate.
+        points: list[tuple[float, float]] = list(outer)
+        hole_ids: list[list[int]] = []
+        for hole in holes:
+            start = len(points)
+            points.extend(hole)
+            hole_ids.append(list(range(start, start + len(hole))))
+        ring = list(range(len(outer)))
+        for hole_index, hole in enumerate(hole_ids):
+            found = bridge(ring, hole, points, outer, holes)
+            if found is None:
+                raise SystemExit(f"{label}: no visible bridge from a hole to its outer contour")
+            ring_position, hole_position = found
+            rotated = hole[hole_position:] + hole[:hole_position + 1]
+            ring = ring[:ring_position + 1] + rotated + [ring[ring_position]] + ring[ring_position + 1:]
+        triangles = ear_clip(ring, points, label)
+        for first, second, third in triangles:
+            if triangle_area(points[first], points[second], points[third]) <= AREA_EPSILON:
+                raise SystemExit(f"{label}: a zero-area triangle survived the ear clip")
+            # Area equality alone would also pass a triangulation that covered a
+            # piece of a hole and missed the same area elsewhere. The centre of
+            # every triangle has to be filled ground: inside the outer contour and
+            # outside every hole.
+            centre = (
+                (points[first][0] + points[second][0] + points[third][0]) / 3.0,
+                (points[first][1] + points[second][1] + points[third][1]) / 3.0,
+            )
+            if not point_inside(centre, outer) or any(point_inside(centre, hole) for hole in holes):
+                raise SystemExit(
+                    f"{label}: triangle {first, second, third} covers ground the fill does not"
+                )
+        mesh_area = sum(triangle_area(points[a], points[b], points[c])
+                        for a, b, c in triangles)
+        outer_area = abs(signed_area(outer))
+        hole_area = sum(abs(signed_area(hole)) for hole in holes)
+        expected = outer_area - hole_area
+        tolerance = max(1e-6, 1e-6 * outer_area)
+        if abs(mesh_area - expected) > tolerance:
+            raise SystemExit(
+                f"{label}: triangulated {mesh_area:.6f} square units, but the outer "
+                f"contour minus its holes is {expected:.6f} (outer {outer_area:.6f}, "
+                f"{len(holes)} hole(s) {hole_area:.6f}, contour areas "
+                f"{[round(abs(signed_area(contour)), 3) for contour in contours]}, "
+                f"groups {[(group.outer, group.holes) for group in groups]})"
+            )
+        if holes and not mesh_area < outer_area:
+            raise SystemExit(f"{label}: a hole was not subtracted from the fill")
+        meshes.append(FillMesh(
+            points=points,
+            triangles=[index for triangle in triangles for index in triangle],
+            holes=len(holes),
+            concave=concave,
+            outer_area=outer_area,
+            hole_area=hole_area,
+            mesh_area=mesh_area,
+            outer_triangles=len(outer) - 2,
+        ))
+    return meshes
+
+
+def fan_triangles(count: int) -> list[int]:
+    """Triangles of a convex polygon, as a fan from its first vertex.
+
+    Used for the discs that stand in for dots, round caps and round joins: they
+    are regular polygons, so the fan that epaint would have drawn is exact for
+    them and ear clipping would only be slower to say the same thing.
+    """
+    return [index for corner in range(1, count - 1)
+            for index in (0, corner, corner + 1)]
 
 
 # --------------------------------------------------------------------------
@@ -508,6 +1136,24 @@ def points_source(points: list[tuple[float, float]]) -> list[str]:
     return out
 
 
+def triangles_source(triangles: list[int]) -> list[str]:
+    """The `&[...]` literal for one mesh's indices, twelve to a line.
+
+    Empty for a stroke, which is most shapes, so the empty case is one line rather
+    than an open-and-close pair: 1,734 strokes would otherwise each carry a
+    two-line reminder that they are not meshes.
+    """
+    if not triangles:
+        return ["        triangles: &[],"]
+    per_line = 12
+    out = ["        triangles: &["]
+    for start in range(0, len(triangles), per_line):
+        chunk = ", ".join(str(index) for index in triangles[start:start + per_line])
+        out.append(f"            {chunk},")
+    out.append("        ],")
+    return out
+
+
 def ink_source(ink: tuple[str, str | None]) -> str:
     kind, value = ink
     if kind == "Fixed" and value is not None:
@@ -534,43 +1180,68 @@ def main() -> int:
 
     icons, sets, refused = collect()
 
-    # Everything the file will hold, worked out once: the glyph's shapes, how many
-    # of them, and which filled elements epaint cannot fill.
+    # Everything the file will hold, worked out once: the glyph's pieces, how many
+    # of them, which filled elements needed triangulating, and the round pieces the
+    # strokes asked for. `tally.gate()` is the refusal to emit an unrounded set.
     geometry: list[tuple] = []
-    not_expressible: list[tuple[str, int, str, bool]] = []
     no_paint: list[str] = []
     dots: list[str] = []
     filled_elements = 0
+    triangulated: list[tuple[str, int, Piece, bool]] = []
+    tally = RoundTally()
     for name, rust, box, elements in icons:
         tolerance = max(FLATNESS_FRACTION * max(box), 1e-4)
         dot_limit = DOT_FRACTION * max(box)
-        shapes: list[tuple[list[tuple[float, float]], bool, object, bool]] = []
+        shapes: list[tuple[Piece, object]] = []
         for index, element in enumerate(elements):
             if element.commands and element.commands[0][0] == "NoPaint":
                 no_paint.append(f"{name}#{index}")
                 continue
-            found = subpaths(element, tolerance, dot_limit)
+            found = subpaths(element, tolerance, dot_limit, tally, f"{name}#{index}")
             if element.filled:
                 filled_elements += 1
-                reason = fill_limitation(found, element.even_odd)
-                if reason is not None:
-                    not_expressible.append((name, index, reason, element.even_odd))
-            for points, closed, dot in found:
-                if dot:
+                for piece in found:
+                    if piece.holes or piece.concave:
+                        triangulated.append((name, index, piece, element.even_odd))
+            for piece in found:
+                if piece.dot:
                     dots.append(f"{name}#{index}")
-                shapes.append((points, closed, element, dot))
+                shapes.append((piece, element))
         if not shapes:
             raise SystemExit(f"{name}.svg: no shape egui could draw")
         geometry.append((name, rust, box, elements, shapes))
+    tally.gate()
 
     shape_counts: list[tuple[str, str, int]] = [
         (name, rust, len(shapes)) for name, rust, _, _, shapes in geometry
     ]
     total_shapes = sum(count for _, _, count in shape_counts)
     distinct_counts = len({count for _, _, count in shape_counts})
-    total_points = sum(len(points) for _, _, _, _, shapes in geometry
-                       for points, _, _, _ in shapes)
+    total_points = sum(len(piece.points) for _, _, _, _, shapes in geometry
+                       for piece, _ in shapes)
+    total_triangles = sum(len(piece.triangles) // 3 for _, _, _, _, shapes in geometry
+                          for piece, _ in shapes)
+    total_round_pieces = sum(piece.round for _, _, _, _, shapes in geometry
+                             for piece, _ in shapes)
+    total_caps = sum(piece.caps for _, _, _, _, shapes in geometry
+                     for piece, _ in shapes)
+    total_joins = total_round_pieces - total_caps
+    round_subpaths = sum(1 for _, _, _, _, shapes in geometry
+                         for piece, _ in shapes if piece.round)
+    round_glyphs = len({name for name, _, _, _, shapes in geometry
+                        for piece, _ in shapes if piece.round})
+    filled_shapes = sum(1 for _, _, _, _, shapes in geometry
+                        for piece, element in shapes if element.filled)
+    mesh_shapes = sum(1 for _, _, _, _, shapes in geometry
+                      for piece, _ in shapes if piece.triangles)
+    total_holes = sum(piece.holes for _, _, _, _, shapes in geometry
+                      for piece, _ in shapes)
     largest = max(shape_counts, key=lambda entry: entry[2])
+    largest_mesh = max(
+        ((name, sum(len(piece.triangles) // 3 for piece, _ in shapes))
+         for name, _, _, _, shapes in geometry),
+        key=lambda entry: entry[1],
+    )
     width_exceptions = sorted({
         f"{name}:{width_text(element.stroke_width)}"
         for name, _, _, elements, _ in geometry
@@ -596,10 +1267,32 @@ def main() -> int:
         for index, element in enumerate(elements)
         if element.filled and element.even_odd
     })
-    unsupported_by_glyph: dict[str, list[str]] = {}
-    for name, index, reason, even_odd in not_expressible:
-        rule = ', `fill-rule="evenodd"`' if even_odd else ""
-        unsupported_by_glyph.setdefault(name, []).append(f"element {index + 1}: {reason}{rule}")
+    # The filled elements that the old triangle-fan fill could not draw, in the
+    # order the report prints them: per element, its triangles now against the
+    # triangles its outer contour alone would take, and the area it should have.
+    triangulated_elements: dict[tuple[str, int], dict[str, object]] = {}
+    for name, index, piece, even_odd in triangulated:
+        entry = triangulated_elements.setdefault(
+            (name, index),
+            {"triangles": 0, "outer": 0, "holes": 0, "mesh_area": 0.0,
+             "outer_area": 0.0, "hole_area": 0.0, "even_odd": False},
+        )
+        entry["triangles"] += len(piece.triangles) // 3
+        entry["outer"] += piece.outer_triangles
+        entry["holes"] += piece.holes
+        entry["mesh_area"] += piece.mesh_area
+        entry["outer_area"] += piece.outer_area
+        entry["hole_area"] += piece.hole_area
+        entry["even_odd"] = entry["even_odd"] or even_odd
+    triangulated_by_glyph: dict[str, dict[str, object]] = {}
+    for (name, index), entry in triangulated_elements.items():
+        glyph = triangulated_by_glyph.setdefault(
+            name, {"triangles": 0, "outer": 0, "holes": 0, "elements": 0}
+        )
+        glyph["triangles"] += entry["triangles"]
+        glyph["outer"] += entry["outer"]
+        glyph["holes"] += entry["holes"]
+        glyph["elements"] += 1
 
     numbers: dict[str, object] = {
         "glyphs": len(icons),
@@ -608,11 +1301,21 @@ def main() -> int:
         "loaders": len(sets["TAG_LOADERS"]),
         "shapes": total_shapes,
         "points": total_points,
+        "triangles": total_triangles,
+        "meshes": mesh_shapes,
+        "fills": filled_shapes,
+        "holes": total_holes,
+        "joins": total_joins,
+        "caps": total_caps,
+        "round_pieces": total_round_pieces,
+        "round_subpaths": round_subpaths,
+        "round_glyphs": round_glyphs,
+        "triangulated": len(triangulated_elements),
+        "triangulated_glyphs": len(triangulated_by_glyph),
         "elements": sum(len(elements) for _, _, _, elements, _ in geometry),
         "no_paint": len(no_paint),
         "filled_elements": filled_elements,
         "filled_glyphs": len(filled_glyphs),
-        "unsupported": len(not_expressible),
         "dots": len(dots),
         "dot_glyphs": len({entry.split('#')[0] for entry in dots}),
         "flatness": FLATNESS_FRACTION,
@@ -648,20 +1351,30 @@ def main() -> int:
     add("//!")
     add("//! ## What is different from the iced file")
     add("//!")
-    add("//! **A `PathShape` is one polyline.** iced's path builder holds subpaths and")
-    add("//! cubic Beziers; `epaint::PathShape` holds a `Vec<Pos2>` and nothing else. So")
-    add("//! the generator flattens every cubic at generation time -- recursive halving")
-    add("//! until both control points are within {flatness} of the view box's long side".format(**numbers))
+    add("//! **Shapes, not strings.** iced's path builder holds subpaths and cubic")
+    add("//! Beziers; every epaint primitive holds finished points. So the generator")
+    add("//! flattens every cubic at generation time -- recursive halving until both")
+    add("//! control points are within {flatness} of the view box's long side".format(**numbers))
     add("//! of the chord, which is 0.05 px at 24 px and 0.1 px at 48 px, well")
-    add("//! under epaint's half-pixel feathering -- and splits every element into one")
-    add("//! shape per subpath, because a `PathShape` cannot hold two. Flattening here")
-    add("//! rather than per frame is the whole reason the coordinates in this file are")
-    add(f"//! plain numbers: {numbers['points']:,} of them, and not one is computed twice.")
+    add("//! under epaint's half-pixel feathering -- and every coordinate in this file")
+    add(f"//! is a plain number: {numbers['points']:,} of them, none computed twice.")
     add("//!")
-    add("//! Splitting subpaths is exact for strokes: stroking a subpath does not")
-    add("//! depend on its siblings, which is why the iced side's multi-subpath paths")
-    add("//! and these shapes draw the same picture. It is **not** exact for fills, and")
-    add("//! that is the one thing this file cannot say:")
+    add("//! **The fills are triangulated, holes included.** `PathShape` has a fill")
+    add("//! colour and no fill rule, and epaint tessellates it with a triangle fan from")
+    add("//! its first point: exact only for a contour that is star-shaped from that")
+    add("//! point, and with no way to leave a hole empty -- the fan paints a nested")
+    add("//! contour solid. So every filled element is triangulated here, once, by ear")
+    add("//! clipping with hole bridging, the construction SVG's fill rules are defined")
+    add("//! against (the one mapbox's `earcut` implements). Each contour is wound the")
+    add("//! same way and its nesting measured; the element's own `fill-rule` then")
+    add("//! decides what is filled -- `evenodd` by nesting parity, `nonzero` by winding")
+    add("//! number -- and each hole is cut into its outer contour by a bridge to the")
+    add("//! nearest visible vertex. The corridor is walked twice, so it has no width")
+    add("//! and adds no area: the triangles sum to the outer contour minus its holes.")
+    add("//! The result is a `Shape::Mesh`, and a stroke stays a `PathShape`.")
+    add(f"//! {numbers['meshes']:,} of the {numbers['shapes']:,} shapes are meshes: {numbers['fills']:,} filled,")
+    add(f"//! {numbers['dots']:,} dots and {numbers['round_subpaths']:,} round-join meshes holding")
+    add(f"//! {numbers['round_pieces']:,} discs and half-discs, with {numbers['triangles']:,} triangles in total.")
     add("//!")
     add("//! **Dots are discs.** {dots:,} stroked subpaths in the set are shorter than a".format(**numbers))
     add("//! thousandth of their view box -- the reference's dot idiom, a zero-length")
@@ -672,23 +1385,20 @@ def main() -> int:
     add("//! {dot_glyphs} glyphs have at least one; a dot that vanished is the kind of".format(**numbers))
     add("//! difference nobody finds by reading coordinates.")
     add("//!")
-    add(f"//! **{numbers['unsupported']} of the {numbers['filled_elements']} filled elements have no egui shape.**")
-    add("//! `PathShape` has a fill colour and no fill rule, and epaint fills a path with")
-    add("//! a triangle fan from its first point. That fan covers a contour exactly when")
-    add("//! the contour is star-shaped as seen from that point -- the toolkit documents")
-    add("//! convex, which is sufficient and not necessary -- so an element of disjoint")
-    add("//! such contours is exact, one shape each. An element with a **hole** or an")
-    add("//! **outline the fan cannot cover** is not: the hole is filled solid (no fill")
-    add("//! rule to cut it, and a nested contour wound the other way is subtracted by")
-    add("//! the reference's `nonzero`), or the fan paints ground the outline does not.")
-    add("//! These:")
+    add(f"//! {numbers['triangulated']} of the {numbers['filled_elements']} filled elements, in {numbers['triangulated_glyphs']} glyphs,")
+    add("//! could not have been drawn by that fan -- a concave outline, a hole, or")
+    add("//! both. They are exact now, and this is what each one costs:")
     add("//!")
-    for name in sorted(unsupported_by_glyph):
-        add(f"//! * `{name}.svg` -- {'; '.join(unsupported_by_glyph[name])}")
+    for name, entry in sorted(triangulated_by_glyph.items()):
+        holes = entry["holes"]
+        cost = f"{entry['triangles']} triangles"
+        if holes:
+            cost += f" ({holes} hole{'s' if holes != 1 else ''})"
+        add(f"//! * `{name}.svg` -- {cost}")
     add("//!")
-    add("//! The iced side carries the reference's `fill-rule` and honours it, so those")
-    add("//! glyphs are drawn correctly there and only approximately here. Nothing else")
-    add(f"//! in the set is affected: the other {numbers['filled_elements'] - numbers['unsupported']} filled elements are expressible.")
+    add("//! The iced side carries the reference's `fill-rule` and honours it, and so")
+    add("//! does this file: the rule is read off the element and applied by the")
+    add("//! triangulator rather than approximated away.")
     add("//!")
     add(f"//! **{numbers['no_paint']} elements are not here at all.** They are the shapes the")
     add("//! reference declares with neither a fill nor a stroke -- the clamp path every")
@@ -700,13 +1410,24 @@ def main() -> int:
     for entry in sorted(no_paint):
         add(f"//! * `{entry.split('#')[0]}.svg` element {int(entry.split('#')[1]) + 1}")
     add("//!")
-    add("//! **The pen is not the same pen.** `PathStroke` carries a width, a colour and")
-    add("//! a `StrokeKind`, and no line cap or join; epaint's stroker joins with miters")
-    add("//! and has no round caps. The reference declares")
+    add("//! **Round joins and caps are discs.** `PathStroke` carries a width, a colour")
+    add("//! and a `StrokeKind`, and no line cap or join; epaint miters every corner and")
+    add("//! butts every line end. The reference declares")
     add("//! `stroke-linecap=\"round\"`/`stroke-linejoin=\"round\"` on 413 of the 441")
-    add("//! glyphs, so a corner here is slightly sharper than the reference's and a")
-    add("//! line end is square rather than round. That is a property of the toolkit,")
-    add("//! not of this file's data, and there is no attribute to set to change it.")
+    add("//! glyphs, so every stroked subpath that turns or ends is followed by one")
+    add("//! small mesh of round pieces -- the same no-attribute problem as the holes,")
+    add("//! and the second entry in that parity-log paragraph:")
+    add("//!")
+    add(f"//! * {numbers['round_pieces']:,} discs at {numbers['joins']:,} corners whose turn exceeds ~20 degrees,")
+    add(f"//!   and {numbers['caps']:,} half-discs at open ends, over {numbers['round_subpaths']:,} stroked subpaths")
+    add(f"//!   in {numbers['round_glyphs']} glyphs. A closed subpath takes joins but no caps.")
+    add("//!")
+    add("//! A disc of the stroke's radius, centred on the vertex, is the arc SVG would")
+    add("//! have painted there; it is drawn over epaint's miter, not instead of it.")
+    add("//! What is left is the miter's tip where a corner is sharp enough to push it")
+    add("//! past the disc (a right angle puts it 41% of the radius beyond): the path")
+    add("//! has already painted that triangle before the disc goes over it, and a")
+    add("//! shape cannot erase what it did not paint.")
     add("//!")
     add("//! ## Performance")
     add("//!")
@@ -714,9 +1435,10 @@ def main() -> int:
     add("//! more than the last decimal of a coordinate.")
     add("//!")
     add("//! * **The geometry is `&'static`.** No SVG is parsed at runtime, no path is")
-    add("//!   built from a string, and the coordinates live in the binary. Drawing a")
-    add("//!   glyph allocates one `Vec<Shape>` and one `Vec<Pos2>` per path, both")
-    add("//!   pre-sized with `Vec::with_capacity`, and nothing else.")
+    add("//!   built from a string, and the coordinates and triangle indices live in")
+    add("//!   the binary. Drawing a glyph allocates one `Vec<Shape>`, one `Vec<Pos2>`")
+    add("//!   per stroke and one `Mesh` per filled or round piece -- each pre-sized")
+    add("//!   with `Vec::with_capacity` -- and nothing else.")
     add("//! * **One paint-list entry per glyph, not one per path.** `draw` and `cached`")
     add("//!   hand egui a single `Shape::Vec`, so a 15-shape glyph costs one entry in")
     add("//!   the layer's paint list and one clip decision rather than fifteen, and the")
@@ -730,16 +1452,15 @@ def main() -> int:
     add("//!   a hit is a `Vec` clone, which is a memcpy of the points that were going to")
     add("//!   be computed anyway, and a miss is the same build `draw` does.")
     add("//!")
-    add("//! A baked `Shape::Mesh` is the other route, and it is deliberately not taken.")
-    add("//! A mesh is a finished triangle list, so adding one skips tessellation")
-    add("//! entirely -- but egui bakes *absolute* positions into it and has no")
-    add("//! per-shape transform at paint time, so a mesh cache has to include the")
-    add("//! widget's position in its key. A scrolling list moves its icons every frame;")
-    add("//! every one of them would miss, re-tessellate through a private `Tessellator`")
-    add("//! per icon per frame, and the bounded cache would clear itself continuously.")
-    add("//! That is strictly worse than handing shapes to the single tessellation pass")
-    add("//! egui already runs at the end of the frame. Where icons do not move, the")
-    add("//! shape route's cache hit is already a memcpy.")
+    add("//! The meshes here are built per draw from view-box coordinates, not baked")
+    add("//! into absolute positions. Building a mesh skips epaint's tessellation, but")
+    add("//! egui bakes *absolute* positions into one and has no per-shape transform at")
+    add("//! paint time, so a cache of baked meshes would have to include the widget's")
+    add("//! position in its key. A scrolling list moves its icons every frame; every")
+    add("//! one of them would miss, rebuild its mesh per icon per frame, and the")
+    add("//! bounded cache would clear itself continuously. Building in view-box")
+    add("//! coordinates keeps the key the glyph, the fit and the ink -- the same three")
+    add("//! things a path shape ever needed.")
     add("")
     add("// Nothing draws these yet: `crates/sift-ui` is the first slice of the")
     add("// move from iced to egui (see its `Cargo.toml`), and it is a frame-time")
@@ -749,7 +1470,7 @@ def main() -> int:
     add("")
     add("use std::cell::RefCell;")
     add("")
-    add("use egui::epaint::{PathShape, PathStroke};")
+    add("use egui::epaint::{Mesh, PathShape, PathStroke, Vertex};")
     add("use egui::layers::ShapeIdx;")
     add("use egui::{Color32, Painter, Pos2, Rect, Shape, Vec2};")
     add("")
@@ -782,16 +1503,26 @@ def main() -> int:
     add("    }")
     add("}")
     add("")
-    add("/// One drawable piece of an icon: a single polyline and how to paint it.")
+    add("/// One drawable piece of an icon: points and how to paint them.")
     add("///")
-    add("/// This is one *subpath*, not one SVG element. An element with three subpaths")
-    add("/// is three of these, because a `PathShape` cannot hold two -- see the module")
-    add("/// documentation. The iced file's `Element` is the element-level record; this")
-    add("/// is the shape-level one.")
+    add("/// This is one *shape*, not one SVG element. An element with three stroked")
+    add("/// subpaths is three of these, because a `PathShape` cannot hold two; a filled")
+    add("/// element is one per filled region, because its contours are triangulated")
+    add("/// together so a hole stays empty -- see the module documentation. The iced")
+    add("/// file's `Element` is the element-level record; this is the shape-level one.")
     add("#[derive(Clone, Copy, Debug, PartialEq)]")
     add("pub struct Subpath {")
     add("    /// The polyline, in the icon's own view box, as x/y pairs.")
+    add("    ///")
+    add("    /// For a filled subpath these are the mesh's vertices: the outer contour")
+    add("    /// followed by each hole, with a bridge repeated rather than duplicated.")
     add("    pub points: &'static [(f32, f32)],")
+    add("    /// For a filled subpath, the triangles of `points`, three indices each.")
+    add("    ///")
+    add("    /// Empty for a stroke. The indices are why a fill is a `Shape::Mesh` and")
+    add("    /// not a `PathShape`: they are the holes and concavities epaint's triangle")
+    add("    /// fan could not express.")
+    add("    pub triangles: &'static [u32],")
     add("    /// Whether it closes back to its first point. True for every filled one.")
     add("    pub closed: bool,")
     add("    /// Stroke width in view-box units, before the fit scale is applied.")
@@ -805,6 +1536,13 @@ def main() -> int:
     add("    /// around the cap's centre. It exists as a field rather than as a quiet")
     add("    /// property of the points so a reader can tell a converted dot from a fill.")
     add("    pub dot: bool,")
+    add("    /// How many round joins and caps this mesh holds, or 0.")
+    add("    ///")
+    add("    /// A round-join mesh is `filled` and `closed`, always follows the stroked")
+    add("    /// subpath it belongs to, and exists because neither `PathStroke` nor")
+    add("    /// epaint's tessellator has a cap or join to set. Like `dot`, it is a field")
+    add("    /// so a reader and a test can tell it from a filled glyph.")
+    add("    pub round: u32,")
     add("    /// Where its colour comes from.")
     add("    pub ink: Ink,")
     add("    /// The element's own `opacity`, which multiplies whatever ink it gets.")
@@ -940,27 +1678,44 @@ def main() -> int:
     add("/// 20 px would otherwise carry a 24 px icon's 2-unit pen and every edge would")
     add("/// be a fifth too heavy.")
     add("///")
-    add("/// One `Shape` per [`Subpath`], and no more: the vector is pre-sized, and each")
-    add("/// path's points are written straight into a vector sized for them.")
+    add("/// One `Shape` per [`Subpath`], and no more: the vector is pre-sized, each")
+    add("/// stroke's points are written into a vector sized for them, and each mesh's")
+    add("/// vertices straight into the mesh's own.")
     add("pub fn parts(glyph: Glyph, fit: Fit, ink: Color32) -> Vec<Shape> {")
     add("    let subpaths = glyph.subpaths();")
     add("    let mut shapes = Vec::with_capacity(subpaths.len());")
     add("    for subpath in subpaths {")
-    add("        let mut points = Vec::with_capacity(subpath.points.len());")
-    add("        points.extend(subpath.points.iter().map(|&(x, y)| {")
-    add("            Pos2::new(x.mul_add(fit.scale, fit.offset.x), y.mul_add(fit.scale, fit.offset.y))")
-    add("        }));")
     add("        let resolved = subpath.ink.resolve(ink);")
     add("        let color = if subpath.opacity >= 1.0 {")
     add("            resolved")
     add("        } else {")
     add("            resolved.gamma_multiply(subpath.opacity)")
     add("        };")
-    add("        let shape = if subpath.filled {")
-    add("            // A fill closes itself; the stroke is the empty one, so epaint does")
-    add("            // not also outline what it filled.")
-    add("            PathShape::convex_polygon(points, color, PathStroke::NONE)")
-    add("        } else if subpath.closed {")
+    add("        if subpath.filled {")
+    add("            // A fill is a triangle list, not a path: the triangles are the")
+    add("            // holes and concavities a `PathShape`'s fan would have got wrong.")
+    add("            // A mesh has no stroke, so epaint does not also outline the fill.")
+    add("            let mut mesh = Mesh::default();")
+    add("            mesh.vertices.reserve(subpath.points.len());")
+    add("            for &(x, y) in subpath.points {")
+    add("                mesh.vertices.push(Vertex::untextured(")
+    add("                    Pos2::new(")
+    add("                        x.mul_add(fit.scale, fit.offset.x),")
+    add("                        y.mul_add(fit.scale, fit.offset.y),")
+    add("                    ),")
+    add("                    color,")
+    add("                ));")
+    add("            }")
+    add("            mesh.indices.reserve(subpath.triangles.len());")
+    add("            mesh.indices.extend_from_slice(subpath.triangles);")
+    add("            shapes.push(Shape::mesh(mesh));")
+    add("            continue;")
+    add("        }")
+    add("        let mut points = Vec::with_capacity(subpath.points.len());")
+    add("        points.extend(subpath.points.iter().map(|&(x, y)| {")
+    add("            Pos2::new(x.mul_add(fit.scale, fit.offset.x), y.mul_add(fit.scale, fit.offset.y))")
+    add("        }));")
+    add("        let path = if subpath.closed {")
     add("            PathShape::closed_line(")
     add("                points,")
     add("                PathStroke::new(subpath.stroke_width * fit.scale, color),")
@@ -968,7 +1723,7 @@ def main() -> int:
     add("        } else {")
     add("            PathShape::line(points, PathStroke::new(subpath.stroke_width * fit.scale, color))")
     add("        };")
-    add("        shapes.push(Shape::Path(shape));")
+    add("        shapes.push(Shape::Path(path));")
     add("    }")
     add("    shapes")
     add("}")
@@ -1077,19 +1832,31 @@ def main() -> int:
     for name, rust, box, elements, shapes in geometry:
         add(f"/// `{name}.svg`, {len(elements)} element(s) as {len(shapes)} shape(s).")
         add(f"const PATHS_{gen_icons.screaming(rust)}: [Subpath; {len(shapes)}] = [")
-        for points, closed, element, dot in shapes:
-            if dot:
+        for piece, element in shapes:
+            if piece.dot:
                 kind = "dot (a round-capped zero-length stroke, as a disc)"
+            elif piece.round:
+                kind = (f"round joins and caps as {piece.round} disc(s), "
+                        f"{piece.caps} of them caps")
+            elif element.filled:
+                kind = "filled mesh"
             else:
-                kind = "filled" if element.filled else "stroked"
+                kind = "stroked"
             add(f"    // {kind} at {number(element.stroke_width, WIDTH_DECIMALS)}, "
-                f"{len(points)} point(s)")
+                f"{len(piece.points)} point(s)")
+            if piece.triangles:
+                detail = f"{len(piece.triangles) // 3} triangle(s)"
+                if piece.holes:
+                    detail += f", {piece.holes} hole(s)"
+                add(f"    // {detail}")
             add("    Subpath {")
-            lines.extend(points_source(points))
-            add(f"        closed: {'true' if closed else 'false'},")
+            lines.extend(points_source(piece.points))
+            lines.extend(triangles_source(piece.triangles))
+            add(f"        closed: {'true' if piece.closed else 'false'},")
             add(f"        stroke_width: {number(element.stroke_width, WIDTH_DECIMALS)},")
-            add(f"        filled: {'true' if element.filled or dot else 'false'},")
-            add(f"        dot: {'true' if dot else 'false'},")
+            add(f"        filled: {'true' if element.filled or piece.dot or piece.round else 'false'},")
+            add(f"        dot: {'true' if piece.dot else 'false'},")
+            add(f"        round: {piece.round},")
             add(f"        ink: {ink_source(element.ink)},")
             add(f"        opacity: {number(element.opacity)},")
             add("    },")
@@ -1208,7 +1975,33 @@ def main() -> int:
     add("                            );")
     add("                        }")
     add("                    }")
-    add("                    other => panic!(\"{name} produced something that is not a path: {other:?}\"),")
+    add("                    Shape::Mesh(mesh) => {")
+    add("                        // A filled or round-join piece: a real triangle list,")
+    add("                        // every index in range, every vertex finite, and")
+    add("                        // every vertex painting a non-empty colour.")
+    add("                        assert!(mesh.vertices.len() >= 3, \"{name} has a mesh with no triangle\");")
+    add("                        assert!(mesh.indices.len() >= 3, \"{name} has a mesh with no triangle\");")
+    add("                        assert_eq!(mesh.indices.len() % 3, 0, \"{name} has a partial triangle\");")
+    add("                        for index in &mesh.indices {")
+    add("                            assert!(")
+    add("                                (*index as usize) < mesh.vertices.len(),")
+    add("                                \"{name} has a mesh index past its vertices\"")
+    add("                            );")
+    add("                        }")
+    add("                        for vertex in &mesh.vertices {")
+    add("                            assert!(")
+    add("                                vertex.pos.x.is_finite() && vertex.pos.y.is_finite(),")
+    add("                                \"{name} has a vertex that is not a number\"")
+    add("                            );")
+    add("                            assert!(")
+    add("                                vertex.color != Color32::TRANSPARENT,")
+    add("                                \"{name} has a vertex that paints nothing\"")
+    add("                            );")
+    add("                        }")
+    add("                    }")
+    add("                    other => panic!(")
+    add("                        \"{name} produced something that is neither a path nor a mesh: {other:?}\"")
+    add("                    ),")
     add("                }")
     add("            }")
     add("        }")
@@ -1218,10 +2011,10 @@ def main() -> int:
     add("    ///")
     add("    /// **This table is a change detector, not a truth.** Nothing in the world")
     add("    /// says `Glyph::Home` has two shapes; what the table says is that it had two")
-    add("    /// when this file was generated. A change to the flattening tolerance, to")
-    add("    /// the subpath splitting, or to a vendored SVG then fails here, with the")
-    add("    /// glyph named, rather than showing up as a picture that is subtly different")
-    add("    /// in a window nobody happens to be comparing.")
+    add("    /// when this file was generated. A change to the flattening tolerance, the")
+    add("    /// join threshold, the subpath splitting, or a vendored SVG then fails here,")
+    add("    /// with the glyph named, rather than showing up as a picture that is subtly")
+    add("    /// different in a window nobody happens to be comparing.")
     add("    ///")
     add("    /// Two glyphs drawing the same number of shapes is normal and is not what")
     add("    /// this asserts -- 441 icons drawn from one vocabulary collide constantly --")
@@ -1372,24 +2165,74 @@ def main() -> int:
     add("    }")
     add("")
     add("    #[test]")
-    add("    fn the_fills_epaint_can_draw_are_closed_and_have_no_stroke() {")
-    add("        // `PathShape::convex_polygon` is what a filled subpath becomes: closed,")
-    add("        // filled, and with the empty stroke so epaint does not also outline it.")
-    add("        // A fill that arrived open, or with a stroke, would be the wrong")
-    add("        // primitive rather than the wrong geometry, which is the kind of thing")
-    add("        // that renders and looks nearly right.")
+    add("    fn the_fills_are_closed_triangulated_meshes_with_no_stroke() {")
+    add("        // A filled subpath is a `Shape::Mesh`: closed, filled, with a")
+    add("        // triangle list that indexes its own points and no stroke, so")
+    add("        // epaint does not also outline it. A fill that arrived open, or")
+    add("        // without its triangles, would be the wrong primitive rather than")
+    add("        // the wrong geometry -- the kind of thing that renders and looks")
+    add("        // nearly right.")
     add("        let mut filled = 0;")
     add("        for (name, glyph) in every() {")
     add("            for subpath in glyph.subpaths() {")
-    add("                if !subpath.filled || subpath.dot {")
+    add("                if !subpath.filled || subpath.dot || subpath.round > 0 {")
     add("                    continue;")
     add("                }")
     add("                filled += 1;")
     add("                assert!(subpath.closed, \"{name} has an open fill\");")
     add("                assert!(subpath.points.len() >= 3, \"{name} has a fill with no area\");")
+    add("                assert!(!subpath.triangles.is_empty(), \"{name} has a fill with no triangles\");")
+    add("                assert_eq!(")
+    add("                    subpath.triangles.len() % 3,")
+    add("                    0,")
+    add("                    \"{name} has a fill with a partial triangle\"")
+    add("                );")
+    add("                for index in subpath.triangles {")
+    add("                    assert!(")
+    add("                        (*index as usize) < subpath.points.len(),")
+    add("                        \"{name} has a fill index past its points\"")
+    add("                    );")
+    add("                }")
     add("            }")
     add("        }")
-    add(f"        assert_eq!(filled, {sum(1 for _, _, _, _, shapes in geometry for _, _, element, dot in shapes if element.filled and not dot)}, \"the filled shape count moved\");")
+    add(f"        assert_eq!(filled, {filled_shapes}, \"the filled shape count moved\");")
+    add("    }")
+    add("")
+    add("    #[test]")
+    add("    fn the_round_joins_follow_their_strokes_and_are_triangulated() {")
+    add("        // epaint has no round cap or join, so a stroked subpath that turns")
+    add("        // or ends is followed by one small mesh of discs and half-discs.")
+    add("        // This is the gate on that: every such mesh is filled, closed, not a")
+    add("        // dot, has triangles, and comes directly after the stroke it rounds.")
+    add("        // The generator's `RoundTally` refuses a run that produces none at")
+    add("        // all; this catches a file where they were emitted somewhere else,")
+    add("        // or quietly dropped on the way out.")
+    add("        let mut discs = 0u32;")
+    add("        let mut meshes = 0;")
+    add("        for (name, glyph) in every() {")
+    add("            let subpaths = glyph.subpaths();")
+    add("            for (index, subpath) in subpaths.iter().enumerate() {")
+    add("                if subpath.round == 0 {")
+    add("                    continue;")
+    add("                }")
+    add("                meshes += 1;")
+    add("                discs += subpath.round;")
+    add("                assert!(subpath.filled && subpath.closed, \"{name} has an open round mesh\");")
+    add("                assert!(!subpath.dot, \"{name} has a round mesh marked as a dot\");")
+    add("                assert!(index > 0, \"{name} has a round mesh before any stroke\");")
+    add("                let stroke = &subpaths[index - 1];")
+    add("                assert!(")
+    add("                    !stroke.filled && !stroke.dot,")
+    add("                    \"{name} rounds something that is not a stroke\"")
+    add("                );")
+    add("                assert!(")
+    add("                    subpath.triangles.len() >= 3 * subpath.round as usize,")
+    add("                    \"{name} has fewer triangles than round pieces\"")
+    add("                );")
+    add("            }")
+    add("        }")
+    add(f"        assert_eq!(meshes, {round_subpaths}, \"the number of round meshes moved\");")
+    add(f"        assert_eq!(discs, {total_round_pieces}, \"the number of round joins and caps moved\");")
     add("    }")
     add("")
     add("    #[test]")
@@ -1506,6 +2349,47 @@ def main() -> int:
 
     text = "\n".join(lines)
 
+    # The per-element triangle counts and area check for the glyphs that needed
+    # triangulation: the evidence that a hole is a second ring of triangles and not
+    # a solid blob. `triangulate_fill` already refuses a mesh whose area is not
+    # outer-minus-holes; this prints the arithmetic for a reader.
+    # The filled triangles a glyph draws, which for most of the problem glyphs is
+    # the element that needed triangulating but for a few (a ring plus a separate
+    # disc, a potato plus its eyes) includes simple fills as well.
+    glyph_fill_triangles: dict[str, int] = {}
+    for name, _, _, _, shapes in geometry:
+        glyph_fill_triangles[name] = sum(
+            len(piece.triangles) // 3 for piece, element in shapes if element.filled
+        )
+    triangulated_lines: list[str] = []
+    area_lines: list[str] = []
+    for (name, index), entry in sorted(triangulated_elements.items()):
+        holes = entry["holes"]
+        detail = f"{entry['triangles']} triangles, outer alone {entry['outer']}"
+        if holes:
+            detail += f", {holes} hole{'s' if holes != 1 else ''}"
+        if entry["even_odd"]:
+            detail += ", fill-rule evenodd"
+        if glyph_fill_triangles[name] != entry["triangles"]:
+            detail += f"; all fills in the glyph {glyph_fill_triangles[name]}"
+        triangulated_lines.append(f"  {name} element {index + 1}: {detail}")
+        if not holes:
+            continue
+        expected = entry["outer_area"] - entry["hole_area"]
+        delta = entry["mesh_area"] - expected
+        passed = entry["mesh_area"] < entry["outer_area"]
+        area_lines.append(
+            f"  {name}#{index + 1}: mesh {entry['mesh_area']:.3f} < outer "
+            f"{entry['outer_area']:.3f} (holes {entry['hole_area']:.3f}, expected "
+            f"{expected:.3f}, delta {delta:+.6f}) {'OK' if passed else 'FAILED'}"
+        )
+        if not passed:
+            raise SystemExit(f"{name}#{index + 1}: the hole was not subtracted from the fill")
+    glyph_triangle_totals = ", ".join(
+        f"{name} {entry['triangles']}"
+        for name, entry in sorted(triangulated_by_glyph.items())
+    )
+
     report = [
         f"glyphs       {len(icons)}",
         "  " + "  ".join(
@@ -1513,14 +2397,22 @@ def main() -> int:
         ),
         f"shapes       {total_shapes}",
         f"points       {total_points}",
+        f"triangles    {total_triangles}",
+        f"meshes       {mesh_shapes}: {filled_shapes} filled, {numbers['dots']} dots, "
+        f"{round_subpaths} round-join",
+        f"holes        {total_holes} across {numbers['triangulated']} triangulated elements",
+        f"round        {total_joins} join disc(s) + {total_caps} half-disc cap(s) over "
+        f"{round_subpaths} stroked subpath(s) in {round_glyphs} glyph(s)",
         f"elements     {numbers['elements']} in total, {numbers['no_paint']} paint nothing",
-        f"largest      {largest[0]} ({largest[2]} shapes)",
+        f"largest      {largest[0]} ({largest[2]} shapes); "
+        f"most triangles {largest_mesh[0]} ({largest_mesh[1]} triangles)",
         f"filled       {numbers['filled_elements']} elements over {numbers['filled_glyphs']} glyphs",
         f"even-odd     {len(even_odds)}: {', '.join(even_odds) if even_odds else '-'}",
-        "unexpressible "
-        + (f"{len(not_expressible)}: "
-           + ", ".join(f"{name}#{index} ({reason})" for name, index, reason, _ in not_expressible)
-           if not_expressible else "-"),
+        f"triangulated {numbers['triangulated']} elements over {numbers['triangulated_glyphs']} glyphs: "
+        + glyph_triangle_totals,
+        *triangulated_lines,
+        "area check   outer contour minus holes, per holed element:",
+        *area_lines,
         f"no paint     {len(no_paint)}: {', '.join(sorted(no_paint)) if no_paint else '-'}",
         f"dots         {len(dots)} over {len({entry.split('#')[0] for entry in dots})} glyphs: "
         + (", ".join(sorted({entry.split('#')[0] for entry in dots})) if dots else "-"),
