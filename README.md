@@ -1,4 +1,4 @@
-# PalantirMC
+# Sift Launcher
 
 A Minecraft launcher for Windows by **Palantir Studios**, written in Rust with
 [iced](https://iced.rs). It is a **native implementation of the Modrinth App**:
@@ -37,7 +37,9 @@ crates/
                       all current work happens.
   palantir-core/      Minecraft's own formats — version JSON, libraries, rules,
                       asset index, launch arguments — and the data-root layout.
-  palantir-net/       Auth, downloads, metadata and the Modrinth API client.
+  sift-net/           Auth, downloads, metadata and the Modrinth API client.
+sift-game/          The engine: version resolve, install, Java, launch, repair.
+sift-ui/            The launcher itself, in egui (its own workspace and lock file).
   palantir-loader/    Forge, Fabric, NeoForge, Quilt and modpack archives.
                       (The view-model the shell reads used to be a fifth crate,
                       `palantir-gui`; it is `palantir-desktop/src/model.rs` now.)
@@ -50,6 +52,19 @@ target/, dist/, .scratch/, *.log   Build output, CI artifacts, captures —
                      git-ignored, never committed.
 ```
 
+## Download
+
+The latest release carries two Windows builds, named after the product:
+
+```
+SiftLauncher-x64-msvc.exe   # static CRT, the recommended one
+SiftLauncher-x64-gnu.exe    # the build the project is developed against locally
+```
+
+Each has a `.sha256` beside it and a `.zip` of the pair. **The binaries are not code-signed**,
+so Windows SmartScreen shows its "unknown publisher" warning on first run; the hashes in the
+release are what to check against.
+
 ## Building and checking
 
 Rust (stable) and Python 3 are the toolchain; the launcher targets Windows.
@@ -58,7 +73,7 @@ Rust (stable) and Python 3 are the toolchain; the launcher targets Windows.
 cargo test -p palantir-desktop --locked        # the crate you changed
 cargo test --workspace --all-targets --locked  # what CI runs
 cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
-cargo build --release --locked -p palantir-desktop   # -> target/release/PalantirMC.exe
+cd crates/sift-ui && cargo build --release --locked   # -> target/release/SiftUi.exe
 ```
 
 `--locked` is deliberate everywhere: a drifted manifest must fail here, not on
