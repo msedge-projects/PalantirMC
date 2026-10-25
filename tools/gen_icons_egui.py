@@ -469,6 +469,9 @@ def main() -> int:
         print(f"missing reference icons: {gen_icons.ICONS}", file=sys.stderr)
         return 2
 
+    out = output()
+    iced_include = Path(os.path.relpath(ICED, out.parent)).as_posix()
+
     icons, sets, refused = collect()
 
     # Everything the file will hold, worked out once: the glyph's shapes, how many
@@ -1063,7 +1066,7 @@ def main() -> int:
     add("        // the variants are the same names in the same order. The iced file is")
     add("        // read at compile time rather than copied here, so this fails the day")
     add("        // the two generators disagree instead of the day somebody notices.")
-    add(f"        let iced = include_str!(\"{ICED_INCLUDE}\");")
+    add(f"        let iced = include_str!(\"{iced_include}\");")
     add("        let mut expected: Vec<String> = Vec::new();")
     add("        let mut inside = false;")
     add("        for line in iced.lines() {")
@@ -1393,20 +1396,20 @@ def main() -> int:
     ]
 
     if args.check:
-        current = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
+        current = out.read_text(encoding="utf-8") if out.is_file() else ""
         if current != text:
-            print(f"{OUT.relative_to(ROOT)} is not what this tool emits.", file=sys.stderr)
+            print(f"{out.relative_to(ROOT)} is not what this tool emits.", file=sys.stderr)
             print("Run `python tools/gen_icons_egui.py` and commit the result.", file=sys.stderr)
             return 1
         print("egui icon generation is byte-identical")
         return 0
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(text, encoding="utf-8", newline="\n")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8", newline="\n")
     if args.report:
         for line in report:
             print(line)
-    print(f"wrote {OUT.relative_to(ROOT)} "
+    print(f"wrote {out.relative_to(ROOT)} "
           f"({text.count(chr(10)) + 1} lines, {len(text.encode('utf-8'))} bytes)")
     return 0
 

@@ -1,134 +1,81 @@
-//! The first slice of the move to egui: the frame loop, fastframe's scrolling, and
-//! a Discover-shaped list to scroll.
+//! Sift Launcher's interface, in egui.
 //!
-//! **What this is for.** The iced shell scrolls at 60 fps p50 with a p95 of 26-62 ms
-//! on the machine that reported it, measured with `SIFT_FRAME_LOG`. The reader
-//! asked for spotifast's feel; spotifast is egui with `fastframe-scroll`; and the
-//! honest way to answer that is to measure the same list in that stack before
-//! rewriting a 24,000-line presentation layer for it. So this draws one page's shape
-//! — a scrolling column of project cards — wires the real scrolling crate in, and
-//! writes the same frame-interval summary the iced shell does. The numbers are
-//! comparable because the instrument is the same.
+//! **Why egui.** The frame log measured iced at a 26-62 ms p95 against egui's 17.6-18.6 ms
+//! on the same machine, same window, same list -- egui re-emits everything every frame and
+//! still holds a tighter tail, because the cost is what a toolkit does between the widget
+//! and the present. And the interface this launcher wants next -- dynamic elements that
+//! morph in place -- is a function of state in immediate mode and a subtree diff in a
+//! retained tree.
 //!
-//! **What it is not.** Not a page of the launcher: the cards are synthetic (no
-//! `Store`, no network, no images), because the question is the frame, not the
-//! content. If the numbers say egui is the answer, the next slices move the real
-//! pages over one at a time; if they do not, this cost one binary and told the truth.
+//! **Why the numbers in `geometry` are measured.** Every element is placed with a
+//! rectangle read off a capture of the Modrinth app with `tools/parity/edges.py`; the
+//! parity requirement is +/-2 px, and a layout engine's own idea of spacing is exactly the
+//! thing that would miss it.
 //!
-//! Run it with `SIFT_FRAME_LOG` naming a file, exactly as the iced build.
+//! **Why it draws nothing when idle.** The window asks for a frame while a hover, a glide
+//! or a transition is in flight and stops when it lands. The slice this grew from called
+//! `ctx.request_repaint()` every frame, which is the behaviour `docs/LIGHTNESS.md` names as
+//! the idle-CPU budget's failure mode.
 
 mod frame_log;
+mod geometry;
+mod icons;
+mod shell;
 /// The reference's palette, geometry, type and motion as egui values.
 mod theme;
-/// The reference's icon set as egui shapes.
-mod icons;
 
 use eframe::egui;
-use fastframe_scroll::Scrolling;
-
-/// How many cards the list holds. Enough that the scrollbar has somewhere to go and
-/// the window has to decide what to draw, which is the cost being measured.
-const CARDS: usize = 300;
-
-/// One card's height, in points.
-const CARD: f32 = 72.0;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
+            .with_inner_size([geometry::WINDOW.0, geometry::WINDOW.1])
             .with_min_inner_size([960.0, 540.0])
-            .with_title("Sift Launcher — egui slice"),
+            .with_title("Sift Launcher"),
         ..Default::default()
     };
     eframe::run_native(
         "Sift Launcher",
         options,
-        Box::new(|_cc| Ok(Box::new(Slice::default()))),
+        Box::new(|cc| {
+            // The generated tokens, not egui's defaults: the palette is the reference's.
+            let shell = shell::Shell::default();
+            cc.egui_ctx.set_visuals(shell.theme.colors());
+            Ok(Box::new(App {
+                shell,
+                log: frame_log::FrameLog::default(),
+            }))
+        }),
     )
 }
 
-/// The window's state: fastframe's scrolling, and the frame log.
-#[derive(Default)]
-struct Slice {
-    scrolling: Scrolling,
+/// The application: one shell, and the frame log when somebody asked for it.
+struct App {
+    shell: shell::Shell,
     log: frame_log::FrameLog,
 }
 
-impl eframe::App for Slice {
+impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.log.begin();
-        // First thing in the frame, before any scroll area reads the input: the
-        // wheel step, the touchpad scale and the glide all happen here. It rewrites
-        // `smooth_scroll_delta`, so every `ScrollArea` picks it up unchanged.
-        self.scrolling.apply(&ctx);
-        // This is what makes the app "continuous": one repaint after another, so the
-        // frame interval is the display's, not a timer's. egui would otherwise sleep
-        // until something asked it to wake.
-        ctx.request_repaint();
-
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Sift Launcher");
-                ui.separator();
-                ui.label(format!("{CARDS} projects"));
-                if self.scrolling.gliding() {
-                    ui.label("gliding");
-                }
-            });
-        });
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for index in 0..CARDS {
-                    card(ui, index);
-                }
-            });
-
+        let animating = self.shell.ui(ui);
         self.log.end();
+        // Only while something is in flight. An idle window draws nothing at all, which is
+        // both the budget in docs/LIGHTNESS.md and the reason a fan does not spin.
+        if animating {
+            ctx.request_repaint();
+        }
     }
-}
-
-/// One project card: an icon, a title, a summary line and a footer, at a fixed
-/// height so the list is the same shape as the real cards.
-///
-/// A painted rectangle rather than an image for the icon: an image would measure the
-/// texture path as well as the frame, and the question here is the frame.
-fn card(ui: &mut egui::Ui, index: usize) {
-    let width = ui.available_width();
-    ui.allocate_ui(egui::vec2(width, CARD), |ui| {
-        ui.horizontal(|ui| {
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::hover());
-            ui.painter()
-                .rect_filled(rect, 8.0, ui.visuals().hyperlink_color);
-            ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("Project {index}"))
-                        .strong()
-                        .size(16.0),
-                );
-                ui.label("A summary sentence of the length a result card carries.");
-                ui.label(
-                    egui::RichText::new("12.4M downloads  ·  1.2M followers  ·  Fabric")
-                        .size(12.0)
-                        .weak(),
-                );
-            });
-        });
-    });
-    ui.separator();
 }
 
 #[cfg(test)]
 mod tests {
-    /// The list's length in points is `CARDS * CARD`, and a scrollbar's thumb is
-    /// computed from it: a card that changed height without this changing would
-    /// leave the measurement describing a list nobody drew.
+    /// The shell starts on Discover and animating nothing: a window that opens
+    /// mid-animation draws a frame it did not need.
     #[test]
-    fn the_list_has_its_documented_length() {
-        assert_eq!(super::CARDS, 300);
-        assert!(super::CARD >= 60.0 && super::CARD <= 96.0);
+    fn a_fresh_shell_is_idle_on_discover() {
+        let shell = shell::Shell::default();
+        assert_eq!(shell.rail, shell::Rail::Discover);
     }
 }
