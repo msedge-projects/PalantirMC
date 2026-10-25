@@ -77,12 +77,15 @@ pub const CARD: f32 = 148.0;
 /// The gap between two result cards.
 pub const CARD_GAP: f32 = 12.0;
 
-/// The distance between two rail icon centres. The rail's icons are evenly pitched; the
-/// pitch is what makes a rail look like a rail rather than a list.
-pub const RAIL_PITCH: f32 = 56.0;
+/// The distance between two rail icon centres, measured from the reference's Home capture:
+/// five icons whose centres are ~50 points apart.
+pub const RAIL_PITCH: f32 = 50.0;
 
-/// The centre of the first rail icon, measured from the top of the window.
-pub const RAIL_FIRST: f32 = 64.0;
+/// The first icon's centre, measured **from the rail's top edge**: the reference's active
+/// plate spans 49..89 window pixels and the title bar ends at 40, so the offset is 29. The
+/// first version measured this from the window and then added the title bar again, which put
+/// every icon 40 points too low.
+pub const RAIL_FIRST: f32 = 29.0;
 
 #[cfg(test)]
 mod tests {

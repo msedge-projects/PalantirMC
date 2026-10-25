@@ -86,7 +86,9 @@ pub struct Shell {
 impl Default for Shell {
     fn default() -> Shell {
         Shell {
-            rail: Rail::Discover,
+            // The reference opens on Home, and a launcher that opens on a catalogue looks
+            // like a store rather than a launcher.
+            rail: Rail::Home,
             hovered: None,
             scrolling: fastframe_scroll::Scrolling::default(),
             theme: crate::theme::dark(),
