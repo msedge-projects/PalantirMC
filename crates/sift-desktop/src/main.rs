@@ -189,7 +189,7 @@ mod scroll;
 ///
 /// **This is the only shell there is.** It replaced the one that preceded it,
 /// which is deleted rather than kept behind a flag: its page names, its capture
-/// flag and its `PalantirApp` state are gone, and the parts of it the product
+/// flag and its `SiftApp` state are gone, and the parts of it the product
 /// still needed — the native frame, and a `--shot` capture — are here.
 mod shell;
 /// One launcher at a time: a claim file naming the process that holds it, and a

@@ -191,6 +191,12 @@ RULES: tuple[Rule, ...] = (
         "SiftPaths",
         "the path helper type every module names; `Palantir` does not survive as a type prefix",
     ),
+    Rule(
+        "2-identifier-forms",
+        "PalantirVersion",
+        "SiftVersion",
+        "the Prism-compatible version comparator in `version/compare.rs`, named in four files;",
+    ),
     # ---- 3. the product name itself -----------------------------------------
     Rule("3-product-name", "PalantirMC", "Sift Launcher", "display name in prose the user reads", scope="visible"),
     Rule("3-product-name", "PalantirMC", "SiftLauncher", "identifier spelling everywhere else", scope="hidden"),

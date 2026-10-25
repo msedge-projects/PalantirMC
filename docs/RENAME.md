@@ -13,17 +13,28 @@ would make per file. "Occurrences" counts every match, so a line carrying two of
 them (a `palantir-core = { path = "../palantir-core" }` entry, say) counts twice
 here and once in a `Select-String` line count.
 
-**Total, as the script measures it:** 378 files scanned, **123 files changed**,
-**1,897 occurrences replaced**, 90 files with no old name, 165 non-UTF-8 files
-(binary assets), 5 files excluded by name.
+**Two measurements, because the tree moved while this was written.**
 
-**This is a snapshot.** It was measured on 2026-10-25 at about 19:25, while
-another session was editing the same tree (`brand.rs`, `build.rs`, `README.md`
-and a new `tools/gen_icons_egui.py` all changed between two runs an hour apart).
-Line numbers drift first; the substitutions do not, because the script matches
-*text*, not positions. Treat a line number here as a hint and
-`python tools/rename_sift.py --verbose` as the authority for the tree you are
-actually holding.
+| When | Tree | Files scanned | Files changed | Occurrences |
+| --- | --- | ---: | ---: | ---: |
+| 2026-10-25 ~19:20 | before the rename: `crates/palantir-*`, `PalantirMC` everywhere | 378 | 123 | 1,897 * |
+| 2026-10-25 ~19:40 | after another session had already applied it | 379 | 28 | 978 |
+
+The first row is what this inventory describes, line by line. The second is what
+`python tools/rename_sift.py` finds now: the recorded history (§11), the
+identifier the other pass missed (§10, `PalantirVersion`), and the vendored
+patch markers (§11). **The rename of the crates, the binary, `SiftPaths`, the
+product name and the paths had already been applied by the time this file was
+finished** — not by this script, which was only ever run in dry-run mode.
+
+\* measured before the `PalantirVersion` rule existed; adding that rule would have
+made the pre-rename figure 1,915.
+
+Line numbers drift; the substitutions do not, because the script matches *text*,
+not positions. Treat a line number here as a hint and
+`python tools/rename_sift.py --verbose` as the authority for the tree in hand.
+`--exclude-glob '*.md,docs/*'` narrows a pass to the code and leaves the prose
+decisions to a second one.
 
 ---
 
@@ -32,7 +43,9 @@ actually holding.
 Rows overlap where one occurrence serves two surfaces — a `[dependencies]` line is
 both a manifest line and a crate path. The per-group totals underneath are
 disjoint and are what the script reports. "Rows listed" is how many substitution
-rows this document's own tables carry for that surface.
+rows this document's own tables carry for that surface. **The numbers are the
+pre-rename tree's** — the one this inventory describes — not the current one;
+the tree as it stands is measured at the top of the file.
 
 | § | Surface | Files | Rows listed | Occurrences | Replaced | Kept on purpose |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -452,8 +465,9 @@ already `$LOCALAPPDATA\Programs\Sift Launcher` (line 64). No file under
 
 ## 10. Replacements that are not plain substrings
 
-Five of the eleven crate pairs are plain; six things are not. Each is a rule of
-its own in the script, in this order.
+Five of the eleven crate pairs are plain (`palantir-core` → `sift-core` and its
+four siblings, hyphen and underscore). Everything below is a rule of its own, and
+the script keeps them in this order.
 
 | Today | After | Why it is not a substring rule |
 | --- | --- | --- |
@@ -465,6 +479,7 @@ its own in the script, in this order.
 | `PalantirMCSkinBoundary` | `SiftSkinBoundary` | multipart boundary (`net/auth.rs:367`); a space in a boundary is an illegal header value. |
 | `PalantirEgui` | `SiftUi` | the egui slice's bin target, following its crate to `sift-ui`. |
 | `PalantirPaths` | `SiftPaths` | a Rust *type* named in 166 places; `Palantir` cannot survive as a type prefix or `PLAN-SIFT`'s "palantir survives only in NOTES.md and vendor/" is false. |
+| `PalantirVersion` | `SiftVersion` | the **other** public type with the old name in it — `version/compare.rs` 10, `version/profile.rs` 5, `resolve.rs` 2, `version/mod.rs` 1, so 18 in all. Found late: the first sweep looked for `PalantirPaths` and missed its sibling, and the rename that landed left this one in place. It is the identifier most likely to survive the whole exercise by accident. |
 | `palantirmc` (lower case) | `sift` | `palantirmc-desktop.json` → `sift-desktop.json`, `palantirmc.pid`-shaped names, test temp dirs, artifact prefixes. **Not** `siftlauncher`: the crate prefix is `sift-`. |
 | `PALANTIRMC_` | `SIFT_` | the environment-variable prefix (all four variables). |
 | `palantir` (bare lower case) | `sift` | leftovers: `palantir.pid` → `sift.pid`, `.palantir-test-data/`, `palantir-cli`/`palantir-gui` in old comments. |
@@ -493,6 +508,7 @@ is a decision with an owner attached, not a substitution.
 | `NOTES.md:1488` | 1 | kept | explains why the studio name is drawn in the About hero. |
 | `PalantirApp` (`main.rs:192`) | 1 | kept | a **deleted** state type, named in a doc comment about the shell that was removed. Left as history. |
 | `vendor/modrinth-app/UPSTREAM.md:90` | 1 | kept | the vendored reference's provenance note pointing at `crates/palantir-desktop/src/native.rs`. `vendor/` is excluded, so this **survives the rename and becomes stale** — the one place a human should edit by hand, after checking that the vendored tree's own rules allow it. |
+| `vendor/cosmic-text` — `src/shape.rs:214`, `src/font/system.rs:33`, `:158`, `Cargo.toml:1` | 4 | kept | `PATCH (PalantirMC, see THIRD_PARTY_NOTICES.md)` markers on the two edits this project carries in a crate it did not write. `vendor/` is excluded, so they keep the old name. That is arguably correct — the patch *was* made under that name and `THIRD_PARTY_NOTICES.md` is the record — but it means "palantir survives only in NOTES.md history and vendor/" is the honest end state, exactly as `docs/PLAN-SIFT.md` predicted. |
 | `palantir-gui`, `palantir-cli` (`main.rs:109`, `paths.rs:29`) | 2 | rewrites | crates that no longer exist. Become `sift-gui`/`sift-cli`, which is arguably *wrong*: they are historical names, not future ones. Harmless either way. |
 | `LICENSE:1` `PalantirMC` | 1 | rewrites | the product name at the top of its own licence; becomes `Sift Launcher`. The copyright holder does not change. **Owner should confirm** — a licence heading is legal text. |
 | `docs/modrinth-research/*`, `docs/superpowers/specs/*` | 92 | rewrites | "the PalantirMC 2.0 rewrite" — research and design *history*. A mechanical rewrite makes the documents claim a name they were not written under. |

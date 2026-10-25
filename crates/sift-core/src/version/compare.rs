@@ -81,14 +81,14 @@ fn null_vs(other: &Section) -> Ordering {
 
 /// A parsed version string with Prism-compatible ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PalantirVersion {
+pub struct SiftVersion {
     raw: String,
     sections: Vec<Section>,
 }
 
-impl PalantirVersion {
+impl SiftVersion {
     /// Parse a version string.
-    pub fn parse(s: &str) -> PalantirVersion {
+    pub fn parse(s: &str) -> SiftVersion {
         let mut sections: Vec<Section> = Vec::new();
         let chars: Vec<char> = s.chars().collect();
         let len = chars.len();
@@ -132,7 +132,7 @@ impl PalantirVersion {
                 sections.push(cur);
             }
         }
-        PalantirVersion {
+        SiftVersion {
             raw: s.to_string(),
             sections,
         }
@@ -144,7 +144,7 @@ impl PalantirVersion {
     }
 
     /// Three-way comparison against another version.
-    pub fn compare(&self, other: &PalantirVersion) -> Ordering {
+    pub fn compare(&self, other: &SiftVersion) -> Ordering {
         let len = self.sections.len().max(other.sections.len());
         for i in 0..len {
             let cmp = match (self.sections.get(i), other.sections.get(i)) {
@@ -161,13 +161,13 @@ impl PalantirVersion {
     }
 }
 
-impl PartialOrd for PalantirVersion {
+impl PartialOrd for SiftVersion {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for PalantirVersion {
+impl Ord for SiftVersion {
     fn cmp(&self, other: &Self) -> Ordering {
         self.compare(other)
     }
@@ -179,7 +179,7 @@ mod tests {
     use std::cmp::Ordering::*;
 
     fn cmp(a: &str, b: &str) -> Ordering {
-        PalantirVersion::parse(a).compare(&PalantirVersion::parse(b))
+        SiftVersion::parse(a).compare(&SiftVersion::parse(b))
     }
 
     #[test]
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn raw_string_is_preserved() {
-        let v = PalantirVersion::parse("1.20-pre1");
+        let v = SiftVersion::parse("1.20-pre1");
         assert_eq!(v.as_str(), "1.20-pre1");
     }
 }

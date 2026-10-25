@@ -65,8 +65,8 @@ fn compose_into(map: &mut BTreeMap<String, Require>, req: &Require) {
             if existing.suggests.is_empty() {
                 existing.suggests = req.suggests.clone();
             } else if !req.suggests.is_empty()
-                && crate::version::PalantirVersion::parse(&existing.suggests)
-                    < crate::version::PalantirVersion::parse(&req.suggests)
+                && crate::version::SiftVersion::parse(&existing.suggests)
+                    < crate::version::SiftVersion::parse(&req.suggests)
             {
                 existing.suggests = req.suggests.clone();
             }

@@ -16,7 +16,7 @@ pub mod profile;
 pub mod rules;
 pub mod version_file;
 
-pub use compare::PalantirVersion;
+pub use compare::SiftVersion;
 pub use gradle::GradleSpecifier;
 pub use library::{ApplicableFiles, DownloadInfo, Library, LibraryDownloads};
 pub use mojang::from_mojang;

@@ -19,7 +19,7 @@
 
 use super::library::{ApplicableFiles, Library};
 use super::rules::RuntimeContext;
-use super::{Agent, AssetIndexInfo, PalantirVersion, ProblemSeverity, VersionFile};
+use super::{Agent, AssetIndexInfo, SiftVersion, ProblemSeverity, VersionFile};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -158,8 +158,8 @@ impl LaunchProfile {
         for module in incoming {
             match find_library_index(&self.mods, &module.name) {
                 Match::Found(i) => {
-                    if PalantirVersion::parse(module.name.version())
-                        > PalantirVersion::parse(self.mods[i].name.version())
+                    if SiftVersion::parse(module.name.version())
+                        > SiftVersion::parse(self.mods[i].name.version())
                     {
                         self.mods[i] = module.clone();
                     }
@@ -181,8 +181,8 @@ impl LaunchProfile {
         };
         match find_library_index(list, &library.name) {
             Match::Found(i) => {
-                if PalantirVersion::parse(library.name.version())
-                    > PalantirVersion::parse(list[i].name.version())
+                if SiftVersion::parse(library.name.version())
+                    > SiftVersion::parse(list[i].name.version())
                 {
                     list[i] = library.clone();
                 }

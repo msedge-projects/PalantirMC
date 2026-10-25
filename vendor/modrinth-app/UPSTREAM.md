@@ -87,7 +87,7 @@ most of it is not the launcher. What was left out, with the size it would have c
 reader of this port might expect to find: it is the Tauri host, and this launcher
 has no Tauri. Everything it would have contributed — the window, the title bar, the
 caption buttons, the drag regions, the window commands — is either iced's or
-`crates/palantir-desktop/src/native.rs`'s, and where that code needs to know what
+`crates/sift-desktop/src/native.rs`'s, and where that code needs to know what
 the Tauri side did, the reason is written at the call site.
 
 ## That it is verbatim, as a command rather than a claim
