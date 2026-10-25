@@ -1,8 +1,9 @@
 //! The content column's search field: a plate, a magnifier, a placeholder and a caret.
 //!
-//! It is what the search row in [`crate::shell`] used to paint by hand -- the rounded
-//! plate, the ring glyph and the `Search modpacks...` text -- with the difference that the
-//! plate now takes the keyboard, holds what is typed and reports it as a query.
+//! It is the search row's own field, where [`crate::shell`] currently paints a placeholder
+//! by hand -- the rounded plate, the ring glyph and the `Search modpacks...` text -- with
+//! the difference that this plate takes the keyboard, holds what is typed and reports it as
+//! a query.
 //!
 //! **Why a field drawn by hand rather than [`egui::TextEdit`].** The reference's field is
 //! not a widget: it is a plate in `--color-raised-bg` at `--radius-sm`, with its text
@@ -154,7 +155,7 @@ impl Search {
             egui::pos2(rect.right() - 18.0, rect.center().y),
             Vec2::splat(16.0),
         );
-        let clear_shown = !self.text.is_empty() && response.hovered();
+        let mut clear_shown = !self.text.is_empty() && response.hovered();
         let mut clear_hovered = false;
         if clear_shown {
             let hit = ui.interact(clear, Id::new("search-clear"), Sense::click());
@@ -166,6 +167,10 @@ impl Search {
                 // again. `focus` also restarts the blink, so the caret is visible at the
                 // start of the empty field it was just emptied into.
                 self.focus();
+                // The text is empty as of this instant, so the button has nothing left to
+                // point at: this frame paints no X rather than one that vanishes next
+                // frame, and the empty field gets the full width back immediately.
+                clear_shown = false;
             }
         }
 
@@ -173,7 +178,7 @@ impl Search {
 
         // The plate. One fill at every state, on purpose: the reference gives this control
         // no hover or focus wash. What tells a reader where the keyboard is, is the caret.
-        painter.rect_filled(rect, crate::theme::RADIUS_SM, theme.RAISED_BG);
+        painter.rect_filled(rect, crate::theme::Theme::radii()[1], theme.RAISED_BG);
 
         // The magnifier, where the painted placeholder used to draw its ring: a 12-point
         // glyph centred 18 points in from the plate's left edge.

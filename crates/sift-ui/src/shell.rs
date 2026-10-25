@@ -85,6 +85,8 @@ pub struct Shell {
     open_project: Option<crate::pages::project::Project>,
     /// The open project's tab.
     project_state: crate::pages::project::State,
+    /// The Discover search field: its text, its focus and its blink phase.
+    search: crate::widgets::search::Search,
 }
 
 impl Default for Shell {
@@ -100,6 +102,7 @@ impl Default for Shell {
             instances: crate::data::load().0,
             open_project: None,
             project_state: crate::pages::project::State::default(),
+            search: crate::widgets::search::Search::default(),
         }
     }
 }
@@ -498,19 +501,10 @@ impl Shell {
             row.min,
             egui::vec2(row.width() * 0.62, g::SEARCH_ROW),
         );
-        painter.rect_filled(field, 8, self.theme.RAISED_BG);
-        painter.circle_stroke(
-            egui::pos2(field.left() + 18.0, field.center().y),
-            6.0,
-            Stroke::new(1.5, self.theme.SECONDARY),
-        );
-        painter.text(
-            egui::pos2(field.left() + 34.0, field.center().y),
-            Align2::LEFT_CENTER,
-            "Search modpacks...",
-            crate::fonts::body(13.0),
-            self.theme.SECONDARY,
-        );
+        // The field is a widget with state now: focus, a caret that blinks and a clear button.
+        // Its return value is frame debt -- true while it is focused, because the caret is
+        // the one thing in this window that moves without being asked to.
+        let mut typing = self.search.ui(ui, field, &self.theme);
         // The two selects: `Sort by: Relevance` and `View: 20`, each its own rounded box.
         let select_w = 150.0;
         for (index, label) in ["Sort by:  Relevance", "View: 20"]
@@ -554,6 +548,7 @@ impl Shell {
             content.max,
         );
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
+        let mut owed = typing;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(&mut child, |ui| {
@@ -571,7 +566,9 @@ impl Shell {
                     self.open_project = Some(crate::pages::project::sample());
                 }
             });
-        false
+        owed |= typing;
+        typing = owed;
+        typing
     }
 }
 
