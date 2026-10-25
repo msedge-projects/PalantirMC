@@ -103,6 +103,16 @@ FLATNESS_FRACTION = 0.002
 # the set; the cap is here so a pathological control polygon cannot recurse forever.
 MAX_SUBDIVISION = 16
 
+# How short a stroked subpath has to be, as a fraction of the view box's long side,
+# before it is the reference's *dot* rather than a line.
+#
+# The set draws a dot as a zero-length line with a round cap -- `M12 12h.01` -- and
+# the cap is the whole of what you see. A thousandth of the view box is 0.024 units
+# on a 24-unit icon: a fiftieth of a pixel at 24 px. The shortest subpath in the set
+# that is *not* that idiom is 0.41 units, seventeen times this limit, so the two are
+# not close enough to confuse. See `disc`.
+DOT_FRACTION = 1e-3
+
 # Decimals kept on a coordinate. A view-box unit is at most one device pixel for
 # the 24-unit icons, so three decimals is a thousandth of a pixel; it also keeps
 # the emitted file from carrying the full binary expansion of every intersection.
@@ -394,9 +404,9 @@ def fill_limitation(shape_list: list[tuple[list[tuple[float, float]], bool]],
     every second nesting, or by a nested contour wound the other way, which
     `nonzero` subtracts -- because the hole would be filled solid.
     """
-    for points, _ in shape_list:
+    for points, *_rest in shape_list:
         if not fan_covers(points):
-            return "a concave outline the fan cannot cover"
+            return "concave outline the fan cannot cover"
     for first_index in range(len(shape_list)):
         for second_index in range(first_index + 1, len(shape_list)):
             first, second = shape_list[first_index][0], shape_list[second_index][0]
@@ -408,7 +418,7 @@ def fill_limitation(shape_list: list[tuple[list[tuple[float, float]], bool]],
                 continue
             same_winding = signed_area(first) * signed_area(second) > 0.0
             if even_odd or not same_winding:
-                return "hole (a subpath nested inside another)"
+                return "hole (a nested subpath)"
     return None
 
 
@@ -529,22 +539,26 @@ def main() -> int:
     geometry: list[tuple] = []
     not_expressible: list[tuple[str, int, str, bool]] = []
     no_paint: list[str] = []
+    dots: list[str] = []
     filled_elements = 0
     for name, rust, box, elements in icons:
         tolerance = max(FLATNESS_FRACTION * max(box), 1e-4)
-        shapes: list[tuple[list[tuple[float, float]], bool, object]] = []
+        dot_limit = DOT_FRACTION * max(box)
+        shapes: list[tuple[list[tuple[float, float]], bool, object, bool]] = []
         for index, element in enumerate(elements):
             if element.commands and element.commands[0][0] == "NoPaint":
                 no_paint.append(f"{name}#{index}")
                 continue
-            found = subpaths(element, tolerance)
+            found = subpaths(element, tolerance, dot_limit)
             if element.filled:
                 filled_elements += 1
                 reason = fill_limitation(found, element.even_odd)
                 if reason is not None:
                     not_expressible.append((name, index, reason, element.even_odd))
-            for points, closed in found:
-                shapes.append((points, closed, element))
+            for points, closed, dot in found:
+                if dot:
+                    dots.append(f"{name}#{index}")
+                shapes.append((points, closed, element, dot))
         if not shapes:
             raise SystemExit(f"{name}.svg: no shape egui could draw")
         geometry.append((name, rust, box, elements, shapes))
@@ -554,7 +568,8 @@ def main() -> int:
     ]
     total_shapes = sum(count for _, _, count in shape_counts)
     distinct_counts = len({count for _, _, count in shape_counts})
-    total_points = sum(len(points) for _, _, _, _, shapes in geometry for points, _, _ in shapes)
+    total_points = sum(len(points) for _, _, _, _, shapes in geometry
+                       for points, _, _, _ in shapes)
     largest = max(shape_counts, key=lambda entry: entry[2])
     width_exceptions = sorted({
         f"{name}:{width_text(element.stroke_width)}"
@@ -598,6 +613,8 @@ def main() -> int:
         "filled_elements": filled_elements,
         "filled_glyphs": len(filled_glyphs),
         "unsupported": len(not_expressible),
+        "dots": len(dots),
+        "dot_glyphs": len({entry.split('#')[0] for entry in dots}),
         "flatness": FLATNESS_FRACTION,
     }
 
@@ -639,31 +656,39 @@ def main() -> int:
     add("//! under epaint's half-pixel feathering -- and splits every element into one")
     add("//! shape per subpath, because a `PathShape` cannot hold two. Flattening here")
     add("//! rather than per frame is the whole reason the coordinates in this file are")
-    add(f"//! plain numbers: {numbers['points']} of them, and not one is computed twice.")
+    add(f"//! plain numbers: {numbers['points']:,} of them, and not one is computed twice.")
     add("//!")
     add("//! Splitting subpaths is exact for strokes: stroking a subpath does not")
     add("//! depend on its siblings, which is why the iced side's multi-subpath paths")
     add("//! and these shapes draw the same picture. It is **not** exact for fills, and")
     add("//! that is the one thing this file cannot say:")
     add("//!")
-    add(f"//! **{numbers['unsupported']} of the {numbers['filled_elements']} filled elements have no egui")
-    add("//! shape.** `PathShape` has a fill colour and no fill rule, and epaint")
-    add("//! fills a path with a triangle fan from its first point. That fan covers a")
-    add("//! contour exactly when the contour is star-shaped as seen from that point --")
-    add("//! the toolkit documents convex, which is sufficient and not necessary -- so")
-    add("//! an element of disjoint such contours is exact, one shape each. An element")
-    add("//! with a **hole** or an **outline the fan cannot cover** is not: the hole is")
-    add("//! filled solid (no fill rule to cut it, and a nested contour wound the other")
-    add("//! way is subtracted by the reference's `nonzero`), or the fan paints ground")
-    add("//! the outline does not. These:")
+    add("//! **Dots are discs.** {dots:,} stroked subpaths in the set are shorter than a".format(**numbers))
+    add("//! thousandth of their view box -- the reference's dot idiom, a zero-length")
+    add("//! line whose round cap is the whole of the picture (`M12 12h.01`) -- and")
+    add("//! epaint has no round caps, so a stroke of one draws nothing at all. Each is")
+    add("//! emitted as the disc that cap would have painted: a regular polygon of the")
+    add("//! stroke's width, filled in the stroke's ink, marked `dot` in the tables.")
+    add("//! {dot_glyphs} glyphs have at least one; a dot that vanished is the kind of".format(**numbers))
+    add("//! difference nobody finds by reading coordinates.")
+    add("//!")
+    add(f"//! **{numbers['unsupported']} of the {numbers['filled_elements']} filled elements have no egui shape.**")
+    add("//! `PathShape` has a fill colour and no fill rule, and epaint fills a path with")
+    add("//! a triangle fan from its first point. That fan covers a contour exactly when")
+    add("//! the contour is star-shaped as seen from that point -- the toolkit documents")
+    add("//! convex, which is sufficient and not necessary -- so an element of disjoint")
+    add("//! such contours is exact, one shape each. An element with a **hole** or an")
+    add("//! **outline the fan cannot cover** is not: the hole is filled solid (no fill")
+    add("//! rule to cut it, and a nested contour wound the other way is subtracted by")
+    add("//! the reference's `nonzero`), or the fan paints ground the outline does not.")
+    add("//! These:")
     add("//!")
     for name in sorted(unsupported_by_glyph):
         add(f"//! * `{name}.svg` -- {'; '.join(unsupported_by_glyph[name])}")
     add("//!")
     add("//! The iced side carries the reference's `fill-rule` and honours it, so those")
     add("//! glyphs are drawn correctly there and only approximately here. Nothing else")
-    add(f"//! in the set is affected: the other {numbers['filled_elements'] - numbers['unsupported']} filled")
-    add("//! elements are expressible.")
+    add(f"//! in the set is affected: the other {numbers['filled_elements'] - numbers['unsupported']} filled elements are expressible.")
     add("//!")
     add(f"//! **{numbers['no_paint']} elements are not here at all.** They are the shapes the")
     add("//! reference declares with neither a fill nor a stroke -- the clamp path every")
@@ -773,6 +798,13 @@ def main() -> int:
     add("    pub stroke_width: f32,")
     add("    /// Whether this is filled rather than stroked.")
     add("    pub filled: bool,")
+    add("    /// Whether this is one of the reference's dots: a zero-length stroke whose")
+    add("    /// round cap was the whole picture, emitted as the disc that cap painted.")
+    add("    ///")
+    add("    /// Every dot is `filled` and `closed`, and its points are a regular polygon")
+    add("    /// around the cap's centre. It exists as a field rather than as a quiet")
+    add("    /// property of the points so a reader can tell a converted dot from a fill.")
+    add("    pub dot: bool,")
     add("    /// Where its colour comes from.")
     add("    pub ink: Ink,")
     add("    /// The element's own `opacity`, which multiplies whatever ink it gets.")
@@ -1045,15 +1077,19 @@ def main() -> int:
     for name, rust, box, elements, shapes in geometry:
         add(f"/// `{name}.svg`, {len(elements)} element(s) as {len(shapes)} shape(s).")
         add(f"const PATHS_{gen_icons.screaming(rust)}: [Subpath; {len(shapes)}] = [")
-        for points, closed, element in shapes:
-            kind = "filled" if element.filled else "stroked"
+        for points, closed, element, dot in shapes:
+            if dot:
+                kind = "dot (a round-capped zero-length stroke, as a disc)"
+            else:
+                kind = "filled" if element.filled else "stroked"
             add(f"    // {kind} at {number(element.stroke_width, WIDTH_DECIMALS)}, "
                 f"{len(points)} point(s)")
             add("    Subpath {")
             lines.extend(points_source(points))
             add(f"        closed: {'true' if closed else 'false'},")
             add(f"        stroke_width: {number(element.stroke_width, WIDTH_DECIMALS)},")
-            add(f"        filled: {'true' if element.filled else 'false'},")
+            add(f"        filled: {'true' if element.filled or dot else 'false'},")
+            add(f"        dot: {'true' if dot else 'false'},")
             add(f"        ink: {ink_source(element.ink)},")
             add(f"        opacity: {number(element.opacity)},")
             add("    },")
@@ -1340,7 +1376,7 @@ def main() -> int:
     add("        let mut filled = 0;")
     add("        for (name, glyph) in every() {")
     add("            for subpath in glyph.subpaths() {")
-    add("                if !subpath.filled {")
+    add("                if !subpath.filled || subpath.dot {")
     add("                    continue;")
     add("                }")
     add("                filled += 1;")
@@ -1348,7 +1384,50 @@ def main() -> int:
     add("                assert!(subpath.points.len() >= 3, \"{name} has a fill with no area\");")
     add("            }")
     add("        }")
-    add(f"        assert_eq!(filled, {sum(1 for _, _, _, _, shapes in geometry for _, _, element in shapes if element.filled)}, \"the filled shape count moved\");")
+    add(f"        assert_eq!(filled, {sum(1 for _, _, _, _, shapes in geometry for _, _, element, dot in shapes if element.filled and not dot)}, \"the filled shape count moved\");")
+    add("    }")
+    add("")
+    add("    #[test]")
+    add("    fn the_dots_the_reference_draws_are_drawn_as_discs() {")
+    add("        // The set draws a dot as a zero-length line with a round cap --")
+    add("        // `M12 12h.01` -- and the cap is the whole of what you see. epaint has")
+    add("        // no round caps, so a stroke of one draws nothing at all, and these")
+    add("        // would be dots that quietly vanished. `tools/gen_icons_egui.py`")
+    add("        // converts each into the disc the cap would have painted, and this is")
+    add("        // the gate on that conversion: every dot is a closed, filled polygon")
+    add("        // whose vertices sit on the circle of the stroke's radius.")
+    add("        let mut dots = 0;")
+    add("        let mut glyphs = 0;")
+    add("        for (name, glyph) in every() {")
+    add("            let mut has_dot = false;")
+    add("            for subpath in glyph.subpaths() {")
+    add("                if !subpath.dot {")
+    add("                    continue;")
+    add("                }")
+    add("                dots += 1;")
+    add("                has_dot = true;")
+    add("                assert!(subpath.filled && subpath.closed, \"{name} has an open dot\");")
+    add("                assert!(subpath.points.len() >= 12, \"{name} has a dot that is not round\");")
+    add("                let count = subpath.points.len() as f32;")
+    add("                let middle = subpath.points.iter().fold((0.0f32, 0.0f32), |sum, point| {")
+    add("                    (sum.0 + point.0, sum.1 + point.1)")
+    add("                });")
+    add("                let middle = (middle.0 / count, middle.1 / count);")
+    add("                let radius = subpath.stroke_width * 0.5;")
+    add("                for point in subpath.points {")
+    add("                    let distance = ((point.0 - middle.0).powi(2) + (point.1 - middle.1).powi(2)).sqrt();")
+    add("                    assert!(")
+    add("                        (distance - radius).abs() <= 0.01,")
+    add("                        \"{name} has a dot point {distance} from the centre, not {radius}\"")
+    add("                    );")
+    add("                }")
+    add("            }")
+    add("            if has_dot {")
+    add("                glyphs += 1;")
+    add("            }")
+    add("        }")
+    add(f"        assert_eq!(dots, {len(dots)}, \"the number of dots moved\");")
+    add(f"        assert_eq!(glyphs, {len({entry.split('#')[0] for entry in dots})}, \"the number of glyphs with a dot moved\");")
     add("    }")
     add("")
     add("    #[test]")
@@ -1438,6 +1517,8 @@ def main() -> int:
            + ", ".join(f"{name}#{index} ({reason})" for name, index, reason, _ in not_expressible)
            if not_expressible else "-"),
         f"no paint     {len(no_paint)}: {', '.join(sorted(no_paint)) if no_paint else '-'}",
+        f"dots         {len(dots)} over {len({entry.split('#')[0] for entry in dots})} glyphs: "
+        + (", ".join(sorted({entry.split('#')[0] for entry in dots})) if dots else "-"),
         f"refused      {len(refused)}: {', '.join(name for name, _ in sorted(refused)) or '-'}",
         f"off-width    {len(width_exceptions)}: {', '.join(width_exceptions) if width_exceptions else '-'}",
         f"tokens       {', '.join(tokens) if tokens else '-'}",
