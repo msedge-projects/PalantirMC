@@ -103,6 +103,32 @@ v0.22.0 side by side:
 | E-6 | Cards | ours are placeholders: no icon, no install button, no badges, no footer stats |
 | E-7 | Backgrounds | the content column looks a shade lighter than the reference's; needs a sampled comparison rather than an eye |
 
+### Second pass: E-1 to E-5 closed, and what the 2x crops found
+
+The chrome now matches the reference where the first pass did not, and the way it was
+found is worth recording because two of the five "differences" were the wrong diagnosis:
+
+| Was | Actually |
+| --- | --- |
+| E-1 "missing page header" | there is no separate header row: the back/forward arrows, the route badge and the page's name sit **on the title bar's own 40 px line**, to the right of the brand |
+| E-3 "tab strip spans the column" | the strip is a rounded container of **six** pills, `Modpacks` first and drawn as the active green pill — the count was wrong, not just the inset |
+| E-2, E-4, E-5 | confirmed as diagnosed: title-bar furniture, rail utility group below its rule, the panel's toggle and news card |
+
+All five are drawn now, from constants in `crates/sift-ui/src/geometry.rs`, and the tab
+labels, breadcrumb, card titles and panel headings are set in **Inter at the reference's
+weights** (400/500/600/700/800 as separate families), which is what made the strip stop
+looking "lighter and smaller": egui ships one proportional face, so without registering the
+weights every heading renders at 400.
+
+### Open after this pass
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-6 | Cards | still placeholders: the reference's card has an icon tile, a title with a follower glyph, a two-line summary, a tag row of badges and a footer of downloads/followers/updated, with an `Install` button at the right |
+| E-8 | Search row | the field, the two selects and the count are drawn but inert; the reference's field takes focus, shows a caret and a clear button, and the selects open menus |
+| E-9 | Rail | the five destination glyphs render smaller and dimmer than the reference's, which are 24 px at `--color-secondary` with a 40 px plate on hover |
+| E-10 | Panel | the news card's height and the row rhythm need measuring rather than the current constants |
+
 ### Two fidelity gaps in the icon set, recorded before they cost time later
 
 `tools/gen_icons_egui.py` emits 441 glyphs / 1,734 shapes, and cannot express two thirds of
