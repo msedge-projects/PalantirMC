@@ -175,6 +175,51 @@ instead of the reference. The capture reads the screen and crops, and both windo
 promises nothing about stacking on a bare X server with no window manager. The tool now
 raises the target, lowers every other named window and raises the target again.
 
+### Fourth pass: the rail was invented, and the icons became exact
+
+**A capture found a structural error nobody's plan had.** Clicking the reference's third rail
+slot landed on its *skin selector*, not on an instances page. The reference's rail is:
+
+```
+Home   Discover   Skins   Screenshots   Servers
+```
+
+There is no `Library` and no `Files` item -- both were mine, invented when the rail was first
+drawn. The shell now carries the reference's five in its order, and the Library page survives
+as a page reached from Home, which is where the reference lists instances. This is the difference
+a side-by-side catches and a spec does not: the rail looked plausible, and it was wrong.
+
+**The icon set is now geometrically exact where epaint allows it.** The generator ear-clips
+filled contours with hole bridging and emits a `Mesh`, and inserts a disc at every round join and
+cap:
+
+| | before | after |
+| --- | --- | --- |
+| shapes | 1,734 | **3,146** |
+| points | 24,183 | 58,805 |
+| mesh triangles | 0 | **27,868** |
+| round pieces | 0 | 4,628 (2,226 joins + 2,402 caps) |
+| generated source | 1.05 MB | 2.68 MB |
+
+Every one of the 16 previously-wrong glyphs now reports a mesh area *smaller* than its outer
+contour alone -- `cog` 180.9 < 209.0, `radio-button` 112.9 < 313.7, `potato` 48,757 < 207,472 --
+which is the hole being subtracted, checked on every generation rather than once.
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-16 | Icons | epaint does not feather raw meshes, so filled glyphs and the round pieces have hard edges where a `PathShape` fill had ~0.5 px of anti-aliasing. MSAA would restore it; strokes still feather either way |
+| E-17 | Icons | the miter tip sits under each join disc rather than being replaced: a 90-degree corner's miter reaches 1.41r and a shape cannot erase it |
+| E-18 | Icons | round caps are applied to every stroke, though 28 glyphs ask for butt or miter in their SVG; the iced generator did the same, so this is inherited rather than introduced |
+| E-19 | Library page | the source's tile is the card's full width (~156 at five columns), not the 64-96 the first brief guessed; the page follows the source |
+| E-20 | Library page | heading is `Library` while the rail's own label for that route is `Instances`; the reference uses both in different places and this needs re-checking against the capture |
+
+**What the round cost in mistakes, all caught:** an egui widget-id collision painted a red
+warning over the card list (ids keyed by title, sample data repeating titles); a replacement span
+deleted a whole struct (six errors at once); a PowerShell redirect wrote UTF-16 into a file a
+UTF-8 reader then could not open; a test asserted the inverse of its own name; and one
+`Context::screen_rect` and one shadowed function name came in from generated-by-agent code that
+had never seen a compiler.
+
 ### Open after this pass
 
 | # | Region | What differs |
