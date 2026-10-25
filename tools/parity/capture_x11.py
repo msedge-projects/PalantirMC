@@ -167,12 +167,16 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        pages = json.loads(args.pages.read_text(encoding="utf-8"))
+        document = json.loads(args.pages.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         print(f"capture_x11: cannot read {args.pages}: {error}", file=sys.stderr)
         return 1
+    # The file groups pages under `pages` and named points under `constants`, with
+    # `_comment` as documentation. A flat file — pages at the top level — is still
+    # read, because this format is data and a hand-written one is legitimate.
+    pages = document.get("pages", document)
     if args.page not in pages:
-        known = ", ".join(sorted(k for k in pages if not k.startswith("_")))
+        known = ", ".join(sorted(pages))
         print(f"capture_x11: unknown page {args.page!r}; known: {known}", file=sys.stderr)
         return 1
 
@@ -194,7 +198,7 @@ def main() -> int:
     for step in pages[args.page].get("steps", []):
         if isinstance(step, str):
             # A named constant from the pages file's `constants` table.
-            step = pages["constants"][step]
+            step = document.get("constants", {})[step]
         for command in apply_step(step):
             run(command, timeout=30)
     run(["sleep", f"{args.settle_ms / 1000:.3f}"], timeout=60)
