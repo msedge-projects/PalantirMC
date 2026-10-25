@@ -214,6 +214,22 @@ def main() -> int:
     if args.size != "none":
         run(["xdotool", "windowsize", window, *args.size.split("x")], timeout=30)
     run(["xdotool", "windowmove", window, "0", "0"], timeout=30)
+
+    # Raise the target and lower every other named window. The capture reads the screen and
+    # crops, so "on top" is what gets photographed -- and the first Home capture came back
+    # showing the *other* app, because both windows sit at 0,0 at the same size and the
+    # launcher happened to be above the reference. `windowactivate` alone does not promise
+    # stacking on a bare X server with no window manager.
+    run(["xdotool", "windowraise", window], timeout=30)
+    others = run(["xdotool", "search", "--name", "."], timeout=20)
+    for line in others.stdout.splitlines():
+        other = line.strip()
+        if not other or other == window:
+            continue
+        name = run(["xdotool", "getwindowname", other], timeout=10)
+        if name.stdout.strip():
+            run(["xdotool", "windowlower", other], timeout=10)
+    run(["xdotool", "windowraise", window], timeout=30)
     run(["sleep", f"{args.settle_ms / 1000:.3f}"], timeout=60)
 
     constants = document.get("constants", {})
