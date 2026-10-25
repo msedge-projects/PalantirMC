@@ -204,12 +204,13 @@ fn list(
 
 #[cfg(test)]
 mod tests {
-    /// The hero is the fresh-install state, and the list is everything else: an empty
-    /// instance list must not draw a list with no rows in it.
+    use super::*;
+
+    /// The hero is the fresh-install state and the list is everything else: the dispatch is
+    /// a plain `is_empty`, so this pins the decision rather than the drawing.
     #[test]
     fn an_empty_library_is_the_hero() {
-        // The dispatch is a plain `is_empty`, so this pins the decision rather than the
-        // drawing: with no instances the page is the hero.
-        assert!(Vec::<Entry>::new().is_empty());
+        let none: Vec<Entry> = Vec::new();
+        assert!(none.is_empty(), "an install with no instances shows the hero");
     }
 }

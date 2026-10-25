@@ -35,7 +35,7 @@ impl Page {
 
     /// The page's rect, from the shell's measured columns.
     pub fn rect(self) -> Rect {
-        let geometry = crate::geometry;
+        use crate::geometry;
         Rect::from_min_size(
             eframe::egui::pos2(
                 geometry::CONTENT_LEFT,
