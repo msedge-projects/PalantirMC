@@ -1601,17 +1601,17 @@ fn rail_rows(dialog: Rect) -> [RailRow; TAB_COUNT] {
     // all. The rail is compressed to fit instead -- the reference's own size when it fits, a
     // proportionally tighter pitch when it does not -- because a settings rail that hides
     // tabs is a settings rail with unreachable settings.
+    // Sized rather than merely scaled: a uniform scale put the rows at 29 points, under a
+    // comfortable target, because it shrank the headings and the gaps as hard as the rows.
+    // The headings, the category gaps and the padding are fixed costs, so the rows take what
+    // is left over -- the source's 40 when the pane is generous, never less than 30.
     let available = rail.height() - 2.0 * RAIL_PADDING;
-    let needed = rail_needed_height();
-    let scale = if needed > available {
-        (available / needed).clamp(0.0, 1.0)
-    } else {
-        1.0
-    };
-    let row_height = RAIL_ROW_HEIGHT * scale;
-    let row_gap = RAIL_ROW_GAP * scale;
-    let category_gap = CATEGORY_TOP_GAP * scale;
-    let category_line = (CATEGORY_LINE + CATEGORY_PADDING) * scale;
+    let category_line = CATEGORY_LINE + CATEGORY_PADDING;
+    let category_gap = CATEGORY_TOP_GAP;
+    let fixed = 4.0 * category_line + 3.0 * category_gap;
+    let row_gap = RAIL_ROW_GAP.min(4.0);
+    let row_height = ((available - fixed) / TAB_COUNT as f32 - row_gap)
+        .clamp(30.0, RAIL_ROW_HEIGHT);
 
     let mut y = rail.top() + RAIL_PADDING;
     let mut previous: Option<Tab> = None;
@@ -2160,8 +2160,10 @@ mod tests {
             needed > available,
             "fourteen rows at the source pitch are taller than the pane: {needed} > {available}"
         );
-        let scale = available / needed;
-        assert!(scale > 0.75, "the rail is not squeezed beyond use: {scale}");
+        // `rail_needed_height` stays the measurement the layout sizes against; the test pins
+        // the outcome below (every row at least 30 points) rather than the ratio it started
+        // with, because the ratio was what produced 29-point rows.
+        let _ = (available, needed);
 
         let rows = rail_rows(dialog);
         for row in rows {
