@@ -279,3 +279,28 @@ Owner's standing instructions (2026-10-09), for every session:
   the background runner (not bare shell `&`), give each its own log file,
   and read that log before reporting success. Exit codes travel in the log
   for exactly this reason.
+
+---
+
+# 9. Ponytail: the smallest complete change
+
+**Every change in this tree follows [ponytail](https://github.com/DietrichGebert/ponytail)** —
+vendored verbatim at `docs/ponytail/AGENTS.md` (MIT, upstream `main` at 2026-10-25). Read it
+before a slice; the parts that bite hardest here:
+
+- **The ladder, before any code:** does this need to exist → is it already in this tree → does
+  the standard library or the platform do it → is it in an installed dependency → can it be one
+  line → only then, the minimum that works. This repo already has `sift-ui`'s theme, fonts,
+  icons, pages and widgets: the answer to "add a widget" is almost never a new file.
+- **Read before you are lazy.** Lazy about the solution, never about the reading: the ladder
+  runs *after* the change's real scope is known — callers, tests, fixtures, config.
+- **Never cut:** validation at trust boundaries, error-handling that prevents data loss,
+  security, accessibility, or anything the owner asked for.
+- **Non-trivial logic leaves one small test.** A branch, a loop, a parser or a security decision
+  ships with a test; this repo's `#[cfg(test)]` habit is that rule, not a preference.
+- **A deliberate shortcut carries `shortcut: <the limit>, <when to upgrade>`** in the code, so
+  "later" has a place to be found.
+- **End every reply with one or two lines**: what was skipped or not checked, and the risk.
+
+Where this file and ponytail disagree, this file wins — it is the project's own record of what
+this product needs. Everything ponytail does not forbid stays as it is.

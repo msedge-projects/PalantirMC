@@ -219,3 +219,13 @@ blob hashes of every file so the copy can be shown to be unmodified.
 This entry was missing while the crate was already linked into the binary and already named on
 the About page: the modal carried the notice and this file did not, which by this repo's own
 rule (attribution is a shipping condition) made the file the wrong one.
+
+## ponytail — MIT
+
+`docs/ponytail/AGENTS.md` is vendored verbatim from
+[`DietrichGebert/ponytail`](https://github.com/DietrichGebert/ponytail), `AGENTS.md` on `main`,
+2026-10-25. Copyright (c) Dietrich Gebert. MIT licence.
+
+It is an instruction set for agents rather than code that links into the launcher, so it does not
+travel in the binary or on the About page; it lives in this tree so every agent that works here
+reads the same rules about the smallest complete change.
