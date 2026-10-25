@@ -419,6 +419,39 @@ file. Every string in these two sections now carries its key.
 | E-40 | Worlds | a world row does not launch (`--quickPlaySingleplayer`) and does not print its instance's name |
 | E-41 | Row menu | there is no rename verb in the reference's menu either — `Edit` opens the instance page, which does not exist yet |
 
+### The settings modal, filled and usable — 2026-10-25
+
+All fourteen tabs now carry the reference's rows: Behavior 14 blocks, Language 3, Feature flags
+11, Profile 5, Social 4, Java and memory 12, Window 3, Launch hooks 7, Syncing 6, Resources 10,
+Troubleshooting 9 — 130 strings, with 164 catalogue citations checked against the line they
+claim so a key that does not exist fails the check rather than the reader.
+
+**Two defects the capture found, both about reachability rather than looks:**
+
+1. **Every body was taller than the pane and the body clipped instead of scrolling**, so the
+   last rows of Behavior, Resources and Troubleshooting could not be seen at all. The body is
+   drawn through a painter rather than a `Ui`, so it takes a scroll offset and reports its own
+   height, which is what the wheel is clamped against.
+2. **The rail's fourteen rows ran past the dialog's edge** at a 900-point window, and rows
+   outside the rail were skipped as targets — `Syncing`, `Resources` and `Troubleshooting` could
+   not be selected at *any* scroll position because there was no scroll. At 1280x800 they cannot
+   fit at any pitch: the capped body leaves 488 points and the rows need 560 even at a zero gap.
+
+**Three layouts were tried before the fourth was right, and the tests recorded each mistake:**
+
+| Attempt | What happened |
+| --- | --- |
+| Cycle the value on press | told the reader nothing about the options |
+| Uniform scale to fit | put rows at 29 points, below a comfortable target, because it shrank headings as hard as rows |
+| Fixed costs + row floor, gap pinned at 4 | overflowed by 8 points; `Resources` fell outside the rail |
+| Fixed costs + row floor + gap gives way + rail scroll | fits at 900, scrolls at 800, rows never under 30 |
+
+| # | Region | What still differs |
+| --- | --- | --- |
+| E-42 | Settings | sliders, text fields, chip groups and tables are drawn as the select plate — only three control kinds exist, and inventing more geometry without a source would be worse |
+| E-43 | Settings | rich-text strings are drawn verbatim **with** their markup (`<crowdin-link>`, `<support>`); link rendering is owed |
+| E-44 | Settings | one control per row: the switch wins over the secondary `Edit` (Syncing) and `Reset to default` (Feature flags) |
+
 ### Open after this pass
 
 | # | Region | What differs |
