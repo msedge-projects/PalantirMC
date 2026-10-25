@@ -680,6 +680,10 @@ pub struct Card<'a> {
 /// Six results with the reference's own content, so a capture shows the real anatomy
 /// rather than lorem ipsum: the first four are the cards the reference's first capture
 /// displayed, in its order.
+///
+/// The icon URLs are the API's own `icon_url` answers for those six projects, fetched with
+/// `tools/parity`'s probe rather than constructed: `/data/<id>/icon.png` is not a URL the
+/// CDN serves -- it answers 400 on every id -- and the hashed `_96.webp` is.
 fn sample_results() -> [Card<'static>; 6] {
     [
         Card {
@@ -696,7 +700,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "19.38M",
             followers: "5,005",
             updated: "5 days ago",
-            icon: "https://cdn.modrinth.com/data/1KVo5zza/icon.png",
+            icon: "https://cdn.modrinth.com/data/1KVo5zza/d8152911f8fd5d7e9a8c499fe89045af81fe816e_96.webp",
         },
         Card {
             title: "Zombie Invade 100 Days",
@@ -710,7 +714,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "15.36M",
             followers: "9,659",
             updated: "10 months ago",
-            icon: "https://cdn.modrinth.com/data/9J2O4k6X/icon.png",
+            icon: "https://cdn.modrinth.com/data/l9m9tuPN/fefe3f67c37744344d100638452c7bf059d586a1_96.webp",
         },
         Card {
             title: "Cobblemon Official Modpack [Fabric]",
@@ -725,7 +729,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "11.53M",
             followers: "2,732",
             updated: "12 hours ago",
-            icon: "https://cdn.modrinth.com/data/5FFgwNNP/icon.png",
+            icon: "https://cdn.modrinth.com/data/5FFgwNNP/e7f9ee2e9d361623847853fe2ddce42f519ee64f.png",
         },
         Card {
             title: "COBBLEVERSE - Pokemon Adventure",
@@ -735,7 +739,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "7.31M",
             followers: "2,092",
             updated: "Updated today",
-            icon: "https://cdn.modrinth.com/data/8M2h1kPq/icon.png",
+            icon: "https://cdn.modrinth.com/data/Jkb29YJU/581ecf54530972afb18a04660afd820f2f24f6c7.png",
         },
         Card {
             title: "Better MC [FORGE]",
@@ -745,7 +749,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "5.02M",
             followers: "1,940",
             updated: "3 days ago",
-            icon: "https://cdn.modrinth.com/data/4Z9m0aJx/icon.png",
+            icon: "https://cdn.modrinth.com/data/4BV47HRn/7f5ef7cc61b2593609aabef3ed07a866a4f11b73_96.webp",
         },
         Card {
             title: "All the Mods 10",
@@ -755,7 +759,7 @@ fn sample_results() -> [Card<'static>; 6] {
             downloads: "4.88M",
             followers: "1,512",
             updated: "6 days ago",
-            icon: "https://cdn.modrinth.com/data/6Vj7dN4w/icon.png",
+            icon: "https://cdn.modrinth.com/data/CfpXILxG/832f62314350e237f299f2ee39d90fb7d85b6419_96.webp",
         },
     ]
 }

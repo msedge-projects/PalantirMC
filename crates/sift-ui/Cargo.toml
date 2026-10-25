@@ -44,6 +44,7 @@ eframe = { version = "0.36.1", default-features = false, features = [
 fastframe-scroll = { path = "../../vendor/fastframe-scroll" }
 # The launcher's own client, for project icons: one HTTP path in the product, not two.
 sift-net = { path = "../sift-net" }
-# PNG and JPEG only: those are what the project CDN serves, and the decoders the other
-# formats would add are bytes in the binary for a picture the launcher never sees.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# The formats the project CDN actually serves. Measured, not assumed: asking for
+# `.../icon.png` answers **400**, and the API's own `icon_url` is a hashed `.webp` (with
+# some projects still on `.png`), so both decoders are needed and neither is speculative.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
