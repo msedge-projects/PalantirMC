@@ -220,6 +220,39 @@ UTF-8 reader then could not open; a test asserted the inverse of its own name; a
 `Context::screen_rect` and one shadowed function name came in from generated-by-agent code that
 had never seen a compiler.
 
+### The launcher talks to Modrinth — 2026-10-25
+
+Typing `sodium` into the egui search box returned real results on the VM: `Sodium Plus` by
+NoSaaBeHappy at 2.92M downloads, `Sodium Extra` at 161.6K, `Essential Sodium` at 138.5K,
+`Sodium Fps+` at 53.9K, each with its own icon, author line and summary. The whole chain is
+live now: field → `search.request` → worker → `sift_net::download_file` →
+`ModrinthSearchResponse` → cards → `images` → texture.
+
+**Design rules that made it work, both worth keeping:**
+
+- **One request in flight, last answer wins.** A reply for a query the reader has moved past is
+  dropped rather than shown: results under the wrong search box are worse than a half-second
+  more of the old list.
+- **The URL and the response shape live in the client crate, not here.** `search_url_parts`
+  and `ModrinthSearchResponse` are the one place each spelling exists; this module is a thread,
+  two channels and a state machine.
+
+**A formatting fact the reference settled:** its cards print millions with two decimals
+(`19.38M`, `15.36M`, `11.53M`) and thousands with one (`2.7K`). My first rule dropped to no
+decimals above ten million, and the test beside it caught that on the first run.
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-21 | Discover cards (live) | the tag pills are empty for search results: the hit carries `categories` and the decoder maps loaders, but the card is handed none |
+| E-22 | Discover cards (live) | the right-hand stats row shows a stray calendar glyph because `updated` is empty for a hit (the search API has no such field) |
+| E-23 | Discover toolbar | the count reads the reference's `1 – 946` regardless of what was searched; it should come from `total_hits` |
+| E-24 | Discover cards (live) | a long summary is clipped mid-word instead of being ellipsised, which the reference does |
+
+**Rig note:** without a window manager, `xdotool windowactivate` fails (`_NET_ACTIVE_WINDOW`
+unsupported) and `xdotool type --window` sends synthetic events that winit ignores. Real XTEST
+typing works once `xdotool windowfocus --sync <id>` has set the input focus. That is the third
+input-plumbing lesson this rig has taught, and it is now written down.
+
 ### Open after this pass
 
 | # | Region | What differs |
