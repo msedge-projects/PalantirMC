@@ -38,10 +38,15 @@
 //! `cardHeight = cardWidth + remSize * 3.375` (lines 130-134), with `minWidth` chosen by
 //! `windowWidth < 1280 ? 8rem : 10rem` (line 124). At a fixed window those resolve to
 //! fixed numbers, so this page re-evaluates the same expressions from the rect the shell
-//! hands it and the real window width; nothing is sampled from a screenshot. At 1440 the
-//! `windowWidth < 1280` test is false, so the **10rem (160-point)** minimum applies —
-//! that breakpoint is the whole reason the count is five rather than six below. The tests
-//! at the bottom pin the 1440 and 960 cases, including the identity
+//! hands it and the real window width; nothing is sampled from a screenshot.
+//!
+//! **The grid at 1440.** The shell's content column is 996 points
+//! (`PANEL_LEFT - CONTENT_LEFT - 16`, `pages/mod.rs:39-49`), so the page's 24-point insets
+//! leave 948. At a 1440 window `windowWidth < 1280` is false, so the **10rem
+//! (160-point)** minimum applies; `floor((948 + 12) / (160 + 12)) = 5` columns of 180
+//! points, and `2 * 24 + 5 * 180 + 4 * 12 = 996`. The 8rem branch is what the 960-point
+//! window takes, which is why that case below is three 148-point cards. The tests pin
+//! both, including the identity
 //! `2 * padding + columns * cardWidth + (columns - 1) * gap == pageWidth`.
 //!
 //! Each measurement carries its `file:line` at the constant. The colours are the tokens
@@ -118,12 +123,12 @@ const SELECT_TRAILING_GAP: f32 = 6.0;
 const DIVIDER_HEIGHT: f32 = 24.0;
 
 /// The view-mode segmented control's width: two 32-point segments inside a 36-point
-/// control at 2 points of inset. The reference stores this mode as the
+/// control at 2 points of inset, so 2 + 32 + 32 + 2. The reference stores this mode as the
 /// `compact_instance_cards` flag (`instance-group/index.vue:57,124`) rather than as a
 /// toolbar control, whose setting copy is `app.appearance-settings.compact-mode.title`
 /// (`BehaviorSettings.vue:91-97`); the two segments are the grid and row shapes that flag
 /// selects between.
-const VIEW_TOGGLE_WIDTH: f32 = 72.0;
+const VIEW_TOGGLE_WIDTH: f32 = 68.0;
 
 // ---------------------------------------------------------------------------
 // Grid geometry — the source's own expressions
@@ -277,14 +282,15 @@ pub fn draw(
     // toolbar, so the scroll area starts at the grid. `gridWidth` is measured from the
     // real content box there (`useElementSize(instanceGridContent)`,
     // `instance-group/index.vue:92`), which is what the page rect minus padding is here.
-    // The grid is laid out from the width it is actually given. The second argument was a
-    // viewport width used for a breakpoint; egui 0.36 has no `Context::screen_rect`, and the
-    // column's own width is the honest number anyway -- a breakpoint taken from the viewport
-    // would be wrong for a panel that is later resized.
-    let grid = grid_layout(grid_rect.width(), grid_rect.width());
+    // The second argument is the source's `windowWidth` (`useWindowSize()`,
+    // `instance-group/index.vue:93`): the `windowWidth < 1280 ? 8 : 10` ternary picks the
+    // minimum before the columns are counted, so it cannot be the grid's own width --
+    // passing 948 at 1440 would take the 8rem branch the source never takes there.
+    // egui 0.36 calls the window's content rectangle `Context::content_rect`.
+    let grid = grid_layout(rect.width(), ui.ctx().content_rect().width());
     let rows = instances.len().div_ceil(grid.columns.max(1));
-    let content_height = (rows as f32 * (grid.card_height + GRID_GAP) - GRID_GAP)
-        .max(GRID_MIN_HEIGHT);
+    let content_height =
+        (rows as f32 * (grid.card_height + GRID_GAP) - GRID_GAP).max(GRID_MIN_HEIGHT);
 
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(grid_rect));
     egui::ScrollArea::vertical()
@@ -293,8 +299,10 @@ pub fn draw(
             // Reserve the full grid height so the scroll area knows what is below the
             // fold. The cards are then painted at the source's absolute positions
             // (`instance-group/index.vue:164-171`) inside that allocation.
-            let (area, _) =
-                ui.allocate_exact_size(egui::vec2(grid_rect.width(), content_height), Sense::hover());
+            let (area, _) = ui.allocate_exact_size(
+                egui::vec2(grid_rect.width(), content_height),
+                Sense::hover(),
+            );
             let painter = ui.painter();
             for (index, entry) in instances.iter().enumerate() {
                 let column = index % grid.columns;
@@ -320,12 +328,7 @@ pub fn draw(
 
 /// Draw the heading, its count, and the two selects with the grid/list toggle. Returns the
 /// y where the grid begins.
-fn heading_and_controls(
-    painter: &egui::Painter,
-    rect: Rect,
-    theme: &Theme,
-    count: usize,
-) -> f32 {
+fn heading_and_controls(painter: &egui::Painter, rect: Rect, theme: &Theme, count: usize) -> f32 {
     let heading_at = egui::pos2(rect.left() + PAGE_PADDING, rect.top() + PAGE_PADDING);
     // `h2.m-0.text-2xl.font-semibold.text-contrast` (`library/index.vue:268`).
     let heading = painter.text(
@@ -339,11 +342,8 @@ fn heading_and_controls(
     // The count is the group header's `TagItem` (`instance-group/index.vue:571-576`):
     // `px-2 py-1 text-sm rounded-full`, so 24 points tall with 8-point padding.
     let count_text = count.to_string();
-    let count_galley = painter.layout_no_wrap(
-        count_text.clone(),
-        fonts::label(14.0),
-        theme.SECONDARY,
-    );
+    let count_galley =
+        painter.layout_no_wrap(count_text.clone(), fonts::body(14.0), theme.SECONDARY);
     let pill = Rect::from_min_size(
         egui::pos2(
             heading.right() + CONTROL_GAP,
@@ -362,7 +362,7 @@ fn heading_and_controls(
         pill.center(),
         Align2::CENTER_CENTER,
         count_text,
-        fonts::label(14.0),
+        fonts::body(14.0),
         theme.SECONDARY,
     );
 
@@ -409,11 +409,8 @@ fn select(
     glyph: Glyph,
     label: &str,
 ) -> Rect {
-    let label_galley = painter.layout_no_wrap(
-        label.to_owned(),
-        fonts::semibold(14.0),
-        theme.CONTRAST,
-    );
+    let label_galley =
+        painter.layout_no_wrap(label.to_owned(), fonts::semibold(14.0), theme.CONTRAST);
     let width = 2.0 * SELECT_PADDING
         + SELECT_GLYPH
         + SELECT_INNER_GAP
@@ -427,7 +424,10 @@ fn select(
         painter,
         glyph,
         Rect::from_center_size(
-            egui::pos2(rect.left() + SELECT_PADDING + SELECT_GLYPH / 2.0, rect.center().y),
+            egui::pos2(
+                rect.left() + SELECT_PADDING + SELECT_GLYPH / 2.0,
+                rect.center().y,
+            ),
             Vec2::splat(SELECT_GLYPH),
         ),
         theme.BASE,
@@ -446,7 +446,10 @@ fn select(
         painter,
         Glyph::ChevronDown,
         Rect::from_center_size(
-            egui::pos2(rect.right() - SELECT_PADDING - SELECT_GLYPH / 2.0, rect.center().y),
+            egui::pos2(
+                rect.right() - SELECT_PADDING - SELECT_GLYPH / 2.0,
+                rect.center().y,
+            ),
             Vec2::splat(16.0),
         ),
         theme.SECONDARY,
@@ -458,17 +461,11 @@ fn select(
 /// tab uses (`BUTTON_BG_SELECTED` at `--color-brand-highlight`, `variables.scss:355`), and
 /// it shows the grid because this page draws the grid layout.
 fn view_toggle(painter: &egui::Painter, min: egui::Pos2, theme: &Theme) {
-    let control = Rect::from_min_size(
-        min,
-        egui::vec2(VIEW_TOGGLE_WIDTH, CONTROL_HEIGHT),
-    );
+    let control = Rect::from_min_size(min, egui::vec2(VIEW_TOGGLE_WIDTH, CONTROL_HEIGHT));
     painter.rect_filled(control, 12, theme.BUTTON_BG);
 
     let segment = 32.0;
-    let selected = Rect::from_min_size(
-        control.min + egui::vec2(2.0, 2.0),
-        Vec2::splat(segment),
-    );
+    let selected = Rect::from_min_size(control.min + egui::vec2(2.0, 2.0), Vec2::splat(segment));
     painter.rect_filled(selected, 10, theme.BUTTON_BG_SELECTED);
     icons::draw(
         painter,
@@ -530,8 +527,7 @@ fn min_card_width(window_width: f32) -> f32 {
 fn grid_layout(page_width: f32, window_width: f32) -> Grid {
     let grid_width = (page_width - 2.0 * PAGE_PADDING).max(0.0);
     let columns = column_count(grid_width, min_card_width(window_width));
-    let card_width =
-        (grid_width - GRID_GAP * (columns.saturating_sub(1)) as f32) / columns as f32;
+    let card_width = (grid_width - GRID_GAP * (columns.saturating_sub(1)) as f32) / columns as f32;
     Grid {
         columns,
         card_width,
@@ -579,33 +575,33 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, entry: &Entry, 
         .name
         .chars()
         .next()
-        .map(|first| first.to_uppercase().collect())
+        .map(|first| first.to_uppercase().collect::<String>())
         .unwrap_or_default();
     painter.text(
         tile.center(),
         Align2::CENTER_CENTER,
         initial,
-        fonts::title((tile_side * 0.28).clamp(24.0, 56.0)),
+        fonts::title((tile_side * 0.28).clamp(12.0, 56.0)),
         theme.SECONDARY,
     );
 
     // The play control: 48-point slot at 6 inside the tile, holding the 40-point `lg`
     // IconButton (`instance-card-view.vue:68`, `instance-card.vue:309`).
-    let play_center = egui::pos2(
-        tile.right() - 6.0 - 24.0,
-        tile.bottom() - 6.0 - 24.0,
-    );
+    let play_center = egui::pos2(tile.right() - 6.0 - 24.0, tile.bottom() - 6.0 - 24.0);
     painter.circle_filled(play_center, 20.0, theme.BRAND);
     icons::draw(
         painter,
         Glyph::Play,
-        Rect::from_center_size(play_center, Vec2::splat(18.0)),
+        Rect::from_center_size(play_center, Vec2::splat(20.0)),
         theme.ACCENT_CONTRAST,
     );
 
     let text_left = rect.left() + CARD_PADDING + 2.0; // `px-0.5` (`instance-card-view.vue:74`)
-    let text_width = rect.width() - 2.0 * (CARD_PADDING + 2.0);
+    let text_width = (rect.width() - 2.0 * (CARD_PADDING + 2.0)).max(1.0);
     let name_top = tile.bottom() + CARD_STACK_GAP;
+    // The brief's 17/13 pair: one point above the reference's `text-base` name and one
+    // below its `text-sm` loader line (`instance-card-view.vue:80,87`), which is the
+    // card-title/body pair this crate's instance rows already use (`pages/home.rs:172-185`).
     clipped_line(
         painter,
         Rect::from_min_size(
@@ -613,7 +609,7 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, entry: &Entry, 
             egui::vec2(text_width, NAME_LINE),
         ),
         &entry.name,
-        fonts::title(17.0),
+        fonts::semibold(17.0),
         theme.CONTRAST,
     );
 
@@ -631,7 +627,7 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, entry: &Entry, 
             egui::vec2(text_width, META_LINE),
         ),
         &loader,
-        fonts::body(13.0),
+        fonts::label(13.0),
         theme.SECONDARY,
     );
 
@@ -655,13 +651,7 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, entry: &Entry, 
 /// Draw one line of text, clipped to its own box. A long name ends at the card's edge
 /// rather than wrapping into the loader line; the reference truncates the same two lines
 /// (`instance-card-view.vue:80,87`).
-fn clipped_line(
-    painter: &egui::Painter,
-    rect: Rect,
-    text: &str,
-    font: egui::FontId,
-    ink: Color32,
-) {
+fn clipped_line(painter: &egui::Painter, rect: Rect, text: &str, font: egui::FontId, ink: Color32) {
     let galley = painter.layout(text.to_owned(), font, ink, rect.width());
     painter.with_clip_rect(rect).galley(rect.min, galley, ink);
 }
@@ -688,8 +678,11 @@ fn empty_state(painter: &egui::Painter, rect: Rect, theme: &Theme) {
     let text_gap = 8.0; // `gap-2` (`WelcomeScreen.vue:94`)
     let body_line = 24.0; // `leading-6` (`WelcomeScreen.vue:98`)
     let button_height = 40.0; // `size="lg"` -> `h-10` (`WelcomeScreen.vue:106`, `ButtonFrame.vue:32`)
-    let total = plate_side + block_gap + HEADING_LINE + text_gap + body_line + block_gap
-        + button_height;
+    let total =
+        plate_side + block_gap + HEADING_LINE + text_gap + body_line + block_gap + button_height;
+    if area.height() < total || area.width() < 1.0 {
+        return;
+    }
     let top = area.center().y - total / 2.0;
 
     let plate = Rect::from_center_size(
@@ -703,6 +696,9 @@ fn empty_state(painter: &egui::Painter, rect: Rect, theme: &Theme) {
         Stroke::new(1.0, theme.DIVIDER),
         egui::StrokeKind::Inside,
     );
+    // The reference's mark is `modrinth-social-icon.png` on the 100-point plate
+    // (`WelcomeScreen.vue:92`); this launcher has no uploaded mark texture yet, so the
+    // library glyph stands in on the same plate.
     icons::draw(
         painter,
         Glyph::Library,
@@ -786,11 +782,12 @@ fn now_millis() -> i64 {
 /// years.
 ///
 /// The words are the reference's own: `app.instance.card.played` supplies
-/// `Played {relativeTime}` (`locales/en-US/index.json:641`) and `app.instance.card.
-/// never-played` supplies `Never played` (`:635`). The unit phrases are what
-/// `Intl.RelativeTimeFormat` constructs for en-US at `style: 'long'` and `numeric:
-/// 'auto'` — the settings `how-ago.ts:57-66` passes to it — so the singular day, week and
-/// month are `yesterday`, `last week` and `last month`, exactly as the app prints them.
+/// `Played {relativeTime}` (`locales/en-US/index.json:641`) and
+/// `app.instance.card.never-played` supplies `Never played` (`:635`). The unit phrases are
+/// what `Intl.RelativeTimeFormat` constructs for en-US at `style: 'long'` and
+/// `numeric: 'auto'` — the settings `how-ago.ts:57-66` passes to it — so the singular day,
+/// week and month are `yesterday`, `last week` and `last month`, exactly as the app prints
+/// them.
 fn last_played_label(millis: i64, now: i64) -> String {
     if millis <= 0 {
         return NEVER_PLAYED.to_owned();
@@ -857,11 +854,17 @@ mod tests {
     /// in the middle of each bucket so the assertion is about the unit, not its edge.
     #[test]
     fn the_relative_ladder_reads_minutes_hours_days_weeks_and_months() {
-        assert_eq!(last_played_label(NOW - 5 * MINUTE, NOW), "Played 5 minutes ago");
+        assert_eq!(
+            last_played_label(NOW - 5 * MINUTE, NOW),
+            "Played 5 minutes ago"
+        );
         assert_eq!(last_played_label(NOW - 3 * HOUR, NOW), "Played 3 hours ago");
         assert_eq!(last_played_label(NOW - 4 * DAY, NOW), "Played 4 days ago");
         assert_eq!(last_played_label(NOW - 2 * WEEK, NOW), "Played 2 weeks ago");
-        assert_eq!(last_played_label(NOW - 3 * MONTH, NOW), "Played 3 months ago");
+        assert_eq!(
+            last_played_label(NOW - 3 * MONTH, NOW),
+            "Played 3 months ago"
+        );
     }
 
     /// `how-ago.ts` asks `Intl.RelativeTimeFormat` for `numeric: 'auto'`, so the singular
@@ -879,21 +882,23 @@ mod tests {
     /// days, 7 is weeks; 3 weeks is weeks, 4 is months.
     #[test]
     fn the_bucket_edges_are_the_composables() {
-        assert_eq!(last_played_label(NOW - 59 * MINUTE, NOW), "Played 59 minutes ago");
-        assert_eq!(last_played_label(NOW - 60 * MINUTE, NOW), "Played 1 hour ago");
+        assert_eq!(
+            last_played_label(NOW - 59 * MINUTE, NOW),
+            "Played 59 minutes ago"
+        );
+        assert_eq!(
+            last_played_label(NOW - 60 * MINUTE, NOW),
+            "Played 1 hour ago"
+        );
         assert_eq!(last_played_label(NOW - 6 * DAY, NOW), "Played 6 days ago");
         assert_eq!(last_played_label(NOW - 7 * DAY, NOW), "Played last week");
         assert_eq!(last_played_label(NOW - 3 * WEEK, NOW), "Played 3 weeks ago");
-        assert_eq!(
-            last_played_label(NOW - 4 * WEEK, NOW),
-            "Played last month"
-        );
+        assert_eq!(last_played_label(NOW - 4 * WEEK, NOW), "Played last month");
     }
 
     /// The 16px root (`instance-group/index.vue:121`) and the shell's content column
     /// (`pages/mod.rs:39-49`: `PANEL_LEFT - CONTENT_LEFT - 16`). At 960 the same furniture
     /// is assumed, so the column is 960 - 64 - 340 - 24 - 16.
-    #[cfg(test)]
     fn page_width_at(window_width: f32) -> f32 {
         window_width
             - crate::geometry::RAIL
@@ -913,7 +918,10 @@ mod tests {
 
         let grid = grid_layout(page, crate::geometry::WINDOW.0);
         assert_eq!(grid.columns, 5, "floor((948 + 12) / (160 + 12))");
-        assert!((grid.card_width - 180.0).abs() < 0.001, "948 / 5 with four 12-point gaps");
+        assert!(
+            (grid.card_width - 180.0).abs() < 0.001,
+            "948 / 5 with four 12-point gaps"
+        );
 
         let used = 2.0 * PAGE_PADDING
             + grid.columns as f32 * grid.card_width

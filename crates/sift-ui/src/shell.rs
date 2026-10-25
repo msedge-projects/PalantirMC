@@ -25,10 +25,10 @@ pub enum Rail {
     Home,
     /// Find modpacks and content.
     Discover,
-    /// The installed instances.
-    Library,
-    /// Files the launcher knows about.
-    Files,
+    /// Skins: the player's own and the catalogue's.
+    Skins,
+    /// Screenshots taken in any instance.
+    Screenshots,
     /// Servers the launcher knows about.
     Servers,
 }
@@ -38,8 +38,8 @@ impl Rail {
     pub const ALL: [Rail; 5] = [
         Rail::Home,
         Rail::Discover,
-        Rail::Library,
-        Rail::Files,
+        Rail::Skins,
+        Rail::Screenshots,
         Rail::Servers,
     ];
 
@@ -48,8 +48,8 @@ impl Rail {
         match self {
             Rail::Home => "Home",
             Rail::Discover => "Discover modpacks",
-            Rail::Library => "Instances",
-            Rail::Files => "Files",
+            Rail::Skins => "Skins",
+            Rail::Screenshots => "Screenshots",
             Rail::Servers => "Servers",
         }
     }
@@ -59,34 +59,11 @@ impl Rail {
         match self {
             Rail::Home => Glyph::Home,
             Rail::Discover => Glyph::Compass,
-            Rail::Library => Glyph::Library,
-            Rail::Files => Glyph::Folder,
+            Rail::Skins => Glyph::Shirt,
+            Rail::Screenshots => Glyph::Image,
             Rail::Servers => Glyph::Server,
         }
     }
-}
-
-/// What the shell is showing, and what is moving.
-pub struct Shell {
-    /// The selected rail destination.
-    pub rail: Rail,
-    /// The hovered rail destination, if any. A press animates between the two, which is
-    /// why this is state rather than a per-frame read.
-    hovered: Option<Rail>,
-    /// fastframe's scroll state: the wheel step, the touchpad scale and the glide.
-    scrolling: fastframe_scroll::Scrolling,
-    /// The colour scheme, from the generated tokens.
-    pub theme: Theme,
-    /// Project icons, fetched off the frame thread and cached as textures.
-    icons: crate::images::Images,
-    /// The instances on disk, read when the shell starts and when the rail returns to Home.
-    instances: Vec<crate::data::Entry>,
-    /// The project whose page is open, if any. `None` means the rail's own page is showing.
-    open_project: Option<crate::pages::project::Project>,
-    /// The open project's tab.
-    project_state: crate::pages::project::State,
-    /// The Discover search field: its text, its focus and its blink phase.
-    search: crate::widgets::search::Search,
 }
 
 impl Default for Shell {
@@ -144,18 +121,6 @@ impl Shell {
                 }
                 None => false,
             }
-        } else if self.rail == Rail::Library {
-            let rect = crate::pages::Page::Library.rect();
-            ui.painter().rect_filled(rect, 0, self.theme.BG);
-            let theme = self.theme;
-            let result = crate::pages::library::draw(
-                ui,
-                rect,
-                &theme,
-                &mut self.icons,
-                &self.instances,
-            );
-            result
         } else if self.rail == Rail::Home {
             let rect = crate::pages::Page::Home.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);

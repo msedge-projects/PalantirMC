@@ -38,7 +38,7 @@ impl Page {
             Page::Discover => "Discover modpacks",
             // A project page's breadcrumb is its own name, which the shell supplies.
             Page::Project => "Project",
-            Page::Library => "Instances",
+            Page::Library => "Library",
         }
     }
 
