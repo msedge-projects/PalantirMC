@@ -13,7 +13,7 @@
 //! ui.painter().text(pos, align, "Mods", fonts::semibold(14.0), colour);
 //! ```
 //!
-//! The files are the same Inter TTFs the iced build embeds. They live in the iced crate's
+//! The files are the same Inter TTFs the iced build embedded, kept in `assets/fonts/` now that
 //! assets today; when that crate is deleted this module's `include_bytes!` paths move with
 //! them, which is why the path is written once, here.
 
@@ -40,11 +40,11 @@ pub fn install(ctx: &eframe::egui::Context) {
 
     for (family, file) in FACES {
         let bytes: &[u8] = match file {
-            "Inter-400.ttf" => include_bytes!("../../sift-desktop/assets/fonts/Inter-400.ttf"),
-            "Inter-500.ttf" => include_bytes!("../../sift-desktop/assets/fonts/Inter-500.ttf"),
-            "Inter-600.ttf" => include_bytes!("../../sift-desktop/assets/fonts/Inter-600.ttf"),
-            "Inter-700.ttf" => include_bytes!("../../sift-desktop/assets/fonts/Inter-700.ttf"),
-            "Inter-800.ttf" => include_bytes!("../../sift-desktop/assets/fonts/Inter-800.ttf"),
+            "Inter-400.ttf" => include_bytes!("../../../assets/fonts/Inter-400.ttf"),
+            "Inter-500.ttf" => include_bytes!("../../../assets/fonts/Inter-500.ttf"),
+            "Inter-600.ttf" => include_bytes!("../../../assets/fonts/Inter-600.ttf"),
+            "Inter-700.ttf" => include_bytes!("../../../assets/fonts/Inter-700.ttf"),
+            "Inter-800.ttf" => include_bytes!("../../../assets/fonts/Inter-800.ttf"),
             _ => continue,
         };
         definitions
