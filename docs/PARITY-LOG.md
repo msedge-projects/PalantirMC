@@ -350,6 +350,35 @@ arrives as `install::Progress` on a channel, the work-area question arrives as a
 the process spawn is a caller's `Command` -- so the egui shell wired a launch with a worker, a
 channel and a state machine, and no part of `sift-game` knows what a window is.
 
+### Six pages from the release build — 2026-10-25
+
+Every page captured from `target/release/SiftUi.exe`, not the debug build, in one run:
+Home, Discover, Project, Skins, Screenshots, Servers. What the contact sheet shows is a
+consistent window: the mark in the title bar, `Sift Launcher` beside it, the reference's rail
+with the current destination lit, the shared panel with Getting started, News and the hosting
+banner, and each page's own content in its column.
+
+**What is now consistent across all six, and was not a day ago:** the product name and mark,
+the rail's five destinations, the panel's three sections, the card radii and gaps, and the page
+title in the breadcrumb.
+
+**What the captures still show as owed**, in the order a reader would notice:
+
+| # | Page | What differs from the reference |
+| --- | --- | --- |
+| E-33 | Home | the row has a play pill but no menu (edit, duplicate, delete, open folder), and the reference's `Jump back in` also lists recently played worlds |
+| E-34 | Discover | the two selects cycle their value instead of opening a dropdown; the reference's are popovers with five and four options |
+| E-35 | Project | the description card holds text only — the reference's has an embedded gallery image, and its sidebar carries links, tags, creators and details below the compatibility block |
+| E-36 | Skins | no preview column, no add-skin dropzone, no `Default skins` section (E-25 to E-27 still open) |
+| E-37 | Screenshots | nine sample shots; the reference's empty state is what its own account shows, so the populated layout is still unverified against it |
+| E-38 | Servers | sample servers; the reference shows its empty hosting state |
+
+**A process note worth more than any single row above:** a subagent rewrote
+`tools/parity/pages.json` and `capture.py` while these captures were being taken, in a schema
+that dropped `project`, `skins`, `screenshots` and `servers` from the page list. The captures
+in this entry had already run, but the next session's would not have. The rewrite is reverted;
+one harness, one schema, and the page list is the authority on which pages exist.
+
 ### Open after this pass
 
 | # | Region | What differs |

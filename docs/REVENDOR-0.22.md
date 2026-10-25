@@ -3,7 +3,7 @@
 What changed between `vendor/modrinth-app` and the v0.22.0 tree in
 `.scratch/modrinth-0.22/`, what it costs a launcher that must look identical, and the
 order to re-run the generators in. Every number was read out of the two trees with
-`Get-FileHash`, `Compare-Object` and `python -c`; no cargo and no git were run.
+`Get-FileHash`, `git diff --no-index` and `gh api`; no cargo, no commit and no push.
 
 | | |
 | --- | --- |
@@ -12,10 +12,15 @@ order to re-run the generators in. Every number was read out of the two trees wi
 | Release record | `.scratch/rel22.json` is commit `e7757b14ed04e824ac7e8b8b05652d4290df721a`, "chore: changelog app 0.22.0 (#8073)", 2026-10-21T22:17:07Z; its patch adds the app 0.22.0 entry to `packages/blog/changelog.ts` |
 | Diff listing | `.scratch/diff-22.tsv`, 431 rows, `status<TAB>tree<TAB>path`, three trees only |
 
-It carries no tag object, and the commit the tarball was cut from (`51e57af`) cannot be checked against a tag without network or git: **tag-to-commit could not
-be determined here**. Paths below use the vendor tree's flattened names; the new tree's
-equivalents are `apps/app-frontend`, `packages/ui`, `packages/assets`,
-`packages/tooling-config/tailwind`.
+`v0.22.0` is an **annotated** tag, so the tarball's directory name is the tag object's
+sha, not the commit's — which is the whole explanation for `modrinth-code-51e57af`:
+`gh api repos/modrinth/code/git/ref/tags/v0.22.0` answers
+`object=51e57afd9de95bd5df2f8a7119afc06f7c820491  type=tag`, and
+`gh api repos/modrinth/code/commits/v0.22.0` answers `e7757b1…`. The pin `UPSTREAM.md`
+has to record is therefore the **commit** `e7757b14ed04e824ac7e8b8b05652d4290df721a`,
+reachable as `v0.22.0`; `modrinth-code-51e57af/` is that commit's tree. Paths below use
+the vendor tree's flattened names; the new tree's equivalents are `apps/app-frontend`,
+`packages/ui`, `packages/assets`, `packages/tooling-config/tailwind`.
 
 ## 1. Summary of the file diff
 
@@ -30,19 +35,14 @@ equivalents are `apps/app-frontend`, `packages/ui`, `packages/assets`,
 By extension (M / A / D): `.vue` 93 / 74 / 45, `.ts` 63 / 43 / 18, `.json` 69 / 0 / 0,
 `.svg` 0 / 18 / 0, `.js` 4 / 0 / 0, `.jsonc` 1 / 0 / 0, `.md` 1 / 1 / 0, `.scss` 1 / 0 / 0.
 
-What matters to a launcher that must look identical:
-
-| Matters | Rows | Why |
-| --- | --- | --- |
-| `assets/styles/classes.scss` | 1 M | the only stylesheet that changed (section 2) |
-| `assets/icons/*.svg`, `assets/generated-icons.ts` | 18 A, 1 M | 18 new glyphs the v0.22 UI draws (section 4) |
-| `app-frontend/src/locales/**`, `ui/src/locales/**` | 33 M, 32 M | every visible string (section 5) |
-| `.vue` under `app-frontend/src` and `ui/src` | 212 (93 M, 74 A, 45 D) | shell, pages, settings modals, widgets (sections 3, 6) |
-
-Does not matter (no pixels): `ui/src/styles/*.css` and
-`tooling-config/tailwind-preset.ts` (0 rows, byte-identical per section 2),
-`app-frontend/src/generated/app-events/**` (7 M, 3 D postcard codecs), `package.json`
-/ `wrangler.jsonc` / `AGENTS.md` / `README.md`, `ui/src/stories/**` (Storybook only).
+What matters to a launcher that must look identical: `assets/styles/classes.scss`
+(1 M, the only stylesheet that changed, §2); `assets/icons/*.svg` +
+`assets/generated-icons.ts` (18 A, 1 M, §4); the two `locales/**` trees (33 M, 32 M,
+§5); and the 212 `.vue` files under `app-frontend/src` and `ui/src` (93 M, 74 A, 45 D —
+shell, pages, settings modals, widgets, §3 and §6). What does not: `ui/src/styles/*.css`
+and `tooling-config/tailwind-preset.ts` (byte-identical, §2),
+`app-frontend/src/generated/app-events/**` (7 M, 3 D postcard codecs), and
+`ui/src/stories/**` (Storybook only).
 
 ## 2. Design tokens
 
@@ -81,7 +81,7 @@ matching lines old against 1,823 new.
 
 | File | Old | New |
 | --- | --- | --- |
-| `ui/src/components/base/Toggle.vue` | track and thumb both `transition-all duration-200` | track `transition-[transform,background-color,width,height,margin] duration-200`, thumb `transition-[background-color,border-color,opacity] duration-200` |
+| `ui/src/components/base/Toggle.vue` | track and thumb both `transition-all duration-200` | track (the `<button>`): `transition-[background-color,border-color,opacity] duration-200`; thumb (the `<span>`): `transition-[transform,background-color,width,height,margin] duration-200` |
 | `ui/src/components/modal/NewModal.vue` | (none) | WAAPI resize `{ duration: 200, easing: 'ease-in-out' }`, cancelled by `resetResizeAnimation()` |
 | `ui/src/components/base/Combobox.vue` | `<Transition name="floating-expand">` | `<Transition name="floating-expand" :css="animateDropdown">`; story `WithoutDropdownAnimation` added |
 | `ui/src/components/servers/ServerManageStats.vue` | `transition-transform duration-100 hover:brightness-125 active:scale-95` | (removed) |
@@ -92,15 +92,15 @@ matching lines old against 1,823 new.
 | `app-frontend/.../settings-modal/settings-options-transition.vue` | `grid-template-rows 0.25s var(--ease-out-expo), opacity 0.2s ease-out`; `transition: none` | identical, moved to `app-frontend/src/features/instances/settings-modal/` |
 | `app-frontend/src/components/ui/Breadcrumbs.vue` (deleted) | `@keyframes breadcrumb-scroll` | same keyframes, moved to `app-frontend/src/app/shell/title-bar/breadcrumbs.vue` |
 
-No existing duration changed value. What disappeared went with two rebuilt surfaces:
-`backups.vue` (200ms, 200ms, 500ms, 200ms) and `ServerManageStats.vue` (100ms). What
-appears is 80ms, 100ms, 150ms, 200ms (the same 200ms G54 already asserts for the
-modal), 250ms, 300ms, 400ms and 1.25s, all on
-`TAILWIND_DURATION_MS = [0, 75, 100, 150, 200, 300, 500, 700, 1000]` at
-`tools/gen_theme.py:137`. Easing tokens are untouched: `--ease-out-expo` is
+No existing duration changed value. What disappeared went with two rebuilt surfaces
+(`backups.vue`: 200ms, 200ms, 500ms, 200ms; `ServerManageStats.vue`: 100ms). What appears
+is 80ms, 100ms, 150ms, 200ms (the same 200ms G54 asserts for the modal), 250ms, 300ms,
+400ms and 1.25s, all on `TAILWIND_DURATION_MS = [0, 75, 100, 150, 200, 300, 500, 700,
+1000]` at `tools/gen_theme.py:137`. Easing tokens are untouched — `--ease-out-expo` is
 `cubic-bezier(0.16, 1, 0.3, 1)` in the byte-identical `tailwind-utilities.css`, so the
-four curves in `theme_gen.rs` do not move, and the only new curve in the tree is
-`cubic-bezier(0.4, 0, 0.2, 1)` in the new `SegmentedControl.vue`. For the +-16ms budget: **every duration this launcher already draws is unchanged.**
+four curves in `theme_gen.rs` do not move; the only new curve is
+`cubic-bezier(0.4, 0, 0.2, 1)` in the new `SegmentedControl.vue`. For the ±16ms budget:
+**every duration this launcher already draws is unchanged.**
 
 ## 4. Icons
 
@@ -157,7 +157,41 @@ to 0 on any path change except `Home`; it is replaced by the new
 | Page files | - | no `src/pages/**` added; 13 deleted (all of `pages/instance/components/settings-modal/`, moved to `features/`); 18 modified, including `instance/layout.vue`, `Index.vue`, `Browse.vue`, `Skins.vue`, `Servers.vue`, `User.vue`, `hosting/manage/Backups.vue`, `project/{Index,Version}.vue`, `instance/content/index.vue` |
 | `ui` layouts and widgets | `layouts/wrapped/hosting/manage/backups.vue` | 12 layouts added, 1 removed: `backups/{index,history-table,slot-card,use-focused-backup}`, `shared/server-settings/pages/{backups,support}.vue`, `shared/user-profile/components/{restrict-user,force-password-reset,lock-user,reset-2fa}-modal.vue`, `shared/installation-settings/{ContentDiffList.vue,utils.ts}`; 17 widgets added, including `base/{InlineValidationMessage,SegmentedControl,FullImage,PageLoadingBar}.vue`, `modal/update-all-modal/*` (9 files), `servers/backups/*`, `servers/{LockServerModal,ServerStatCard}.vue` |
 
+Both settings dialogs are drawn by the same component, and that component's own geometry
+changed — which matters more than the tab counts, because the launcher draws the box:
+
+| `ui/src/components/modal/TabbedModal.vue` | `8966b5e` | v0.22.0 |
+| --- | --- | --- |
+| dialog surface | inherited from `NewModal` | `!rounded-[20px] !bg-surface-3` — **20px corner, was not set** |
+| sidebar column | `minmax(12.5rem,18rem)` = 200–288 px, elastic | `250px` fixed |
+| dialog body height | `min-h-[min(65vh,600px)]` | `h-[min(65vh,640px)]` |
+| grid padding | `p-6 pb-3 pr-0` on the grid | `p-4` on the sidebar, `px-6 pt-6` on the content |
+| tab pill | `rounded-xl px-4 py-2` (12 px) | `rounded-[14px] px-4 py-2.5 text-base leading-5` |
+| tab icon | `w-4 h-4` | `size-5` |
+| selected / idle pill | `bg-button-bgSelected text-button-textSelected`; `text-button-text hover:bg-button-bg` | `bg-[color-mix(in_srgb,var(--color-brand)_30%,transparent)] text-brand`; `text-primary hover:bg-surface-4` |
+| category label | `px-4 pb-1 pt-2 text-xs font-bold uppercase tracking-wide` | `pb-1.5 text-sm font-extrabold uppercase leading-5`, `mt-3` between groups |
+| scroll fade | `from-bg-raised`, `h-16` / `max-h-16` | `from-surface-3` / `from-surface-2`, `h-14` / `max-h-14` |
+| scrollbar | browser default | 4 px, `--surface-5` (new `<style scoped>`) |
+
+Both call sites also stop shrinking: `:width` / `:max-width` were
+`min(928px, calc(95vw - 10rem))`, now the literal `928px`, so only `NewModal`'s
+`max-width: min(var(--modal-max-width), calc(100% - 2 * var(--gap-lg)))` pulls the box in
+— at an 800 px window it is now 768 px where it was 600 px. `ui/src/components/base/Card.vue`
+and `app-frontend/src/components/ui/NavButton.vue` are byte-identical, so the card and the
+rail are untouched. `ui/src/components/base/Tabs.vue` gains a `size="large"` variant
+(`h-[42px] rounded-[14px] p-[3px]`, pill `rounded-xl px-3 text-base font-semibold`), a
+`wrap` prop and `color="gray"`; its default is unchanged (`h-[38px] rounded-xl p-0.5`, pill
+`rounded-[10px] px-2.5 text-sm font-medium`), so an existing tab strip needs no edit.
+
 ## 7. Re-vendor plan for this repository
+
+**Three of the tools below no longer exist, and the order under them is rewritten for the
+ones that do.** `tools/gen_theme.py`, `gen_text.py` and `gen_locale.py` were deleted in
+`ea8d724` (*"Stop the lint job asking for generators whose crate is gone"*); `db671d4`
+re-added `gen_icons.py` as the library `gen_icons_egui.py` imports. On disk 2026-10-25:
+`gen_icons.py`, `gen_icons_egui.py`, `gen_theme_egui.py`, `gen_tokens.py`,
+`lucide_source.py`, `gen_brand.py`, `make_fonts.py`. The table's right-hand column is
+still the useful half — those are the artefacts to look for, wherever they now land.
 
 Five tools read the vendored tree; a sixth mentions it only in prose:
 
@@ -176,31 +210,53 @@ generated either: it is the independent reader G46-G52 assert against.
 ### Order
 
 GATES.md records the chain at line 1781 as `gen_theme.py --check && gen_icons.py
---check && gen_text.py --check && gen_tokens.py --check`. Keep that order, and put
-the locale compiler after `gen_text.py`, whose module it imports.
+--check && gen_text.py --check && gen_tokens.py --check`. That is the *dependency*
+order and it still holds; three of those four files are gone, so the runnable chain is
+steps 2-3 below and then nothing until a text compiler is re-created.
 
 1. Copy the new tree into `vendor/modrinth-app` **keeping the flattened layout**
    (`apps/app-frontend` -> `app-frontend/`, `packages/ui` -> `ui/`, `packages/assets`
    -> `assets/`, `packages/tooling-config/tailwind/tailwind-preset.ts` ->
-   `tooling-config/tailwind-preset.ts`): the five readers hard-code those flat paths,
-   so a copy that keeps `apps/` and `packages/` breaks all of them. Rewrite
-   `UPSTREAM.md` in the same commit (481 / 869 / 579 / 1 files, 11.8 / 10.8 / 4.5 / 0
-   MB, 1,930 total against the recorded 1,857).
-2. `python tools/gen_theme.py` then `--check`. Expect the motion tables to change and
-   nothing else: `theme_gen.rs` records each declaration's path and text, and lines
-   1087-1088 name the moved `settings-options-transition.vue` under
-   `app-frontend/src/pages/instance/components/settings-modal/`, a path that no longer
-   exists, so the moved transition, the moved breadcrumb keyframes and every entry
-   added or dropped in section 3 rewrite lines. Palette, radii, gaps and curves cannot
-   move: their sheets are byte-identical.
-3. `python tools/gen_icons.py` then `--check`: +18 glyphs (313 -> 331 top-level SVGs).
-4. `python tools/gen_text.py` then `--check`: 3,846 -> 4,054 messages, so the `Key`
-   enum, the ICU helpers and every plural arm change.
-5. `python tools/gen_tokens.py` then `--check`. Expect **byte-identical**: it reads
-   only `variables.scss` and `defaults.scss`, both unchanged, so 189 tokens in each of
-   four modes stay 189.
-6. `python tools/gen_locale.py`, then `--check` and `--report`: 33 trees carrying
-   89,177 -> 95,812 leaves, so the sparse tables and the coverage ledger both change.
+   `tooling-config/tailwind-preset.ts`): the readers hard-code those flat paths, so a
+   copy that keeps `apps/` and `packages/` breaks all of them. Rewrite `UPSTREAM.md` in
+   the same commit: commit `e7757b1`, 481 / 869 / 579 / 1 files, 1,930 against the
+   recorded 1,857, and its "1857 lines each, empty diff" blob-hash check re-run rather
+   than re-typed.
+2. `python tools/gen_theme_egui.py --check` → `crates/sift-ui/src/theme.rs` (1,288 lines;
+   `OUT` at `gen_theme_egui.py:77`). This replaces `gen_theme.py`, whose
+   `crates/palantir-desktop/src/theme_gen.rs` went with its crate. Expect **no diff**: it
+   reads `assets/styles/{variables,defaults,classes}.scss` and
+   `ui/src/styles/tailwind-utilities.css`, identical except `classes.scss`'s two
+   `.markdown-body` hunks, which are `@apply` utilities rather than declarations. This is
+   the one prediction in the chain — `--check` is the test, and a diff here is a finding.
+   `theme_gen.rs`'s `file:line` keys move the same way if the moved
+   `settings-options-transition.vue` (now under `features/instances/settings-modal/`) is
+   keyed by path.
+3. `python tools/gen_icons.py --check`, then `python tools/gen_icons_egui.py` →
+   `crates/sift-ui/src/icons.rs` (72,318 lines). This is the step that **must** produce a
+   different file: +18 glyphs, 313 -> 331 top-level SVGs, 465 -> 483 imports.
+   `gen_icons.py:100` still points `OUT` at the deleted
+   `crates/sift-desktop/src/icons_gen.rs`, which is why the egui tool imports it and does
+   the writing. Its top-level set is `{"table": "ALL", …, "complete": True}`
+   (`gen_icons.py:116-122`), so one unparsable new SVG aborts the run and names the file.
+4. `python tools/gen_text.py` — **deleted; nothing to run.** It compiled the two
+   `en-US/index.json` into `crates/palantir-desktop/src/text_gen.rs`, and tool and crate
+   are both gone. The 3,846 -> 4,054 messages in §5 are real and currently unowned:
+   re-create the compiler against `crates/sift-ui`, or record that the launcher ships no
+   compiled message table. G60's CHECK line still names the deleted script.
+5. `python tools/gen_tokens.py` then `--check`. Expect **byte-identical** (only
+   `variables.scss` and `defaults.scss`, both unchanged, so 189 tokens x 4 modes stay
+   189) but its `OUT` is `crates/palantir-desktop/src/theme_tokens.rs`, a crate that no
+   longer exists, so it cannot run at all. Re-point it at `crates/sift-ui` or retire it;
+   G51's CHECK points at the same dead crate.
+6. `python tools/gen_locale.py` — **deleted; nothing to run.** No tool reads `locales/`
+   today. 33 trees and 89,177 -> 95,812 leaves are still what any replacement must
+   reproduce, and G120's `--report` table cannot be regenerated until one exists.
+7. `python tools/make_fonts.py --check` → `crates/sift-ui/src/fonts.rs`. Expect **no
+   diff**: `assets/styles/inter.scss` is byte-identical and the faces come from
+   `cdn.modrinth.com`, not this tree.
+8. Do **not** re-run `tools/gen_brand.py`: it derives from the Sift mark in
+   `assets/brand/`, not from `vendor/modrinth-app`.
 
 ### Gates that came from the old tree
 
