@@ -722,6 +722,7 @@ impl Shell {
         ];
         const SIZES: [u32; 4] = [10, 20, 50, 100];
         let select_w = 150.0;
+        let mut select_rects = [Rect::NOTHING; 2];
         for index in 0..2 {
             let select = Rect::from_min_size(
                 egui::pos2(field.right() + 12.0 + index as f32 * (select_w + 8.0), row.top()),
@@ -765,63 +766,10 @@ impl Shell {
                     Some(index)
                 };
             }
-            // The options, drawn in a popover under the select while it is open. Drawn here
-            // rather than at the end of the frame because the select is the only thing that
-            // knows where it is; the popover overlaps the list, and egui paints in call order.
-            if self.open_select == Some(index) {
-                let options: Vec<(String, Option<&'static str>)> = if index == 0 {
-                    SORTS
-                        .iter()
-                        .map(|(name, value)| ((*name).to_owned(), Some(*value)))
-                        .collect()
-                } else {
-                    SIZES.iter().map(|size| (size.to_string(), None)).collect()
-                };
-                let row_h = 32.0;
-                let plate = Rect::from_min_size(
-                    egui::pos2(select.left(), select.bottom() + 4.0),
-                    egui::vec2(select.width(), row_h * options.len() as f32 + 8.0),
-                );
-                painter.rect_filled(plate, 8, self.theme.SUPER_RAISED_BG);
-                for (row, (label, value)) in options.iter().enumerate() {
-                    let item = Rect::from_min_size(
-                        egui::pos2(plate.left() + 4.0, plate.top() + 4.0 + row as f32 * row_h),
-                        egui::vec2(plate.width() - 8.0, row_h),
-                    );
-                    let chosen = match value {
-                        Some(value) => *value == self.sort_index,
-                        None => label.parse::<u32>().ok() == Some(self.page_size),
-                    };
-                    if chosen {
-                        painter.rect_filled(item, 6, self.theme.BUTTON_BG_SELECTED);
-                    }
-                    painter.text(
-                        egui::pos2(item.left() + 10.0, item.center().y),
-                        Align2::LEFT_CENTER,
-                        label,
-                        crate::fonts::body(13.0),
-                        if chosen {
-                            self.theme.BUTTON_TEXT_SELECTED
-                        } else {
-                            self.theme.BASE
-                        },
-                    );
-                    if ui
-                        .interact(item, egui::Id::new(("search-option", index, row)), Sense::click())
-                        .clicked()
-                    {
-                        if let Some(value) = value {
-                            self.sort_index = value;
-                        } else if let Ok(size) = label.parse::<u32>() {
-                            self.page_size = size;
-                        }
-                        self.open_select = None;
-                        // A different order or page size is a different question: forget the
-                        // answer so the request below asks it again.
-                        self.results.forget();
-                    }
-                }
-            }
+            // Where this select sits, remembered so its popover can be drawn after the list:
+            // egui paints in call order, and a popover drawn here would sit *under* the cards
+            // that the scroll area paints later.
+            select_rects[index] = select;
         }
         // The result count, right-aligned on the same row.
         //
@@ -890,6 +838,68 @@ impl Shell {
                     self.open_project = Some(crate::pages::project::sample());
                 }
             });
+        // The open popover, last, so it covers the list rather than the other way round. Its
+        // items are interacted here too: an item registered before the cards would lose the
+        // click to whichever card overlaps it.
+        if let Some(open) = self.open_select {
+            let select = select_rects[open];
+            if select != Rect::NOTHING {
+                let row_h = 32.0;
+                let labels: Vec<(String, bool)> = if open == 0 {
+                    SORTS
+                        .iter()
+                        .map(|(name, value)| ((*name).to_owned(), *value == self.sort_index))
+                        .collect()
+                } else {
+                    SIZES
+                        .iter()
+                        .map(|size| (size.to_string(), *size == self.page_size))
+                        .collect()
+                };
+                let plate = Rect::from_min_size(
+                    egui::pos2(select.left(), select.bottom() + 4.0),
+                    egui::vec2(select.width(), row_h * labels.len() as f32 + 8.0),
+                );
+                ui.painter().rect_filled(plate, 8, self.theme.SUPER_RAISED_BG);
+                for (row, (label, chosen)) in labels.iter().enumerate() {
+                    let item = Rect::from_min_size(
+                        egui::pos2(plate.left() + 4.0, plate.top() + 4.0 + row as f32 * row_h),
+                        egui::vec2(plate.width() - 8.0, row_h),
+                    );
+                    if *chosen {
+                        ui.painter().rect_filled(item, 6, self.theme.BUTTON_BG_SELECTED);
+                    }
+                    ui.painter().text(
+                        egui::pos2(item.left() + 10.0, item.center().y),
+                        Align2::LEFT_CENTER,
+                        label,
+                        crate::fonts::body(13.0),
+                        if *chosen {
+                            self.theme.BUTTON_TEXT_SELECTED
+                        } else {
+                            self.theme.BASE
+                        },
+                    );
+                    if ui
+                        .interact(item, egui::Id::new(("search-option", open, row)), Sense::click())
+                        .clicked()
+                    {
+                        if open == 0 {
+                            if let Some((_, value)) = SORTS.get(row) {
+                                self.sort_index = value;
+                            }
+                        } else if let Some(size) = SIZES.get(row) {
+                            self.page_size = *size;
+                        }
+                        self.open_select = None;
+                        // A different order or page size is a different question: forget the
+                        // answered query so the request below asks it again.
+                        self.results.forget();
+                    }
+                }
+            }
+        }
+
         owed |= typing;
         typing = owed;
         typing
