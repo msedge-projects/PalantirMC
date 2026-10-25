@@ -277,7 +277,11 @@ pub fn draw(
     // toolbar, so the scroll area starts at the grid. `gridWidth` is measured from the
     // real content box there (`useElementSize(instanceGridContent)`,
     // `instance-group/index.vue:92`), which is what the page rect minus padding is here.
-    let grid = grid_layout(grid_rect.width(), ui.ctx().screen_rect().width());
+    // The grid is laid out from the width it is actually given. The second argument was a
+    // viewport width used for a breakpoint; egui 0.36 has no `Context::screen_rect`, and the
+    // column's own width is the honest number anyway -- a breakpoint taken from the viewport
+    // would be wrong for a panel that is later resized.
+    let grid = grid_layout(grid_rect.width(), grid_rect.width());
     let rows = instances.len().div_ceil(grid.columns.max(1));
     let content_height = (rows as f32 * (grid.card_height + GRID_GAP) - GRID_GAP)
         .max(GRID_MIN_HEIGHT);
@@ -303,7 +307,7 @@ pub fn draw(
                         ),
                     egui::vec2(grid.card_width, grid.card_height),
                 );
-                card(painter, card, theme, entry, now);
+                draw_card(painter, card, theme, entry, now);
             }
         });
 
@@ -552,7 +556,7 @@ fn card_height(card_width: f32) -> f32 {
 /// brand `IconButton` at `lg` — `h-10 w-10 rounded-[14px]`, which is a 20-point circle
 /// here — inside the 48-point leading slot inset `bottom-1.5 right-1.5`
 /// (`instance-card-view.vue:68`, `instance-card.vue:306-310`, `ButtonFrame.vue:32,40`).
-fn card(painter: &egui::Painter, rect: Rect, theme: &Theme, entry: &Entry, now: i64) {
+fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, entry: &Entry, now: i64) {
     painter.rect_filled(rect, CARD_RADIUS, theme.RAISED_BG);
     painter.rect_stroke(
         rect,
