@@ -446,6 +446,25 @@ impl Shell {
         animating
     }
 
+    /// The toolbar's `first - last` range, from the search's own answering.
+    ///
+    /// `None` when nothing has been searched: a range with no search behind it is a number
+    /// invented by the launcher, which is what the hardcoded `1 - 946` was.
+    fn result_range(&self) -> Option<String> {
+        match self.results.state() {
+            crate::search::State::Ready { hits, total, .. } => {
+                if hits.is_empty() {
+                    // A search that matched nothing says so; there is no range to print.
+                    return Some("No results".to_owned());
+                }
+                let first = 1_u64;
+                let last = hits.len() as u64;
+                Some(format!("{first}  -  {last}  of  {total}"))
+            }
+            _ => None,
+        }
+    }
+
     /// Do what a page's press asked for.
     ///
     /// Every page's verbs land in this one list: a launcher's actions are few and shared (make
@@ -617,14 +636,21 @@ impl Shell {
                 self.theme.SECONDARY,
             );
         }
-        // The result count and the pager, right-aligned on the same row.
-        painter.text(
-            egui::pos2(row.right() - 110.0, row.center().y),
-            Align2::LEFT_CENTER,
-            "1  -  946",
-            crate::fonts::body(13.0),
-            self.theme.SECONDARY,
-        );
+        // The result count, right-aligned on the same row.
+        //
+        // It reads the search's own total now instead of the reference's `1 - 946`. When the
+        // box is empty there is no search, and the reference's number is what a first capture
+        // happened to show rather than a fact about anything -- so an empty box says nothing
+        // rather than a stale count.
+        if let Some(range) = self.result_range() {
+            painter.text(
+                egui::pos2(row.right() - 110.0, row.center().y),
+                Align2::LEFT_CENTER,
+                range,
+                crate::fonts::body(13.0),
+                self.theme.SECONDARY,
+            );
+        }
 
         // The list, via fastframe's scrolling: 120 points per notch rather than egui's 40.
         let list = Rect::from_min_max(

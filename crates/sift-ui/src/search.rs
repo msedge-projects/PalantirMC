@@ -47,8 +47,15 @@ pub enum State {
     Idle,
     /// A query is out.
     Loading,
-    /// Results, for the query named.
-    Ready { query: String, hits: Vec<Hit> },
+    /// Results, for the query named, and how many the API says exist in total.
+    ///
+    /// The total is not `hits.len()`: one page is twenty of a search that may match thousands,
+    /// and the toolbar's `1 - 946` is the reference printing exactly that distinction.
+    Ready {
+        query: String,
+        hits: Vec<Hit>,
+        total: u64,
+    },
     /// The query failed, with a reason a page can show.
     Failed { query: String, reason: String },
 }
@@ -58,8 +65,8 @@ pub struct Search {
     state: State,
     /// The query the current state belongs to, so a stale reply can be dropped.
     current: Option<String>,
-    sender: Sender<(String, Result<Vec<Hit>, String>)>,
-    receiver: Receiver<(String, Result<Vec<Hit>, String>)>,
+    sender: Sender<(String, Result<(Vec<Hit>, u64), String>)>,
+    receiver: Receiver<(String, Result<(Vec<Hit>, u64), String>)>,
 }
 
 impl Default for Search {
@@ -122,7 +129,7 @@ impl Search {
                 continue;
             }
             self.state = match result {
-                Ok(hits) => State::Ready { query, hits },
+                Ok((hits, total)) => State::Ready { query, hits, total },
                 Err(reason) => State::Failed { query, reason },
             };
         }
@@ -130,7 +137,7 @@ impl Search {
 }
 
 /// Fetch and decode one search. Runs on a worker thread.
-fn run(query: &str) -> Result<Vec<Hit>, String> {
+fn run(query: &str) -> Result<(Vec<Hit>, u64), String> {
     let url = sift_net::modrinth::search_url_parts(
         query,
         Some("modpack"),
@@ -152,7 +159,10 @@ fn run(query: &str) -> Result<Vec<Hit>, String> {
     let body = body?;
     let page: sift_net::modrinth::ModrinthSearchResponse =
         serde_json::from_slice(&body).map_err(|error| error.to_string())?;
-    Ok(page.hits.into_iter().map(hit).collect())
+    // The total travels with the page: twenty hits out of nine hundred is the number the
+    // reference's toolbar shows, and `hits.len()` cannot produce it.
+    let total = u64::from(page.total_hits);
+    Ok((page.hits.into_iter().map(hit).collect(), total))
 }
 
 /// One API hit, as a card needs it.
