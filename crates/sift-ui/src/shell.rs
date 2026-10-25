@@ -74,7 +74,7 @@ impl Default for Shell {
             rail: Rail::Discover,
             hovered: None,
             scrolling: fastframe_scroll::Scrolling::default(),
-            theme: Theme::dark(),
+            theme: crate::theme::dark(),
         }
     }
 }
@@ -113,7 +113,10 @@ impl Shell {
 
         // The mark and the product name, at the reference's own inset.
         let mark = Rect::from_min_size(egui::pos2(10.0, 10.0), Vec2::splat(20.0));
-        icons::draw(painter, Glyph::Modrinth, mark, self.theme.ACCENT_CONTRAST);
+        // The reference's mark is its brand logo, which the icon set does not carry: it
+        // is `logo512.png`, uploaded as a texture in the slice that does image loading.
+        // Until then the plate is drawn in the accent, so the bar keeps its anchor.
+        painter.rect_filled(mark, 5, self.theme.ACCENT_CONTRAST);
         painter.text(
             egui::pos2(mark.right() + 8.0, bar.center().y),
             Align2::LEFT_CENTER,

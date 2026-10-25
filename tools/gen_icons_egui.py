@@ -190,7 +190,39 @@ def tidy(points: list[tuple[float, float]], closed: bool) -> list[tuple[float, f
     return out
 
 
-def subpaths(element, tolerance: float) -> list[tuple[list[tuple[float, float]], bool]]:
+def disc(center: tuple[float, float], radius: float, tolerance: float) -> list[tuple[float, float]]:
+    """A circle as the regular polygon whose sagitta is within `tolerance`.
+
+    The reference draws a dot as a *zero-length line with a round cap*, which is a
+    disc of the stroke's width -- `M12 12h.01` is the idiom, and the cap is the dot.
+    epaint has no round caps, so the only way to draw what the reference draws is to
+    fill the disc, and a disc is not a `PathShape`: the polygon that stands in for it
+    is. Its vertex count is solved from the sagitta `r (1 - cos(pi / n))` rather than
+    fixed, so a 3-unit dot is as round as a 1-unit one.
+    """
+    if radius <= 0.0:
+        return []
+    ratio = 1.0 - min(tolerance / radius, 1.0)
+    steps = max(12, math.ceil(math.pi / math.acos(ratio)))
+    steps = min(steps, 64)
+    return [
+        (center[0] + radius * math.cos(math.tau * index / steps),
+         center[1] + radius * math.sin(math.tau * index / steps))
+        for index in range(steps)
+    ]
+
+
+def bounding_extent(points: list[tuple[float, float]]) -> float:
+    """The diagonal of the points' bounding box, which is 0 for a single point."""
+    if not points:
+        return 0.0
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+
+
+def subpaths(element, tolerance: float,
+             dot_limit: float) -> list[tuple[list[tuple[float, float]], bool, bool]]:
     """One element's geometry as the polylines egui can express.
 
     An element the reference paints nothing for (`Cmd::NoPaint`, the clamp path an
@@ -199,11 +231,18 @@ def subpaths(element, tolerance: float) -> list[tuple[list[tuple[float, float]],
 
     `closed` is true for a subpath that ends in `Close` *and* for every filled one,
     because a fill closes its contour whether the SVG says so or not.
+
+    `dot` marks the one conversion that is not a polyline of the reference's points:
+    a stroked subpath shorter than `dot_limit` is the reference's dot idiom, drawn by
+    a round cap that epaint does not have, so it becomes the disc the cap would have
+    painted. Nothing that is longer than `dot_limit` is converted -- a thousandth of
+    the view box is a fiftieth of a pixel at 24 px, and the shortest real stroke in
+    the set is seventeen times longer than that.
     """
     if element.commands and element.commands[0][0] == "NoPaint":
         return []
 
-    out: list[tuple[list[tuple[float, float]], bool]] = []
+    out: list[tuple[list[tuple[float, float]], bool, bool]] = []
     points: list[tuple[float, float]] = []
     current = (0.0, 0.0)
     closed = False
@@ -211,8 +250,19 @@ def subpaths(element, tolerance: float) -> list[tuple[list[tuple[float, float]],
     def flush() -> None:
         nonlocal points, closed
         cleaned = tidy(points, closed or element.filled)
-        if len(cleaned) >= (3 if element.filled else 2):
-            out.append((cleaned, closed or element.filled))
+        if element.filled:
+            if len(cleaned) >= 3:
+                out.append((cleaned, True, False))
+        elif bounding_extent(cleaned) <= dot_limit and cleaned:
+            middle = (
+                sum(point[0] for point in cleaned) / len(cleaned),
+                sum(point[1] for point in cleaned) / len(cleaned),
+            )
+            blob = disc(middle, element.stroke_width * 0.5, tolerance)
+            if blob:
+                out.append((blob, True, True))
+        elif len(cleaned) >= 2:
+            out.append((cleaned, closed, False))
         points, closed = [], False
 
     for command in element.commands:
