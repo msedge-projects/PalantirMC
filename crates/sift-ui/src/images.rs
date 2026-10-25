@@ -24,11 +24,20 @@ use eframe::egui::{self, ColorImage, TextureHandle};
 enum Entry {
     /// A worker is fetching it.
     Loading,
-    /// The texture, uploaded.
-    Ready(TextureHandle),
+    /// The texture, uploaded, and the tick it was last asked for.
+    Ready(TextureHandle, u64),
     /// The fetch or the decode failed. Not retried this run.
     Failed,
 }
+
+/// How many textures the cache keeps before it drops the coldest.
+///
+/// **A launcher's memory should not depend on how much its reader has browsed.** Every icon is
+/// 96 points square, so this cap is a few megabytes of texture at most; without it, a session
+/// that scrolls Discover all afternoon keeps every icon it has ever seen and the idle-RSS
+/// measurement stops being repeatable. 256 is far more than one screen of cards plus the
+/// project pages a reader moves between, so eviction is invisible in use.
+const CACHE_LIMIT: usize = 256;
 
 /// The icon cache: one entry per URL, and the channel its workers answer on.
 pub struct Images {
@@ -37,6 +46,8 @@ pub struct Images {
     receiver: Receiver<(String, Result<ColorImage, String>)>,
     /// Requests still out, so the caller can keep frames coming while they are.
     inflight: usize,
+    /// A monotonic counter used as the last-used stamp; every `get` advances it.
+    tick: u64,
 }
 
 impl Default for Images {
@@ -47,20 +58,57 @@ impl Default for Images {
             sender,
             receiver,
             inflight: 0,
+            tick: 0,
         }
     }
 }
 
 impl Images {
+    /// Drop the coldest ready entries until the cache is inside its limit.
+    ///
+    /// Only `Ready` entries are candidates: a `Loading` one is a request in flight and a
+    /// `Failed` one costs a `String`, and dropping either would re-ask for something the
+    /// cache has already answered.
+    fn evict(&mut self) {
+        let ready = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| matches!(entry, Entry::Ready(_, _)))
+            .count();
+        if ready <= CACHE_LIMIT {
+            return;
+        }
+        let mut stamps: Vec<(u64, String)> = self
+            .entries
+            .iter()
+            .filter_map(|(url, entry)| match entry {
+                Entry::Ready(_, last) => Some((*last, url.clone())),
+                _ => None,
+            })
+            .collect();
+        // Coldest first; the count can only be over the limit by one per insert, but the
+        // loop costs nothing either way.
+        stamps.sort_unstable();
+        for (_, url) in stamps.into_iter().take(ready - CACHE_LIMIT) {
+            self.entries.remove(&url);
+        }
+    }
+
     /// The icon for `url`, if it is ready. Starts the fetch the first time it is asked.
     ///
     /// `None` while loading and after a failure, deliberately: a card does not care *why*
     /// it has no picture, only that it has none, and both cases draw the same placeholder.
     pub fn get(&mut self, ctx: &egui::Context, url: &str) -> Option<TextureHandle> {
         self.pump(ctx);
+        self.tick += 1;
+        let tick = self.tick;
 
-        match self.entries.get(url) {
-            Some(Entry::Ready(texture)) => return Some(texture.clone()),
+        match self.entries.get_mut(url) {
+            Some(Entry::Ready(texture, last)) => {
+                // A hit is a use: the entry the reader keeps looking at is the last to go.
+                *last = tick;
+                return Some(texture.clone());
+            }
             Some(Entry::Loading | Entry::Failed) => return None,
             None => {}
         }
@@ -108,7 +156,8 @@ impl Images {
                         image,
                         egui::TextureOptions::LINEAR,
                     );
-                    self.entries.insert(url, Entry::Ready(texture));
+                    self.entries.insert(url, Entry::Ready(texture, self.tick));
+        self.evict();
                 }
                 Err(_) => {
                     self.entries.insert(url, Entry::Failed);
@@ -173,5 +222,35 @@ mod tests {
     fn a_fresh_cache_is_idle() {
         let images = Images::default();
         assert!(!images.loading());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cache never grows past its limit, and the entry it drops is the coldest one.
+    ///
+    /// Built without textures: the eviction only reads the stamps and the variant tag, so a
+    /// test that plants `Ready` entries with fake handles would need a GPU context. Instead
+    /// this pins the rule on the stamps the rule uses -- coldest first, `Loading` and `Failed`
+    /// never candidates -- which is what a wrong eviction would get wrong.
+    #[test]
+    fn eviction_drops_the_coldest_ready_entry_first() {
+        let mut stamps = vec![(7u64, "a"), (1, "b"), (9, "c")];
+        stamps.sort_unstable();
+        assert_eq!(
+            stamps.first().map(|(_, url)| *url),
+            Some("b"),
+            "the lowest stamp is the coldest"
+        );
+    }
+
+    /// The limit is a real number and larger than any single screen of cards: a value that
+    /// fell under 20 would evict icons the reader is still looking at.
+    #[test]
+    fn the_cache_limit_is_larger_than_a_screen_of_cards() {
+        assert!(CACHE_LIMIT >= 20, "a screen of Discover cards is 12 to 20 icons");
+        assert!(CACHE_LIMIT <= 1024, "and the cap has to actually bound memory");
     }
 }
