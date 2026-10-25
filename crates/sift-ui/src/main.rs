@@ -17,6 +17,7 @@
 //! `ctx.request_repaint()` every frame, which is the behaviour `docs/LIGHTNESS.md` names as
 //! the idle-CPU budget's failure mode.
 
+mod fonts;
 mod frame_log;
 mod geometry;
 mod icons;
@@ -40,6 +41,9 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| {
             // The generated tokens, not egui's defaults: the palette is the reference's.
             let shell = shell::Shell::default();
+            // Inter at the reference's weights, then the reference's palette: a theme
+            // without its type is half a theme, and the first capture showed the gap.
+            fonts::install(&cc.egui_ctx);
             cc.egui_ctx.set_visuals(shell.theme.colors());
             Ok(Box::new(App {
                 shell,

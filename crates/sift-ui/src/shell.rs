@@ -12,7 +12,7 @@
 //! crate differs most from the slice it grew out of, which asked for a frame every vsync
 //! whether or not anything had changed.
 
-use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::geometry as g;
 use crate::icons::{self, Glyph};
@@ -132,7 +132,7 @@ impl Shell {
             egui::pos2(mark.right() + 8.0, bar.center().y),
             Align2::LEFT_CENTER,
             "Sift Launcher",
-            FontId::proportional(14.0),
+            crate::fonts::semibold(14.0),
             self.theme.CONTRAST,
         );
 
@@ -163,7 +163,7 @@ impl Shell {
             egui::pos2(badge.x + 18.0, bar.center().y),
             Align2::LEFT_CENTER,
             self.rail.title(),
-            FontId::proportional(15.0),
+            crate::fonts::label(15.0),
             self.theme.CONTRAST,
         );
 
@@ -176,7 +176,7 @@ impl Shell {
             chip,
             Align2::RIGHT_CENTER,
             "No instances running",
-            FontId::proportional(12.0),
+            crate::fonts::body(12.0),
             self.theme.SECONDARY,
         );
 
@@ -324,7 +324,7 @@ impl Shell {
             heading,
             Align2::LEFT_TOP,
             "Getting started",
-            FontId::proportional(16.0),
+            crate::fonts::semibold(16.0),
             self.theme.CONTRAST,
         );
         for (index, label) in ["Create first instance", "Sign in to Minecraft", "Sign in to Modrinth"]
@@ -337,7 +337,7 @@ impl Shell {
                 egui::pos2(rect.left() + 12.0, rect.center().y),
                 Align2::LEFT_CENTER,
                 label,
-                FontId::proportional(13.0),
+                crate::fonts::body(13.0),
                 self.theme.BASE,
             );
         }
@@ -348,7 +348,7 @@ impl Shell {
             toggle,
             Align2::LEFT_CENTER,
             "Hide already installed",
-            FontId::proportional(13.0),
+            crate::fonts::body(13.0),
             self.theme.BASE,
         );
         let switch = Rect::from_center_size(
@@ -378,14 +378,14 @@ impl Shell {
             egui::pos2(news.left() + 34.0, news.top() + 19.0),
             Align2::LEFT_CENTER,
             "Modrinth news",
-            FontId::proportional(12.0),
+            crate::fonts::semibold(12.0),
             self.theme.SECONDARY,
         );
         painter.text(
             egui::pos2(news.left() + 12.0, news.top() + 44.0),
             Align2::LEFT_TOP,
             "Get your next server on Modrinth.",
-            FontId::proportional(16.0),
+            crate::fonts::semibold(16.0),
             self.theme.CONTRAST,
         );
     }
@@ -414,7 +414,7 @@ impl Shell {
         {
             let galley = painter.layout_no_wrap(
                 label.to_owned(),
-                FontId::proportional(14.0),
+                crate::fonts::semibold(14.0),
                 if index == 0 { self.theme.BUTTON_TEXT_SELECTED } else { self.theme.BASE },
             );
             let pill = Rect::from_min_size(
@@ -459,14 +459,14 @@ fn card(ui: &mut Ui, theme: &Theme, index: usize) {
         egui::pos2(rect.left() + 72.0, rect.top() + 20.0),
         Align2::LEFT_TOP,
         format!("Project {index}"),
-        FontId::proportional(16.0),
+        crate::fonts::title(16.0),
         theme.CONTRAST,
     );
     painter.text(
         egui::pos2(rect.left() + 72.0, rect.top() + 46.0),
         Align2::LEFT_TOP,
         "A summary line the length of a result card's description.",
-        FontId::proportional(13.0),
+        crate::fonts::body(13.0),
         theme.BASE,
     );
     ui.add_space(g::CARD_GAP);
