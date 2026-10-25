@@ -25,6 +25,7 @@ mod icons;
 mod pages;
 mod panel;
 mod images;
+mod search;
 mod shell;
 /// The reference's palette, geometry, type and motion as egui values.
 mod theme;

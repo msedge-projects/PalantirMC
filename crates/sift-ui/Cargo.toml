@@ -49,4 +49,5 @@ sift-core = { path = "../sift-core" }
 # The formats the project CDN actually serves. Measured, not assumed: asking for
 # `.../icon.png` answers **400**, and the API's own `icon_url` is a hashed `.webp` (with
 # some projects still on `.png`), so both decoders are needed and neither is speculative.
+serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }

@@ -87,6 +87,8 @@ pub struct Shell {
     project_state: crate::pages::project::State,
     /// The Discover search field: its text, its focus and its blink phase.
     search: crate::widgets::search::Search,
+    /// The network search behind that field.
+    results: crate::search::Search,
 }
 
 impl Default for Shell {
@@ -103,6 +105,7 @@ impl Default for Shell {
             open_project: None,
             project_state: crate::pages::project::State::default(),
             search: crate::widgets::search::Search::default(),
+            results: crate::search::Search::default(),
         }
     }
 }
@@ -153,7 +156,7 @@ impl Shell {
         };
 
         // An icon in flight is a reason to draw the next frame, exactly like a hover.
-        rail_animating || content || self.icons.loading()
+        rail_animating || content || self.icons.loading() || self.results.loading()
     }
 
     /// The top bar: the mark and the page's name at the left, window controls at the right.
@@ -445,6 +448,12 @@ impl Shell {
         // Its return value is frame debt -- true while it is focused, because the caret is
         // the one thing in this window that moves without being asked to.
         let mut typing = self.search.ui(ui, field, &self.theme);
+        // The field's text drives the network search: a changed query starts one, and a
+        // reply already in flight is collected here. Both are cheap when nothing changed.
+        if let Some(query) = self.search.query().map(str::to_owned) {
+            self.results.request(&query);
+        }
+        self.results.poll();
         // `search.ui` took `ui` mutably, which ended the painter borrow taken above; the
         // painter is re-acquired here, and the compiler is what said so.
         let painter = ui.painter();
@@ -497,9 +506,28 @@ impl Shell {
             .show(&mut child, |ui| {
                 // The reference's own six results first, then repeats so the list is long
                 // enough to scroll: a capture compares anatomy, not the catalogue.
-                let results = sample_results();
+                // Real results when the search has them; the reference's own six cards while
+                // the box is empty, so the page is never a blank rectangle.
+                let live: Vec<Card<'_>> = match self.results.state() {
+                    crate::search::State::Ready { hits, .. } => hits
+                        .iter()
+                        .map(|hit| Card {
+                            title: &hit.title,
+                            author: &hit.author,
+                            summary: &hit.summary,
+                            tags: &[],
+                            downloads: &hit.downloads,
+                            followers: &hit.followers,
+                            updated: "",
+                            icon: &hit.icon,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let sample = sample_results();
+                let results: &[Card<'_>] = if live.is_empty() { &sample } else { &live };
                 let mut opened = false;
-                for index in 0..12 {
+                for index in 0..results.len().max(1) {
                     let clicked = card(ui, &self.theme, index, &results[index % results.len()], &mut self.icons);
                     opened |= clicked;
                 }
