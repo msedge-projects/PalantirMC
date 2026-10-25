@@ -31,10 +31,16 @@ SetCompressorDictSize 64
 !include "x64.nsh"
 
 !ifndef VERSION
-  !define VERSION "0.0.0"
+  ; Kept in step with `crates/sift-ui/Cargo.toml`, which is the manifest the release tag is
+  ; checked against; a release step may override it with /DVERSION=.
+  !define VERSION "0.1.0"
 !endif
+; The default is the product's own build output. `crates/sift-ui` is its own workspace, so
+; cargo writes there rather than to the root `target/`; the file inside is `SiftUi.exe` and the
+; installer renames it to `SiftLauncher.exe` on install, which is the name the Start menu, the
+; uninstall entry and the shortcut all use.
 !ifndef APP_EXE
-  !define APP_EXE "../target/release/SiftLauncher.exe"
+  !define APP_EXE "../crates/sift-ui/target/release/SiftUi.exe"
 !endif
 
 !define PRODUCT "Sift Launcher"
