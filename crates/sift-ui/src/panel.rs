@@ -707,6 +707,11 @@ mod tests {
             bottom > g::WINDOW.1 / 2.0,
             "the three sections fill more than half the column"
         );
-        assert!(plan.card > plan.banner - BANNER_H, "the card sits above the banner");
+        assert!(
+            plan.card < plan.banner,
+            "the card sits above the banner: card top {} must be less than banner top {}",
+            plan.card,
+            plan.banner
+        );
     }
 }
