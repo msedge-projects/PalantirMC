@@ -89,6 +89,10 @@ pub struct Shell {
     game: crate::game::Game,
     /// The instances on disk, read when the shell starts and when the rail returns to Home.
     instances: Vec<crate::data::Entry>,
+    /// The Home page's own state: which row's kebab popover is open, and the `saves/` names
+    /// it read. Kept here beside the other pages' states so the popover survives the frames
+    /// that also draw the rail and the panel.
+    home: crate::pages::home::State,
     /// The project whose page is open, if any. `None` means the rail's own page is showing.
     open_project: Option<crate::pages::project::Project>,
     /// The open project's tab.
@@ -134,6 +138,7 @@ impl Default for Shell {
             icons: crate::images::Images::default(),
             game: crate::game::Game::default(),
             instances: crate::data::load().0,
+            home: crate::pages::home::State::default(),
             open_project: None,
             project_state: crate::pages::project::State::default(),
             search: crate::widgets::search::Search::default(),
@@ -254,8 +259,14 @@ impl Shell {
             let rect = crate::pages::Page::Home.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);
             let theme = self.theme;
-            let action =
-                crate::pages::home::draw(ui, rect, &theme, &mut self.icons, &self.instances);
+            let action = crate::pages::home::draw(
+                ui,
+                rect,
+                &theme,
+                &mut self.icons,
+                &self.instances,
+                &mut self.home,
+            );
             // The page reports intent; the shell owns the paths, the disk and the process
             // table, so it is the shell that acts.
             self.act(action);
@@ -537,15 +548,134 @@ impl Shell {
     /// one, open one, run one), and a page that grew its own copy would be where the rules
     /// diverged.
     fn act(&mut self, action: crate::pages::home::Action) {
+        use crate::pages::home::Action;
         match action {
-            crate::pages::home::Action::None => {}
-            crate::pages::home::Action::Create => self.create_instance(),
-            crate::pages::home::Action::Import => {
+            Action::None => {}
+            Action::Create => self.create_instance(),
+            Action::Import => {
                 // The button is honest about not doing it yet rather than silently doing
                 // nothing, which reads as a broken press.
                 self.toast = Some("Importing from another launcher is not wired yet.".to_owned());
             }
-            crate::pages::home::Action::Play(id) => self.game.start(&id),
+            Action::Play(id) => {
+                // One game at a time (`game.rs:113-124`): a press while a launch is out is
+                // otherwise a no-op, and a press that silently does nothing reads as broken
+                // -- so the second press says why instead of being swallowed. The menu's
+                // Play and the row's pill both land here, which is what keeps them one verb.
+                if self.game.busy() {
+                    self.toast = Some(
+                        "A launch is already running: this launcher starts one game at a time."
+                            .to_owned(),
+                    );
+                } else {
+                    self.game.start(&id);
+                }
+            }
+            Action::Edit(id) => {
+                // The reference opens the instance's own page with its settings tabs
+                // (`pages/instance/layout.vue:182`). That page does not exist in this shell,
+                // so the press says what is missing instead of doing nothing visible.
+                self.toast = Some(format!(
+                    "Editing {} is not wired yet: the instance settings page does not exist.",
+                    self.instance_name(&id)
+                ));
+            }
+            Action::Duplicate(id) => {
+                self.toast = Some(format!(
+                    "Duplicating {} is not wired yet: nothing copies an instance's folder.",
+                    self.instance_name(&id)
+                ));
+            }
+            Action::OpenFolder(id) => self.open_instance_folder(&id),
+            Action::Delete(id) => self.delete_instance(&id),
+            Action::OpenWorld { instance, world } => {
+                // Quick-play is one world's launch: the game's `--quickPlaySingleplayer`
+                // argument, which this launcher's launch plan does not build yet.
+                self.toast = Some(format!(
+                    "Launching {world} in {} is not wired yet: a world launch needs quick-play.",
+                    self.instance_name(&instance)
+                ));
+            }
+        }
+    }
+
+    /// The name a reader knows an instance by, or its id when the list no longer holds it.
+    ///
+    /// A toast that said `Instance 4` when the row read `Fabric 1.21` would be about a
+    /// different thing than the press, so every message the row menu produces goes through
+    /// here.
+    fn instance_name(&self, id: &str) -> String {
+        self.instances
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.name.clone())
+            .unwrap_or_else(|| id.to_owned())
+    }
+
+    /// The folder one instance lives in.
+    ///
+    /// `Entry::id` is the folder's own name (`data.rs:21-23`), and `data::instances_dir` is
+    /// the root the list was read from, so the path is the two joined -- the same tree the
+    /// launch and the create already open.
+    fn instance_dir(id: &str) -> std::path::PathBuf {
+        crate::data::instances_dir().join(id)
+    }
+
+    /// Show an instance's folder in the platform's file manager.
+    ///
+    /// **`explorer`, and Windows-only for now.** `explorer` is Windows' own file manager and
+    /// takes the directory as a plain argument, which is what the reference's
+    /// `showInstanceInFolder` ends up doing through Tauri's `openPath`. The launcher ships a
+    /// Windows exe and nothing here builds for another target, so the unix branch is the
+    /// fallback that keeps the call honest rather than a path that has been run:
+    /// `xdg-open` takes the same single argument, and macOS's `open` is not handled because
+    /// no build targets it. A spawn (not a wait) is deliberate: the file manager outlives
+    /// this process, and blocking a frame on it would freeze the window until it closed.
+    fn open_instance_folder(&mut self, id: &str) {
+        let path = Self::instance_dir(id);
+        let opener = if cfg!(windows) { "explorer" } else { "xdg-open" };
+        match std::process::Command::new(opener).arg(&path).spawn() {
+            Ok(_) => self.toast = Some(format!("Opened {}.", path.display())),
+            Err(error) => {
+                self.toast = Some(format!(
+                    "Could not open {} with {opener}: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+
+    /// Remove an instance's folder from disk, unless a launch is alive.
+    ///
+    /// **The refusal is the shell's, not the row's.** `Game` holds one launch and keeps a
+    /// status, not the id it was asked for (`game.rs:83-92`), so any live launch refuses
+    /// every delete. Deleting the instance a game is running would take its `saves/` out
+    /// from under a process still writing to them, which is the one mistake this launcher
+    /// must not make; refusing a delete on an unrelated instance is the safe side of that
+    /// line, and the toast says which rule refused it.
+    fn delete_instance(&mut self, id: &str) {
+        if self.game.busy() {
+            self.toast = Some(format!(
+                "Not deleting {} while a launch is running.",
+                self.instance_name(id)
+            ));
+            return;
+        }
+        let path = Self::instance_dir(id);
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {
+                self.toast = Some(format!("Deleted {}.", self.instance_name(id)));
+                // The list is what the page draws, so it is re-read here rather than on a
+                // later frame: a deleted row left on screen would be a ghost the reader
+                // could press again.
+                self.instances = crate::data::load().0;
+            }
+            Err(error) => {
+                self.toast = Some(format!(
+                    "Could not delete {}: {error}",
+                    path.display()
+                ));
+            }
         }
     }
 
