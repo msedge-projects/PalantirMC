@@ -82,3 +82,40 @@ edge, the right panel's left edge and width, the tab strip's height, the rail's 
 pitch (the first two centres), and the title bar's height. They are one `edges.py` run
 each; the reason they are not in this table is that the loop was still being built when
 the table was written.
+
+---
+
+## The egui shell's first frame — 2026-10-25
+
+The rewritten shell renders: title bar with the accent plate and `Sift Launcher`, the five
+destination rail with its glyphs, the tab strip, twelve cards through fastframe's scrolling,
+and the right panel's `Getting started` rows. Its structure is the reference's; what is
+left is convergence, and these are the first differences seen at 1:1 against Modrinth
+v0.22.0 side by side:
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-1 | Header | the reference has a page header (breadcrumb `Discover modpacks` with back/forward arrows) between the title bar and the tabs; ours goes straight from bar to tabs |
+| E-2 | Title bar | ours carries the mark and the name only; the reference also carries `No instances running` and the window controls |
+| E-3 | Tabs | the reference's strip is inset inside the content column with its own rounded container; ours spans the column edge to edge |
+| E-4 | Rail | our rail has no utility group (settings, reload, account) and no separator between the groups |
+| E-5 | Right panel | ours draws three rows; the reference has three rows, a `Hide already installed` toggle and the news card, with the toggle's own switch drawn |
+| E-6 | Cards | ours are placeholders: no icon, no install button, no badges, no footer stats |
+| E-7 | Backgrounds | the content column looks a shade lighter than the reference's; needs a sampled comparison rather than an eye |
+
+### Two fidelity gaps in the icon set, recorded before they cost time later
+
+`tools/gen_icons_egui.py` emits 441 glyphs / 1,734 shapes, and cannot express two thirds of
+the reference's *filled* elements faithfully:
+
+- **16 glyphs have holes or concave outlines** (`cloud`, `x`, `cog`, `spinner`,
+  `radio-button`, `minecraft`, `vanilla`, `velocity`, `tags/categories/{entities,mobs,potato}`,
+  `tags/loaders/{datapack,babric}`, …). epaint's `PathShape` has no fill rule and fills with a
+  triangle fan from the first point, so a hole is filled solid. Fix: triangulate in the
+  generator (even-odd) and emit a `Shape::Mesh`.
+- **413 of 441 glyphs use `stroke-linecap="round"`**, which `PathStroke` cannot honour; the
+  zero-length dot idiom was already mitigated by emitting discs, but joins still miter where
+  the reference rounds them. Fix: insert small discs at joins in the generator.
+
+Both are generator work, not app work, and both are visible at 32 px and above — which is
+the size the rail and cards use.
