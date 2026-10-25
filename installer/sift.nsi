@@ -43,6 +43,11 @@ SetCompressorDictSize 64
   !define APP_EXE "../crates/sift-ui/target/release/SiftUi.exe"
 !endif
 
+; The script's own directory, with the trailing separator every path below assumes.
+; `__FILEDIR__` does not end with one on NSIS 3.13, so `${HERE}sift.ico` resolved to
+; `installersift.ico` and makensis aborted on the icon line.
+!define HERE "${__FILEDIR__}\"
+
 !define PRODUCT "Sift Launcher"
 !define PUBLISHER "Palantir Studios"
 ; The launcher's own data folder, which is a product decision the launcher
@@ -66,11 +71,11 @@ SetCompressorDictSize 64
 
 Name "${PRODUCT} ${VERSION}"
 BrandingText "${PRODUCT} ${VERSION}"
-OutFile "${__FILEDIR__}../dist/SiftLauncher-${VERSION}-x64-setup.exe"
+OutFile "${HERE}../dist/SiftLauncher-${VERSION}-x64-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\Sift Launcher"
 InstallDirRegKey HKCU "${APP_KEY}" "InstallDir"
-Icon "${__FILEDIR__}sift.ico"
-UninstallIcon "${__FILEDIR__}sift.ico"
+Icon "${HERE}sift.ico"
+UninstallIcon "${HERE}sift.ico"
 
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
@@ -81,8 +86,8 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 ${PUBLISHER}"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "${__FILEDIR__}sift.ico"
-!define MUI_UNICON "${__FILEDIR__}sift.ico"
+!define MUI_ICON "${HERE}sift.ico"
+!define MUI_UNICON "${HERE}sift.ico"
 ; Checked by default: a first install is finished when the launcher opens, not
 ; when a wizard closes. Nothing runs in a silent install.
 !define MUI_FINISHPAGE_RUN "$INSTDIR\Sift Launcher.exe"
@@ -92,7 +97,7 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 ${PUBLISHER}"
 ; installer is, and the licence and folder choices come after it.
 Page custom ShowMark
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${__FILEDIR__}../LICENSE"
+!insertmacro MUI_PAGE_LICENSE "${HERE}../LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -124,7 +129,7 @@ Function ShowMark
     Abort
   ${EndIf}
 
-  File /oname=$PLUGINSDIR\sift.avi "${__FILEDIR__}anim/sift.avi"
+  File /oname=$PLUGINSDIR\sift.avi "${HERE}anim/sift.avi"
   nsDialogs::CreateControl "SysAnimate32" \
     "${WS_CHILD}|${WS_VISIBLE}|${ACS_CENTER}|${ACS_TRANSPARENT}|${ACS_AUTOPLAY}" \
     "0" "0" "0" "96u" "96u" ""
@@ -180,11 +185,11 @@ Section "${PRODUCT} (required)" SEC_APP
   ; token, so a destination filename containing a space cannot be written on the
   ; `File` line itself, and the installed name is the one the shortcuts and the
   ; uninstaller both depend on.
-  File /oname=SiftLauncher.exe "${__FILEDIR__}${APP_EXE}"
+  File /oname=SiftLauncher.exe "${HERE}${APP_EXE}"
   Rename "$INSTDIR\SiftLauncher.exe" "$INSTDIR\Sift Launcher.exe"
-  File "${__FILEDIR__}sift.ico"
-  File "${__FILEDIR__}../LICENSE"
-  File "${__FILEDIR__}../THIRD_PARTY_NOTICES.md"
+  File "${HERE}sift.ico"
+  File "${HERE}../LICENSE"
+  File "${HERE}../THIRD_PARTY_NOTICES.md"
 
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
   CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\Sift Launcher.exe" "" "$INSTDIR\sift.ico" 0
