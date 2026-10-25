@@ -1609,9 +1609,12 @@ fn rail_rows(dialog: Rect) -> [RailRow; TAB_COUNT] {
     let category_line = CATEGORY_LINE + CATEGORY_PADDING;
     let category_gap = CATEGORY_TOP_GAP;
     let fixed = 4.0 * category_line + 3.0 * category_gap;
-    let row_gap = RAIL_ROW_GAP.min(4.0);
-    let row_height = ((available - fixed) / TAB_COUNT as f32 - row_gap)
-        .clamp(30.0, RAIL_ROW_HEIGHT);
+    // The row is the thing a reader aims at, so it keeps its 30-point floor and the gap gives
+    // way: at 4 points of gap the fourteen rows and their fixed costs come to 616 in a
+    // 608-point pane, which put Resources and everything after it outside the rail.
+    let per_row = (available - fixed) / TAB_COUNT as f32;
+    let row_height = (per_row - RAIL_ROW_GAP).clamp(30.0, RAIL_ROW_HEIGHT);
+    let row_gap = (per_row - row_height).clamp(0.0, RAIL_ROW_GAP);
 
     let mut y = rail.top() + RAIL_PADDING;
     let mut previous: Option<Tab> = None;
