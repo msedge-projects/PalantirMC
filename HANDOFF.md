@@ -302,3 +302,19 @@ started with a measurable slice rather than a rewrite:
    `palantir-desktop/src/store.rs` today, and the egui crate cannot depend on a
    binary crate. That is the first real refactor of the migration and it should be
    done before the second page, not during it.
+
+**Correction, after sizing it: `Store` is not a seam yet.** The plan above said "move
+`Store` into a library both can use". Measured before starting it: `store.rs` reaches
+into eighteen desktop modules -- `page`, `pages`, `ui`, `route`, `color_theme`,
+`scale`, `instances`, `launch`, `meta`, `mods`, `avatar`, `skin`, `wire` and more --
+and 119 call sites across the crate name `crate::store` or `crate::prefs`. It is not a
+data layer with a UI on top; the UI types are inside it. Extracting it is its own
+project, not a step of this one.
+
+So the first page does not wait for it: **egui's Discover reads `palantir-net`
+directly** -- the crate that is already UI-free and holds the search URL builder, the
+`ModrinthSearchHit` parser and `BlockingHttpFetcher`. One page talking to a library is
+a smaller lie than a four-thousand-line extraction done to avoid it, and it puts real
+results on screen in the stack that scrolls at 18 ms p95. The `Store` extraction
+becomes what it is: a separate slice that both stacks will want, to be planned on its
+own numbers rather than as a prerequisite.
