@@ -23,36 +23,34 @@ import sys
 
 
 def row_pixels(png: str, row: int) -> list[tuple[int, int, int, int]]:
-    """Every pixel of `row`, as (x, r, g, b)."""
+    """Every pixel of `row`, as (x, r, g, b).
+
+    Raw RGB bytes rather than ImageMagick's text output: the text form has to be parsed,
+    and the first version of this tool parsed it wrong -- it reported 102,926 "edges" in a
+    1,440-pixel row, which is a decoder bug stating its own result. A byte stream of
+    `width * 3` bytes cannot be misread.
+    """
+    size = subprocess.run(
+        ["identify", "-format", "%w", png], capture_output=True, text=True, check=False,
+        timeout=60,
+    )
+    try:
+        width = int(size.stdout.strip())
+    except ValueError:
+        print(f"edges: cannot read width of {png}", file=sys.stderr)
+        return []
     result = subprocess.run(
-        ["convert", png, "-crop", f"+0+{row}", "+repage", "txt:-"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=120,
+        ["convert", png, "-crop", f"{width}x1+0+{row}", "+repage", "rgb:-"],
+        capture_output=True, check=False, timeout=120,
     )
     if result.returncode != 0:
-        print(f"edges: convert failed for {png}: {result.stderr.strip()}", file=sys.stderr)
+        print(f"edges: convert failed for {png}", file=sys.stderr)
         return []
-    pixels = []
-    for line in result.stdout.splitlines():
-        if not line or line.startswith("#"):
-            continue
-        # `0,0: (39,41,46)  #27292E  srgb(39,41,46)`
-        head, _, rest = line.partition(":")
-        x_text, _, _ = head.partition(",")
-        start = rest.find("(")
-        end = rest.find(")", start)
-        if start < 0 or end < 0:
-            continue
-        parts = rest[start + 1 : end].split(",")
-        if len(parts) < 3:
-            continue
-        try:
-            pixels.append((int(x_text), int(parts[0]), int(parts[1]), int(parts[2])))
-        except ValueError:
-            continue
-    return pixels
+    raw = result.stdout
+    return [
+        (index // 3, raw[index], raw[index + 1], raw[index + 2])
+        for index in range(0, min(len(raw), width * 3) - 2, 3)
+    ]
 
 
 def edges(pixels: list[tuple[int, int, int, int]], threshold: int) -> list[int]:
