@@ -143,6 +143,38 @@ dependency names the three formats it needs and says why each is there.
 | E-11 | Card tile | the icon is drawn into a square; the reference's 64-point tile is rounded, so a light icon shows square corners against the plate |
 | E-12 | Card | the reference's title row carries a small follower glyph on hover, and its `Install` button has a border rather than a fill |
 
+### Home, first pair — 2026-10-25
+
+The app opens on Home like the reference: the rail's first destination active, the breadcrumb
+`Home`, the centred hero (`Welcome to Sift Launcher`, `Ready to start playing?`, the green
+`+ Create an instance`, the `N` hint) and the `Escaping another launcher?` prompt pinned near
+the bottom.
+
+**The background matches exactly, and the eye was wrong about it.** A side-by-side composite
+made our window look lighter, so the pixels were sampled instead of argued with:
+
+| Point | Reference | Ours |
+| --- | --- | --- |
+| content (700,400) | `srgb(22,24,28)` | `srgb(22,24,28)` |
+| rail (40,400) | `srgb(39,41,46)` | `srgb(39,41,46)` |
+| panel (1250,400) | `srgb(44,81,63)` | `srgb(39,41,46)` |
+
+Two lessons, both cheap: a downscaled JPEG shifts perceived lightness enough to fake a theme
+bug, and the one point that *did* differ says something real -- the reference's panel has the
+news card's green art there and ours has plain panel.
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-13 | Right panel (all pages) | the reference's panel carries `News` with a card -- art, title `Sync settings across instances`, two lines of copy, a date and `Upgrade to Modrinth+` -- and a hosting banner below it; ours has the news heading and one line |
+| E-14 | Home hero | the mark plate is empty: the brand is `logo512.png`, uploaded as a texture in the slice that does it |
+| E-15 | Rail | the reference's active plate is a rounded square with the glyph inset; ours is close but the icon is 20 where the reference's is 22 |
+
+**A rig bug worth the paragraph:** the first Home capture came back showing *this launcher*
+instead of the reference. The capture reads the screen and crops, and both windows sit at
+0,0 at the same size, so whatever is on top is what gets photographed -- `windowactivate`
+promises nothing about stacking on a bare X server with no window manager. The tool now
+raises the target, lowers every other named window and raises the target again.
+
 ### Open after this pass
 
 | # | Region | What differs |
