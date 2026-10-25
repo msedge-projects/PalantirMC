@@ -155,6 +155,38 @@ jobs:
       - name: Check the exe's DLL dependencies
         run: python .github/scripts/check_exe.py dist/SiftUi.exe
 
+      # The installer exists in this tree and has never been built: `installer/sift.nsi`
+      # wraps the exe, carries `sift.ico`, writes the Start-menu entry and the uninstall
+      # record. Building it here rather than by hand is the only way it stays true to the
+      # exe beside it -- it takes the version from the product's manifest and the binary
+      # from the artifact this job just staged.
+      #
+      # MSVC only: one installer for one binary, and the static-CRT build is the one a
+      # reader with no Visual C++ redistributable can run.
+      - name: Build the installer
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            choco install nsis -y --no-progress
+            $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          }
+          if (-not (Test-Path $makensis)) { throw "makensis is not installed" }
+
+          $version = (Select-String -Path crates/sift-ui/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' -List).Matches[0].Groups[1].Value
+          & $makensis /V2 /DVERSION=$version /DAPP_EXE=../dist/SiftUi.exe installer/sift.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis exited $LASTEXITCODE" }
+
+          $setup = Get-Item "dist/SiftLauncher-$version-x64-setup.exe"
+          # Same bound as the exe it wraps, with room for the NSIS stub and the icon.
+          if ($setup.Length -lt 1MB -or $setup.Length -gt 80MB) {
+            throw "Unexpected setup size: $($setup.Length) bytes"
+          }
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+          [System.IO.File]::WriteAllText("dist/$($setup.Name).sha256", "$hash  $($setup.Name)`n")
+          "### $($setup.Name) ($($setup.Length) bytes)" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -199,6 +231,15 @@ jobs:
             # continues with the next one, which is what keeps the temporary iced
             # artefacts out of the release without changing the loop body below.
             if ($_.Directory.Name -notlike 'sift-launcher-*') { return }
+            # The setup exe is already named the way it should be published, and the
+            # rename below would flatten it onto the bare exe's name.
+            if ($_.Name -like '*-setup.exe') {
+              Copy-Item $_.FullName "release/$($_.Name)"
+              $hash = (Get-FileHash "release/$($_.Name)" -Algorithm SHA256).Hash.ToLower()
+              [System.IO.File]::WriteAllText("release/$($_.Name).sha256", "$hash  $($_.Name)`n")
+              "| $($_.Name) | $($_.Length) bytes | $hash |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+              return
+            }
 
             $target = $_.Directory.Name
             $label = switch -Wildcard ($target) {
