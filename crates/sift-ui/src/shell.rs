@@ -121,7 +121,7 @@ impl Shell {
         self.title_bar(ui);
         let mut rail_animating = false;
         rail_animating |= self.rail_column(ui);
-        self.right_panel(ui);
+        rail_animating |= self.right_panel(ui);
         let content = if let Some(project) = &self.open_project {
             let rect = crate::pages::Page::Project.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);
@@ -360,113 +360,33 @@ impl Shell {
         animating
     }
 
-    /// The right panel: the page's own sections first, then the shared getting-started and
-    /// news. The reference teleports project sections into this panel, so both live here.
-    fn right_panel(&mut self, ui: &mut Ui) {
+    /// The right panel: the page's own sections first, then the shared getting-started,
+    /// news and hosting block.
+    ///
+    /// The reference teleports page sections into this panel (`<Teleport
+    /// to="#sidebar-teleport-target">`), which is why the page draws first and the shared
+    /// stack is then painted into whatever rect is left: a panel with one implementation and a
+    /// hole at the top for the page, rather than a second copy of the shared sections per page.
+    fn right_panel(&mut self, ui: &mut Ui) -> bool {
         let panel = Rect::from_min_size(
             egui::pos2(g::PANEL_LEFT, g::TITLE_BAR),
             egui::vec2(g::PANEL, g::WINDOW.1 - g::TITLE_BAR),
         );
 
-        // A project page contributes its compatibility block above the shared sections --
-        // the reference teleports it into this same panel. It needs `ui` mutably, so it runs
-        // before the painter is borrowed for the shared sections below.
-        let mut shared_top = panel.top() + 20.0;
+        let mut shared = panel;
         if let Some(project) = self.open_project.clone() {
-            let used = crate::pages::project::panel(
-                ui,
-                Rect::from_min_size(
-                    egui::pos2(panel.left() + 24.0, panel.top() + 20.0),
-                    egui::vec2(g::PANEL - 48.0, 400.0),
-                ),
-                &self.theme,
-                &project,
+            let block = Rect::from_min_size(
+                egui::pos2(panel.left() + 24.0, panel.top() + 20.0),
+                egui::vec2(g::PANEL - 48.0, 400.0),
             );
-            shared_top = panel.top() + 20.0 + used + 16.0;
-        }
-
-        let painter = ui.painter();
-        let _ = shared_top;
-        painter.rect_filled(panel, 0, self.theme.BG);
-        painter.vline(
-            panel.left() + 0.5,
-            panel.y_range(),
-            Stroke::new(1.0, self.theme.DIVIDER),
-        );
-
-        let row = |y: f32| Rect::from_min_size(
-            egui::pos2(panel.left() + 24.0, y),
-            egui::vec2(g::PANEL - 48.0, 36.0),
-        );
-        let heading = egui::pos2(panel.left() + 24.0, panel.top() + 20.0);
-        painter.text(
-            heading,
-            Align2::LEFT_TOP,
-            "Getting started",
-            crate::fonts::semibold(16.0),
-            self.theme.CONTRAST,
-        );
-        for (index, label) in ["Create first instance", "Sign in to Minecraft", "Sign in to Modrinth"]
-            .into_iter()
-            .enumerate()
-        {
-            let rect = row(panel.top() + 56.0 + index as f32 * 40.0);
-            painter.rect_filled(rect, 8, self.theme.RAISED_BG);
-            painter.text(
-                egui::pos2(rect.left() + 12.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                label,
-                crate::fonts::body(13.0),
-                self.theme.BASE,
+            let used = crate::pages::project::panel(ui, block, &self.theme, &project);
+            shared = Rect::from_min_max(
+                egui::pos2(panel.left(), panel.top() + 20.0 + used + 16.0),
+                panel.max,
             );
         }
 
-        // `Hide already installed`, with the switch the reference draws beside it.
-        let toggle = egui::pos2(panel.left() + 24.0, panel.top() + 190.0);
-        painter.text(
-            toggle,
-            Align2::LEFT_CENTER,
-            "Hide already installed",
-            crate::fonts::body(13.0),
-            self.theme.BASE,
-        );
-        let switch = Rect::from_center_size(
-            egui::pos2(panel.right() - 32.0, toggle.y),
-            egui::vec2(28.0, 16.0),
-        );
-        painter.rect_filled(switch, 8, self.theme.BUTTON_BG);
-        painter.circle_filled(
-            egui::pos2(switch.left() + 8.0, switch.center().y),
-            6.0,
-            self.theme.SECONDARY,
-        );
-
-        // The news card: a raised block with a heading row and the article title.
-        let news = Rect::from_min_size(
-            egui::pos2(panel.left() + 24.0, panel.top() + 240.0),
-            egui::vec2(g::PANEL - 48.0, 190.0),
-        );
-        painter.rect_filled(news, 12, self.theme.RAISED_BG);
-        icons::draw(
-            painter,
-            Glyph::Newspaper,
-            Rect::from_min_size(news.min + egui::vec2(12.0, 12.0), Vec2::splat(14.0)),
-            self.theme.SECONDARY,
-        );
-        painter.text(
-            egui::pos2(news.left() + 34.0, news.top() + 19.0),
-            Align2::LEFT_CENTER,
-            "Modrinth news",
-            crate::fonts::semibold(12.0),
-            self.theme.SECONDARY,
-        );
-        painter.text(
-            egui::pos2(news.left() + 12.0, news.top() + 44.0),
-            Align2::LEFT_TOP,
-            "Get your next server on Modrinth.",
-            crate::fonts::semibold(16.0),
-            self.theme.CONTRAST,
-        );
+        crate::panel::draw(ui, shared, &self.theme)
     }
 
     /// The tabs, the search row and the scrolling list. Returns whether a glide is running.
