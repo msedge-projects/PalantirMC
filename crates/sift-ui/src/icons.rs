@@ -30815,13 +30815,18 @@ mod tests {
         let empty = Rect::from_min_size(Pos2::new(17.0, 23.0), Vec2::ZERO);
         let inverted = Rect::from_min_max(Pos2::new(10.0, 10.0), Pos2::new(-10.0, -10.0));
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             for (_, glyph) in every() {
                 draw(ui.painter(), glyph, empty, Color32::WHITE);
                 let _ = cached(ui.painter(), glyph, empty, Color32::WHITE);
                 draw(ui.painter(), glyph, inverted, Color32::WHITE);
             }
         });
+        // A font atlas delta is produced for the text this frame laid out, and
+        // epaint panics if one is dropped without being uploaded. Nothing uploads
+        // in a unit test, so the delta is cleared deliberately -- which is what the
+        // panic message asks for.
+        output.textures_delta.clear();
     }
 
     #[test]
