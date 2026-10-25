@@ -501,33 +501,196 @@ impl Shell {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(&mut child, |ui| {
+                // The reference's own six results first, then repeats so the list is long
+                // enough to scroll: a capture compares anatomy, not the catalogue.
+                let results = sample_results();
                 for index in 0..12 {
-                    card(ui, &self.theme, index);
+                    card(ui, &self.theme, &results[index % results.len()]);
                 }
             });
         false
     }
 }
 
-/// One result card, sized from the measured card height and gap.
-fn card(ui: &mut Ui, theme: &Theme, index: usize) {
+/// One result card, drawn to the reference's anatomy.
+///
+/// Measured from a 2.2x crop of the reference (`card.jpg`), in window pixels from the
+/// card's own top-left: a 64-point icon tile at 16,16; the title at 96,16 with the author
+/// beside it and a link glyph after; a two-line summary at 96,44; a row of tag pills at
+/// 96,104; the stats right-aligned on that same row; and the install button at the card's
+/// top-right corner. The card itself is 148 tall with a 12-point gap, which is what the
+/// reference's pitch between two card tops measures.
+fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>) {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, g::CARD), Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 12, theme.RAISED_BG);
-    painter.text(
-        egui::pos2(rect.left() + 72.0, rect.top() + 20.0),
-        Align2::LEFT_TOP,
-        format!("Project {index}"),
-        crate::fonts::title(16.0),
+
+    // The icon tile. The reference draws the project's icon here; until images load, a
+    // plate in the accent carries the same weight and the same 12-point radius.
+    let tile = Rect::from_min_size(rect.min + egui::vec2(16.0, 16.0), Vec2::splat(64.0));
+    painter.rect_filled(tile, 12, theme.BUTTON_BG);
+
+    // The title, the author and the link glyph, on one baseline.
+    let title = painter.layout_no_wrap(
+        result.title.to_owned(),
+        crate::fonts::title(17.0),
         theme.CONTRAST,
     );
-    painter.text(
-        egui::pos2(rect.left() + 72.0, rect.top() + 46.0),
-        Align2::LEFT_TOP,
-        "A summary line the length of a result card's description.",
+    let title_at = egui::pos2(rect.left() + 96.0, rect.top() + 18.0);
+    painter.galley(title_at, title.clone(), theme.CONTRAST);
+    let by = painter.layout_no_wrap(
+        format!("by {}", result.author),
         crate::fonts::body(13.0),
-        theme.BASE,
+        theme.SECONDARY,
     );
+    let by_at = egui::pos2(title_at.x + title.size().x + 10.0, title_at.y + 3.0);
+    painter.galley(by_at, by.clone(), theme.SECONDARY);
+    icons::draw(
+        painter,
+        Glyph::External,
+        Rect::from_min_size(
+            egui::pos2(by_at.x + by.size().x + 8.0, by_at.y + 2.0),
+            Vec2::splat(12.0),
+        ),
+        theme.SECONDARY,
+    );
+
+    // The summary, wrapped to the space the install button leaves.
+    let summary_width = rect.width() - 96.0 - 150.0;
+    let summary = painter.layout(
+        result.summary.to_owned(),
+        crate::fonts::body(13.5),
+        theme.SECONDARY,
+        summary_width,
+    );
+    painter.galley(egui::pos2(rect.left() + 96.0, rect.top() + 44.0), summary, theme.SECONDARY);
+
+    // The tag pills, each with its own glyph, then the stats on the same row.
+    let mut x = rect.left() + 96.0;
+    for tag in result.tags {
+        let text = painter.layout_no_wrap(tag.0.to_owned(), crate::fonts::body(11.0), theme.SECONDARY);
+        let pill = Rect::from_min_size(
+            egui::pos2(x, rect.top() + 104.0),
+            egui::vec2(text.size().x + 30.0, 24.0),
+        );
+        painter.rect_filled(pill, 12, theme.BUTTON_BG);
+        icons::draw(
+            painter,
+            tag.1,
+            Rect::from_center_size(
+                egui::pos2(pill.left() + 14.0, pill.center().y),
+                Vec2::splat(11.0),
+            ),
+            theme.SECONDARY,
+        );
+        painter.galley(
+            egui::pos2(pill.left() + 24.0, pill.center().y - text.size().y / 2.0),
+            text.clone(),
+            theme.SECONDARY,
+        );
+        x = pill.right() + 6.0;
+    }
+
+    // The stats and the install button, right-aligned: downloads, followers, updated.
+    let install = Rect::from_min_size(
+        egui::pos2(rect.right() - 16.0 - 96.0, rect.top() + 16.0),
+        egui::vec2(96.0, 36.0),
+    );
+    painter.rect_filled(install, 8, theme.BUTTON_BG_SELECTED);
+    painter.text(
+        install.center(),
+        Align2::CENTER_CENTER,
+        "Install",
+        crate::fonts::semibold(13.0),
+        theme.BUTTON_TEXT_SELECTED,
+    );
+    painter.text(
+        egui::pos2(rect.right() - 16.0, rect.top() + 116.0),
+        Align2::RIGHT_CENTER,
+        format!("{} downloads", result.downloads),
+        crate::fonts::body(11.0),
+        theme.SECONDARY,
+    );
+
     ui.add_space(g::CARD_GAP);
+}
+
+/// What a result card shows. The reference's list carries these fields and no others.
+pub struct Card<'a> {
+    /// The project's name.
+    pub title: &'a str,
+    /// The team that published it.
+    pub author: &'a str,
+    /// One or two sentences of description.
+    pub summary: &'a str,
+    /// The categories and loader, as (label, glyph).
+    pub tags: &'a [(&'a str, Glyph)],
+    /// The download count, already abbreviated the way the reference shows it.
+    pub downloads: &'a str,
+}
+
+/// Six results with the reference's own content, so a capture shows the real anatomy
+/// rather than lorem ipsum: the first four are the cards the reference's first capture
+/// displayed, in its order.
+fn sample_results() -> [Card<'static>; 6] {
+    [
+        Card {
+            title: "Fabulously Optimized",
+            author: "Fabulously Optimized",
+            summary: "Beautiful graphics, speedy performance and familiar features in a simple package. Wilderness Bound beta!",
+            tags: &[
+                ("Client", Glyph::Monitor),
+                ("Lightweight", Glyph::Sparkles),
+                ("Multiplayer", Glyph::Users),
+                ("Optimization", Glyph::Rocket),
+                ("Fabric", Glyph::Box),
+            ],
+            downloads: "19.38M",
+        },
+        Card {
+            title: "Zombie Invade 100 Days",
+            author: "FlameFire",
+            summary: "Same as Forge Labs 100 Days Zombie Apocalypse in new Minecraft.",
+            tags: &[
+                ("Client and server", Glyph::Users),
+                ("Challenging", Glyph::TagCategorySwords),
+                ("Forge", Glyph::Box),
+            ],
+            downloads: "15.36M",
+        },
+        Card {
+            title: "Cobblemon Official Modpack [Fabric]",
+            author: "Cobbled Studios",
+            summary: "The official modpack of the Cobblemon mod, for Fabric!",
+            tags: &[
+                ("Client and server", Glyph::Users),
+                ("Adventure", Glyph::Compass),
+                ("Lightweight", Glyph::Sparkles),
+                ("Fabric", Glyph::Box),
+            ],
+            downloads: "11.53M",
+        },
+        Card {
+            title: "COBBLEVERSE - Pokemon Adventure",
+            author: "LUMYVERSE",
+            summary: "Start a true Pokemon adventure in Minecraft: Cobblemon 1.7.3 [ALL 1025 Pokemon] • Mega Evolutions • Gyms & Badges • Starter Kit.",
+            tags: &[("Adventure", Glyph::Compass), ("Fabric", Glyph::Box)],
+            downloads: "7.31M",
+        },
+        Card {
+            title: "Better MC [FORGE]",
+            author: "Shivaxi",
+            summary: "The kitchen-sink pack that keeps its focus: quests, dungeons and a world that rewards exploring.",
+            tags: &[("Adventure", Glyph::Compass), ("Forge", Glyph::Box)],
+            downloads: "5.02M",
+        },
+        Card {
+            title: "All the Mods 10",
+            author: "ATMTeam",
+            summary: "Every mod that matters, curated and tested, with a quest book to hold it together.",
+            tags: &[("Kitchen sink", Glyph::Boxes), ("NeoForge", Glyph::Box)],
+            downloads: "4.88M",
+        },
+    ]
 }

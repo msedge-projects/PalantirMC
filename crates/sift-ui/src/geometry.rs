@@ -70,9 +70,9 @@ pub const SEARCH_ROW: f32 = 40.0;
 /// next horizontal edge below it.
 pub const TAB_STRIP: f32 = 36.0;
 
-/// A result card's height in Discover's list layout, measured from the reference's first
-/// card's top and the second card's top.
-pub const CARD: f32 = 116.0;
+/// A result card's height, measured at 2.2x from the reference's own card: the tile, the
+/// title row, two summary lines, the tag row and the padding add up to 148.
+pub const CARD: f32 = 148.0;
 
 /// The gap between two result cards.
 pub const CARD_GAP: f32 = 12.0;
