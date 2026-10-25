@@ -95,6 +95,9 @@ pub struct Shell {
     search: crate::widgets::search::Search,
     /// The network search behind that field.
     results: crate::search::Search,
+    /// Which of the tab strip's kinds the search is for: `modpack`, `mod`, `resourcepack`,
+    /// `datapack`, `shader` or `plugin`.
+    project_type: &'static str,
     /// The skins page's own state.
     skins: crate::pages::skins::State,
     /// The screenshots page's own state.
@@ -120,6 +123,7 @@ impl Default for Shell {
             project_state: crate::pages::project::State::default(),
             search: crate::widgets::search::Search::default(),
             results: crate::search::Search::default(),
+            project_type: "modpack",
             skins: crate::pages::skins::State::default(),
             screenshots: crate::pages::screenshots::State::default(),
             servers: crate::pages::servers::State::default(),
@@ -561,21 +565,46 @@ impl Shell {
         );
         painter.rect_filled(strip, 12, self.theme.RAISED_BG);
         let mut x = strip.left() + 6.0;
-        for (index, label) in ["Modpacks", "Mods", "Resource Packs", "Data Packs", "Shaders", "Servers"]
-            .into_iter()
-            .enumerate()
-        {
+        // The reference's six kinds. `Servers` has no search facet of its own -- it is a
+        // destination, not a project type -- so it keeps the plugins facet the API does have
+        // and says so here rather than quietly searching nothing.
+        const KINDS: [(&str, &str); 6] = [
+            ("Modpacks", "modpack"),
+            ("Mods", "mod"),
+            ("Resource Packs", "resourcepack"),
+            ("Data Packs", "datapack"),
+            ("Shaders", "shader"),
+            ("Servers", "plugin"),
+        ];
+        for (index, (label, kind)) in KINDS.into_iter().enumerate() {
             let galley = painter.layout_no_wrap(
                 label.to_owned(),
                 crate::fonts::semibold(14.0),
-                if index == 0 { self.theme.BUTTON_TEXT_SELECTED } else { self.theme.BASE },
+                if kind == self.project_type {
+                    self.theme.BUTTON_TEXT_SELECTED
+                } else {
+                    self.theme.BASE
+                },
             );
             let pill = Rect::from_min_size(
                 egui::pos2(x, strip.top() + 8.0),
                 egui::vec2(galley.size().x + 32.0, g::TAB_PILL),
             );
-            if index == 0 {
+            let selected = kind == self.project_type;
+            if selected {
                 painter.rect_filled(pill, 18, self.theme.BUTTON_BG_SELECTED);
+            }
+            // The pill is a target: pressing it switches the kind the search asks for, which is
+            // the whole reason the strip exists rather than being a label.
+            if ui
+                .interact(pill, egui::Id::new(("kind-tab", index)), Sense::click())
+                .clicked()
+                && !selected
+            {
+                self.project_type = kind;
+                // A new kind is a new search; dropping the answered query makes the request
+                // below fire even when the text has not changed.
+                self.results.forget();
             }
             painter.galley(
                 egui::pos2(pill.center().x - galley.size().x / 2.0, pill.center().y - galley.size().y / 2.0),
@@ -602,7 +631,7 @@ impl Shell {
         // The field's text drives the network search: a changed query starts one, and a
         // reply already in flight is collected here. Both are cheap when nothing changed.
         if let Some(query) = self.search.query().map(str::to_owned) {
-            self.results.request(&query);
+            self.results.request(&query, self.project_type);
         }
         self.results.poll();
         // `search.ui` took `ui` mutably, which ended the painter borrow taken above; the

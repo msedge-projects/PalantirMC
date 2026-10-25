@@ -92,25 +92,27 @@ impl Search {
         matches!(self.state, State::Loading)
     }
 
-    /// Ask for `query`, unless it is the one already answered or already out.
+    /// Ask for `query` within `project_type`, unless that is what is already answered or out.
     ///
     /// The empty query is not asked: Discover with no query shows the reference's own default
     /// feed, which is a different request with its own facets and does not belong here yet.
-    pub fn request(&mut self, query: &str) {
+    pub fn request(&mut self, query: &str, project_type: &str) {
         let query = query.trim();
-        if query.is_empty() || self.current.as_deref() == Some(query) {
+        let asked = format!("{project_type}\u{{1}}{query}");
+        if query.is_empty() || self.current.as_deref() == Some(asked.as_str()) {
             return;
         }
-        self.current = Some(query.to_owned());
+        self.current = Some(asked);
         self.state = State::Loading;
 
         let owned = query.to_owned();
-        let reply = owned.clone();
+        let kind = project_type.to_owned();
+        let reply = self.current.clone().unwrap_or_default();
         let sender = self.sender.clone();
         let spawned = std::thread::Builder::new()
             .name("sift-search".to_owned())
             .spawn(move || {
-                let _ = sender.send((reply, run(&owned)));
+                let _ = sender.send((reply, run(&owned, &kind)));
             });
         if spawned.is_err() {
             self.state = State::Failed {
@@ -118,6 +120,15 @@ impl Search {
                 reason: "could not start a search worker".to_owned(),
             };
         }
+    }
+
+    /// Forget the answered query, so the next `request` asks again.
+    ///
+    /// Used when the *kind* changes and the text does not: the query is the same string but the
+    /// question is different, and without this the second question would never be asked.
+    pub fn forget(&mut self) {
+        self.current = None;
+        self.state = State::Idle;
     }
 
     /// Take any reply that has arrived. Called once per frame by the page.
@@ -137,17 +148,22 @@ impl Search {
 }
 
 /// Fetch and decode one search. Runs on a worker thread.
-fn run(query: &str) -> Result<(Vec<Hit>, u64), String> {
+fn run(query: &str, project_type: &str) -> Result<(Vec<Hit>, u64), String> {
+    // The tab the reader is on is a facet, not a filter applied afterwards: the API answers
+    // the right kind of project and counts the right total, which a local filter could not.
     let url = sift_net::modrinth::search_url_parts(
         query,
-        Some("modpack"),
+        Some(project_type),
         Some("relevance"),
         20,
         0,
     );
     // The launcher's own client, streaming to a temporary file: the same timeout and user
     // agent as every other request, and a body that never has to fit on this thread's stack.
-    let path = std::env::temp_dir().join(format!("sift-search-{:016x}.json", hash(query)));
+    let path = std::env::temp_dir().join(format!(
+        "sift-search-{:016x}.json",
+        hash(&format!("{project_type}\u{{1}}{query}"))
+    ));
     let fetched = sift_net::download_file(&url, &path, Duration::from_secs(20))
         .map_err(|error| error.to_string());
     let body = match fetched {
@@ -246,11 +262,11 @@ mod tests {
     #[test]
     fn the_same_query_is_not_asked_twice() {
         let mut search = Search::default();
-        search.request("   ");
+        search.request("   ", "modpack");
         assert!(matches!(search.state(), State::Idle), "whitespace is not a query");
-        search.request("sodium");
+        search.request("sodium", "modpack");
         assert!(matches!(search.state(), State::Loading));
-        search.request("sodium");
+        search.request("sodium", "modpack");
         assert!(matches!(search.state(), State::Loading), "still the first request");
     }
 
