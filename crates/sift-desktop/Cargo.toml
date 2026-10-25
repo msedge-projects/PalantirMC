@@ -41,6 +41,13 @@ iced = { version = "0.12", features = ["image", "canvas", "advanced"] }
 sift-core = { path = "../sift-core" }
 sift-net = { path = "../sift-net" }
 sift-loader = { path = "../sift-loader" }
+# The game engine: metadata resolution, the install plan, the Java search, the
+# launch script and the worker. It lives in its own crate so the egui shell
+# (`crates/sift-ui`, its own workspace) can install and launch without going
+# through this one; this crate's `launch`, `install`, `meta`, `catalog`,
+# `instances`, `mods`, `accounts` and `wire` modules are re-exports of it, and the
+# engine has no iced dependency of its own.
+sift-game = { path = "../sift-game" }
 futures = "0.3"
 # No `reqwest` here, deliberately: this crate used to hold its own client for the
 # Modrinth API, which meant a second connection pool, a second `User-Agent` and a
@@ -48,9 +55,8 @@ futures = "0.3"
 # was `browse.rs`'s pack installer, and that goes over `sift-net`'s engine
 # now (G93), so the only HTTP client this launcher has is the engine's.
 # Offline account UUIDs are `java.util.UUID.nameUUIDFromBytes("OfflinePlayer:<name>")`,
-# which is MD5-based; matching it is what makes the same name the same player in
-# Prism, the vanilla launcher, and here.
-md-5 = "0.10"
+# which is MD5-based; the account store moved to `sift-game` with the launch code,
+# and `md-5` went with it.
 # Mojang publishes a `sha1` per library and asset; Modrinth publishes one per
 # file. Verifying either needs exactly this digest.
 sha1 = "0.10"

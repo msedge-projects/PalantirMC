@@ -3228,17 +3228,32 @@ dependencies = [
  "futures",
  "iced",
  "image",
- "md-5",
  "serde",
  "serde_json",
  "sha1",
  "sift-core",
+ "sift-game",
  "sift-loader",
  "sift-net",
  "tempfile",
  "wgpu",
  "windows-sys 0.52.0",
  "winresource",
+ "zip",
+]
+
+[[package]]
+name = "sift-game"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "md-5",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sift-core",
+ "sift-net",
+ "tempfile",
  "zip",
 ]
 

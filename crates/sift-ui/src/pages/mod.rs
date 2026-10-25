@@ -10,6 +10,7 @@
 //! the shell would be able to change the rail from inside a list, which is how a UI ends up
 //! with navigation nobody can trace.
 
+pub mod about;
 pub mod home;
 pub mod library;
 pub mod screenshots;

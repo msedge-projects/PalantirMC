@@ -1,11 +1,12 @@
 //! An instance's own settings, as a form: read back into controls and written
 //! on save. Two tabs, because the two writes are different kinds of thing.
 //!
-//! Why this exists at all: [`crate::model`] inherited a settings *reader* from
-//! `sift-gui` -- the override-gate semantics Prism keeps (`OverrideMemory`
-//! and its neighbours) -- and the note it left behind says the write side
-//! belongs to the page that never arrived. This is that page, as a modal,
-//! because a modal is where the reference keeps it: `InstanceSettingsModal`.
+//! Why this exists at all: the settings *reader* from `sift-gui` -- the
+//! override-gate semantics Prism keeps (`OverrideMemory` and its neighbours) --
+//! moved with the launch engine into `sift-game`'s `model` module, and the note it
+//! left behind says the write side belongs to the page that never arrived. This is
+//! that page, as a modal, because a modal is where the reference keeps it:
+//! `InstanceSettingsModal`.
 //!
 //! **The two halves, and where the reference keeps each.** The reference's modal
 //! has tabs for general, installation, sync overrides and sharing. Its

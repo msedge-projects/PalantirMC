@@ -65,12 +65,7 @@ mod icons_gen;
 mod install;
 mod instance_settings;
 mod instances;
-mod java_runtime;
 mod launch;
-/// The loader install a launch runs before it plans anything: Forge's and
-/// NeoForge's processors patch the client jar their own profile names, and the
-/// plan that follows has to see those files as present.
-mod loader_install;
 /// The language the interface is in: the tag, the table behind it, the fallback
 /// when the table has nothing to say, and the writing direction.
 ///
@@ -103,18 +98,6 @@ mod markdown;
 /// Prism's mirror only where a publisher serves nothing in the shape this
 /// launcher reads.
 mod meta;
-/// The view-model whose two readers are left: the instance list `instances.rs` is
-/// built from, and the override-gated settings `launch.rs` resolves a run with.
-///
-/// It arrived as a crate of its own -- `sift-gui`, whose only dependant was
-/// the shell that has since been deleted and whose reason to exist was a CLI
-/// that is gone -- and it lives here now so that the crate can go. What is
-/// deliberately *not* done in the same move is renaming or reshaping it: the
-/// model is Prism-shaped because `sift_core::settings` is, and both go when
-/// the flattening importer replaces the last of them. Moving it and redesigning
-/// it in one step would make a broken launch impossible to tell from a changed
-/// one.
-mod model;
 mod mods;
 /// The reference's motion: its own durations and curves, and the cubic Bézier
 /// solver a native toolkit does not have.

@@ -19,10 +19,18 @@
 //! finish a download trades one annoyance for a worse one. The system stays up;
 //! the screen is the screen's business.
 //!
-//! **Nesting is counted.** A launch runs its own install on the same worker
-//! thread, so two guards are held at once there. `ES_CONTINUOUS` on the second
-//! release would clear the first request outright, so the thread keeps a depth
-//! and only the outermost guard talks to the OS.
+//! **Nesting is counted.** Two guards can overlap when a caller wraps work that
+//! itself asks for one; `ES_CONTINUOUS` on the second release would clear the
+//! first request outright, so the thread keeps a depth and only the outermost
+//! guard talks to the OS.
+//!
+//! **The requests now sit at this shell's entry points.** The install and launch
+//! engine moved to `sift-game`, which is safe Rust and therefore cannot make this
+//! call; its `install::run` and `launch::run_launch_worker` document that the
+//! caller holds the guard. Here that is `shell.rs`, around the thread that runs a
+//! launch worker (whose install runs on the same thread), and
+//! `Store::repair_instance`, which runs a repair on the off-thread worker. An
+//! egui shell does the same at its own entry points.
 //!
 //! Off Windows there is nothing to ask -- the Linux and macOS builds here exist
 //! to run tests and the build VM -- so [`Awake`] still exists and does nothing,
@@ -196,28 +204,41 @@ mod tests {
         assert_eq!(recorded().last().copied(), Some(RELEASE));
     }
 
-    /// The guard only means anything where the work is, and neither of those two
+    /// The guard only means anything where the work is, and neither of the two
     /// places can be run here: an install needs a wire and a plan, a launch needs
-    /// a game. So the two function bodies are read out of the tree and held to
-    /// the line that has to be in them.
-    ///
-    /// The body is taken from the signature to the next `pub fn` at the start of
-    /// a line, which is the next item: none of these functions defines another.
+    /// a game. Since the engine moved to `sift-game` (safe Rust, so the Win32
+    /// request stays in this crate), the two call sites are this shell's: the
+    /// thread that runs the launch worker, and the store method that runs a
+    /// repair. Each body is read out of the tree and held to the line that has to
+    /// be in it.
     #[test]
     fn the_work_that_must_not_be_interrupted_holds_a_guard() {
-        for (source, signature) in [
-            (include_str!("install.rs"), "pub fn run("),
-            (include_str!("launch.rs"), "pub fn run_launch_worker("),
-        ] {
-            let body = source
-                .split(signature)
-                .nth(1)
-                .unwrap_or_else(|| panic!("{signature} is gone from its module"));
-            let body = body.split("\npub fn ").next().unwrap_or(body);
-            assert!(
-                body.contains("crate::awake::Awake::begin()"),
-                "{signature} no longer holds the machine awake"
-            );
-        }
+        // The launch: the engine's worker must be called with a guard already
+        // held on this thread, because the worker's own install runs on it too.
+        let shell = include_str!("shell.rs");
+        let call = shell
+            .find("launch::run_launch_worker(")
+            .expect("the launch worker is gone from the shell");
+        let before = &shell[..call];
+        let guard = before
+            .rfind("crate::awake::Awake::begin()")
+            .expect("the shell no longer holds the machine awake for a launch");
+        assert!(
+            before[guard..].lines().count() <= 10,
+            "the guard is not held around the worker call"
+        );
+
+        // The repair: the store wraps the engine's repair, which it runs on the
+        // off-thread worker.
+        let store = include_str!("store.rs");
+        let body = store
+            .split("pub fn repair_instance(")
+            .nth(1)
+            .expect("the repair is gone from the store");
+        let body = body.split("\n    pub fn ").next().unwrap_or(body);
+        assert!(
+            body.contains("crate::awake::Awake::begin()"),
+            "Store::repair_instance no longer holds the machine awake"
+        );
     }
 }

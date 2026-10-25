@@ -4,6 +4,10 @@ members = [
     "crates/sift-core",
     "crates/sift-net",
     "crates/sift-loader",
+    # The game engine: install, Java selection and launch. A workspace member of
+    # its own so both UI crates can depend on it -- the egui one is in a separate
+    # workspace (see below) and can reach it by path.
+    "crates/sift-game",
     "crates/sift-desktop",
     # `crates/sift-ui` is **not** a member, and cannot be: `iced_winit` 0.12
     # pins `web-sys = "=0.3.67"` and `eframe` 0.36 requires `^0.3.103`, so the two

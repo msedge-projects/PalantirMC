@@ -800,7 +800,7 @@ impl Store {
     /// them: this launcher's own preferences, read the way a launch reads them.
     fn launch_defaults(&self) -> crate::launch::LaunchDefaults {
         match &self.paths {
-            Some(paths) => crate::launch::LaunchDefaults::from_prefs(&crate::prefs::load(paths)),
+            Some(paths) => crate::launch::defaults_from_prefs(&crate::prefs::load(paths)),
             None => crate::launch::LaunchDefaults::default(),
         }
     }
@@ -1695,6 +1695,11 @@ impl Store {
         let Some(paths) = &self.paths else {
             return Err(not_implemented("Repairing an instance"));
         };
+        // A repair is the same minutes of transfer a launch is, and the engine
+        // no longer holds the wake guard itself (it is Win32 FFI, and
+        // `sift-game` is safe Rust). This method runs on the off-thread worker,
+        // so the guard belongs here, around the whole repair.
+        let _awake = crate::awake::Awake::begin();
         // The engine's own pool, not a second one built from the same numbers:
         // [`Store::install_project`]'s rule, and the reason there is a fetch here
         // at all.

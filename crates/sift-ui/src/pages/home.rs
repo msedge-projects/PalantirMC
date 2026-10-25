@@ -59,20 +59,24 @@ fn hero(ui: &mut Ui, rect: Rect, theme: &Theme, icons_cache: &mut Images) -> Act
     let painter = ui.painter();
     let centre_x = rect.center().x;
 
-    // The mark plate: 64 points, rounded, with the product mark inside it.
+    // The mark plate: 64 points, rounded, with the product mark inside it. The mark is the
+    // generated `logo512.png` texture (`brand::install` uploads it at startup), not a glyph
+    // and not a path beside the exe. When there is no texture -- a headless context, or a
+    // decode that failed -- the plate the mark sits on is what this frame draws: a frame
+    // must still draw something, and an empty hole in the hero reads as a broken build.
     let plate = Rect::from_center_size(
         egui::pos2(centre_x, rect.top() + 250.0),
         Vec2::splat(64.0),
     );
-    painter.rect_filled(plate, 16, theme.RAISED_BG);
-    painter.rect_stroke(
-        plate,
-        16,
-        Stroke::new(1.0, theme.ACCENT_CONTRAST.gamma_multiply(0.4)),
-        egui::StrokeKind::Inside,
-    );
-    // The brand mark is the logo asset, not a glyph; until the texture is uploaded for it,
-    // the accent plate the mark sits on carries the same weight.
+    if !crate::brand::paint_mark(painter, ui.ctx(), plate) {
+        painter.rect_filled(plate, 16, theme.RAISED_BG);
+        painter.rect_stroke(
+            plate,
+            16,
+            Stroke::new(1.0, theme.ACCENT_CONTRAST.gamma_multiply(0.4)),
+            egui::StrokeKind::Inside,
+        );
+    }
     let _ = icons_cache;
 
     painter.text(

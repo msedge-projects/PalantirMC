@@ -1,0 +1,36 @@
+[package]
+name = "sift-game"
+description = "Sift Launcher's game engine: metadata, install, Java selection, launch and repair"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# What a launch needs and a shell does not: the resolver's metadata stores, the
+# downloader's wire, the install plan, the loader's own installer, the Java
+# search and the launch script. `iced`, `wgpu` and `windows-sys` are deliberately
+# absent: the crate is safe Rust and every window-system question it cannot
+# answer is a parameter its caller fills in (see `lib.rs`).
+[dependencies]
+sift-core = { path = "../sift-core" }
+sift-net = { path = "../sift-net" }
+# The worker's event channel is a `futures` mpsc stream, which is what iced's
+# `subscription::channel` hands a subscription and what the egui shell can pump
+# from a thread too. It is not an iced type: iced appears nowhere in this crate.
+futures = "0.3"
+serde.workspace = true
+serde_json.workspace = true
+# Offline account UUIDs are `java.util.UUID.nameUUIDFromBytes("OfflinePlayer:<name>")`,
+# which is MD5-based; matching it is what makes the same name the same player in
+# Prism, the vanilla launcher, and here.
+md-5 = "0.10"
+# Mojang publishes a `sha1` per library and asset; Modrinth publishes one per
+# file. Verifying either needs exactly this digest.
+sha1 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+# The install and loader tests build small native and modifier jars and assert
+# on what the extractor writes, which needs a zip *writer*. Same version
+# `sift-loader` already pulls in, so this adds nothing to the build.
+zip = "0.6"

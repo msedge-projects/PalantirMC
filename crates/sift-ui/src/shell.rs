@@ -110,6 +110,8 @@ pub struct Shell {
     servers: crate::pages::servers::State,
     /// A one-line message shown after an action, until the next one.
     toast: Option<String>,
+    /// Whether the About modal is showing.
+    about_open: bool,
 }
 
 impl Default for Shell {
@@ -134,6 +136,7 @@ impl Default for Shell {
             screenshots: crate::pages::screenshots::State::default(),
             servers: crate::pages::servers::State::default(),
             toast: None,
+            about_open: false,
         }
     }
 }
@@ -248,8 +251,13 @@ impl Shell {
             self.content_column(ui)
         };
 
+        // The About modal is drawn over the whole window, last, so nothing paints on top
+        // of it. It reports whether it is still open, which is the frame debt it owes.
+        let about = crate::pages::about::draw(ui, Self::window_rect(), &self.theme, &mut self.about_open);
+        rail_animating |= about;
+
         // An icon in flight is a reason to draw the next frame, exactly like a hover.
-        rail_animating || content || self.icons.loading() || self.results.loading()
+        rail_animating || content || self.icons.loading() || self.results.loading() || about
     }
 
     /// The top bar: the mark and the page's name at the left, window controls at the right.
@@ -266,10 +274,13 @@ impl Shell {
 
         // The mark and the product name, at the reference's own inset.
         let mark = Rect::from_min_size(egui::pos2(10.0, 10.0), Vec2::splat(20.0));
-        // The reference's mark is its brand logo, which the icon set does not carry: it
-        // is `logo512.png`, uploaded as a texture in the slice that does image loading.
-        // Until then the plate is drawn in the accent, so the bar keeps its anchor.
-        painter.rect_filled(mark, 5, self.theme.ACCENT_CONTRAST);
+        // The reference's mark is its brand logo, which the icon set does not carry: it is
+        // `logo512.png`, through the texture `brand::install` uploads at startup. The accent
+        // plate is the fallback for a frame with no texture -- a headless run, or a failed
+        // decode -- so the bar keeps its anchor instead of losing its left end.
+        if !crate::brand::paint_mark(painter, ui.ctx(), mark) {
+            painter.rect_filled(mark, 5, self.theme.ACCENT_CONTRAST);
+        }
         painter.text(
             egui::pos2(mark.right() + 8.0, bar.center().y),
             Align2::LEFT_CENTER,
@@ -431,6 +442,10 @@ impl Shell {
             rail.bottom() - 3.0 * g::RAIL_PITCH - 24.0,
             Stroke::new(1.0, self.theme.DIVIDER),
         );
+        // The reference's three: settings, reload, account. Only the account row does
+        // something yet -- it opens About. The other two are honest about it below: a press
+        // that silently does nothing reads as a broken button, so they answer with a toast
+        // naming what is missing.
         for (index, glyph) in [Glyph::Settings, Glyph::RefreshCw, Glyph::CircleUser]
             .into_iter()
             .enumerate()
@@ -439,12 +454,18 @@ impl Shell {
                 g::RAIL / 2.0,
                 rail.bottom() - 24.0 - (2 - index) as f32 * g::RAIL_PITCH,
             );
-            icons::draw(
-                painter,
-                glyph,
-                Rect::from_center_size(centre, Vec2::splat(20.0)),
-                self.theme.SECONDARY,
-            );
+            let target = Rect::from_center_size(centre, Vec2::splat(32.0));
+            icons::draw(painter, glyph, target, self.theme.SECONDARY);
+            if ui
+                .interact(target, egui::Id::new(("utility", index)), Sense::click())
+                .clicked()
+            {
+                match index {
+                    2 => self.about_open = true,
+                    0 => self.toast = Some("Settings are not wired yet.".to_owned()),
+                    _ => self.toast = Some("Reload is not wired yet.".to_owned()),
+                }
+            }
         }
 
         // A hover that changed keeps the loop alive for the transition; once the hover
@@ -454,6 +475,14 @@ impl Shell {
             animating = true;
         }
         animating
+    }
+
+    /// The whole window, which is what a modal covers.
+    fn window_rect() -> Rect {
+        Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(g::WINDOW.0, g::WINDOW.1),
+        )
     }
 
     /// The toolbar's `first - last` range, from the search's own answering.

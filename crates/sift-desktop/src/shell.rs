@@ -4709,7 +4709,7 @@ impl Shell {
                 instance_id: id.clone(),
                 data_root,
                 account: self.account(),
-                defaults: launch::LaunchDefaults::from_prefs(&self.prefs),
+                defaults: launch::defaults_from_prefs(&self.prefs),
             },
             // Its own slot, empty until its worker starts the game: this is what
             // makes a second run's stop control the second run's.
@@ -4927,6 +4927,13 @@ impl Shell {
                 let (events, mut stream) =
                     futures::channel::mpsc::channel::<launch::LaunchEvent>(128);
                 let _ = std::thread::spawn(move || {
+                    // The engine is safe Rust, so it cannot make the Win32
+                    // `SetThreadExecutionState` call itself; the guard is per
+                    // thread and this is the thread that resolves, installs and
+                    // then sits on the game's output. Taken before the worker
+                    // starts, dropped when it returns -- including the install
+                    // the worker runs on this same thread.
+                    let _awake = crate::awake::Awake::begin();
                     launch::run_launch_worker(params, slot, events);
                 });
                 let mut sender = sender;

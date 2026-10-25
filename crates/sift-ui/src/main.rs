@@ -17,6 +17,9 @@
 //! `ctx.request_repaint()` every frame, which is the behaviour `docs/LIGHTNESS.md` names as
 //! the idle-CPU budget's failure mode.
 
+/// The product's mark, embedded and uploaded once: the exe is the product, so its logo
+/// travels inside it rather than beside it.
+mod brand;
 mod data;
 mod fonts;
 mod frame_log;
@@ -50,6 +53,10 @@ fn main() -> eframe::Result<()> {
             // Inter at the reference's weights, then the reference's palette: a theme
             // without its type is half a theme, and the first capture showed the gap.
             fonts::install(&cc.egui_ctx);
+            // The mark's texture, uploaded before the first frame, so the title bar's first
+            // paint is the product's logo rather than the plate that stands in for it. Both
+            // calls are process-wide setup and neither depends on the other.
+            brand::install(&cc.egui_ctx);
             cc.egui_ctx.set_visuals(shell.theme.colors());
             Ok(Box::new(App {
                 shell,

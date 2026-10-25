@@ -48,6 +48,11 @@ pub const DOWNLOAD_THREADS: usize = 6;
 /// written and never read on the launch path until this struct existed, which
 /// made the tab a promise the launcher did not keep: set Java 21 there, and the
 /// game ran on whatever the scan happened to find.
+///
+/// The conversion from the shell's preferences lives in `sift-desktop`'s launch
+/// shim (`launch::java_prefs`) rather than here: `Prefs` is the shell's settings
+/// file and carries UI state this crate has no business knowing about. The two
+/// readers below are the whole of the contract a launch needs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JavaPrefs {
     /// The "Java executable" path, used when nothing more specific applies.
@@ -57,32 +62,6 @@ pub struct JavaPrefs {
 }
 
 impl JavaPrefs {
-    /// Read the Java tab out of this launcher's own preferences.
-    ///
-    /// A key that is not a number and a path that is blank are both dropped:
-    /// the first is a file from a newer build or a hand-edit, and the second is
-    /// how the tab records "nothing chosen" — neither is a Java to run with.
-    pub fn from_prefs(prefs: &crate::prefs::Prefs) -> JavaPrefs {
-        let by_major = prefs
-            .java_paths
-            .iter()
-            .filter_map(|(major, path)| {
-                let major = major.trim().parse::<i64>().ok()?;
-                let path = path.trim();
-                (!path.is_empty()).then(|| (major, path.to_string()))
-            })
-            .collect();
-        JavaPrefs {
-            default_path: prefs
-                .default_java_path
-                .as_deref()
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
-            by_major,
-        }
-    }
-
     /// The configured binaries that answer `majors`, in the order the version
     /// lists its majors rather than in key order: the first is the one the
     /// version would prefer, and that is the one to try first.
@@ -439,40 +418,6 @@ mod tests {
     use super::*;
     use crate::wire::Script;
     use serde_json::json;
-
-    #[test]
-    fn the_java_tab_reaches_the_launch_path() {
-        let mut prefs = crate::prefs::Prefs::default();
-        prefs.default_java_path = Some("  C:/jdk/bin/javaw.exe ".to_string());
-        prefs
-            .java_paths
-            .insert("8".to_string(), "C:/jdk8/bin/java.exe".to_string());
-        prefs
-            .java_paths
-            .insert("21".to_string(), "C:/jdk21/bin/java.exe".to_string());
-        // Neither of these is a Java to run with.
-        prefs
-            .java_paths
-            .insert("not-a-major".to_string(), "C:/nope/java.exe".to_string());
-        prefs.java_paths.insert("17".to_string(), "   ".to_string());
-
-        let java = JavaPrefs::from_prefs(&prefs);
-        assert_eq!(java.default_binary(), Some("C:/jdk/bin/javaw.exe"));
-        assert_eq!(
-            java.by_major.len(),
-            2,
-            "a bad key and a blank path are not choices"
-        );
-        // The version's own order decides, not the map's. This is the case the
-        // tab exists for: 1.12.2 accepts 8 and would otherwise be run on 21.
-        assert_eq!(
-            java.for_majors(&[8, 21]),
-            vec![(8, "C:/jdk8/bin/java.exe"), (21, "C:/jdk21/bin/java.exe")]
-        );
-        assert_eq!(java.for_majors(&[21, 8])[0].0, 21);
-        assert!(java.for_majors(&[17]).is_empty());
-        assert!(JavaPrefs::default().default_binary().is_none());
-    }
 
     fn temp_paths() -> (tempfile::TempDir, SiftPaths) {
         let dir = tempfile::tempdir().unwrap();

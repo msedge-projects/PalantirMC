@@ -27,6 +27,11 @@
 //! Every derived file comes from `tools/gen_brand.py`, which is that recipe in
 //! code. Regenerate with `python tools/gen_brand.py`; `--check` fails if the
 //! files on disk are not what it writes.
+//!
+//! One split since the launch engine moved to `sift-game`: the product name and
+//! version are *text* the engine also writes (into the launch script and the run
+//! log), so they are defined in `sift_game::brand` and re-exported below. The art
+//! and the window icon stay here, because they are this shell's.
 
 use iced::widget::image::Handle;
 use iced::window::Icon;
@@ -34,10 +39,11 @@ use std::sync::OnceLock;
 
 /// Product name shown in the title bar, the hero card and the About page.
 ///
-/// [`sift_core::PRODUCT_NAME`] rather than a second literal: the name also
-/// travels into the game through the launch script, and two spellings of one
-/// product name is how a window ends up labelled with a different launcher.
-pub const APP_NAME: &str = sift_core::PRODUCT_NAME;
+/// Defined in `sift-game` because the name also travels into the game through
+/// the launch script and the run log, and two spellings of one product name is
+/// how a window ends up labelled with a different launcher. The re-export keeps
+/// every use in this crate unchanged.
+pub use sift_game::brand::APP_NAME;
 
 /// Embedded hero logo (512x512 RGBA PNG, transparent backdrop).
 const LOGO_PNG: &[u8] = include_bytes!("../assets/brand/logo512.png");
@@ -46,9 +52,10 @@ const LOGO_PNG: &[u8] = include_bytes!("../assets/brand/logo512.png");
 const ICON_PNG: &[u8] = include_bytes!("../assets/brand/icon256.png");
 
 /// Version reported by the About page (`Cargo.toml`).
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+///
+/// From `sift-game` for [`APP_NAME`]'s reason: the run log writes the same
+/// number, and the workspace gives every member one version to write.
+pub use sift_game::brand::version;
 
 /// `Sift Launcher 0.1.0` — used on the About page and in logs.
 #[cfg(test)]
