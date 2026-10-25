@@ -132,6 +132,19 @@ jobs:
       - name: Locale table regeneration
         run: python tools/gen_locale.py --check
 
+      # The egui side has generators of its own, and a generated file nobody checks is a
+      # generated file that drifts silently: theme.rs is 1,382 lines of tokens read out of
+      # the vendored CSS, icons.rs is 29,013 lines of shapes built from its SVGs.
+      - name: egui theme regeneration
+        run: python tools/gen_theme_egui.py --check
+
+      - name: egui icon regeneration
+        run: python tools/gen_icons_egui.py --check
+
+      # And the brand art: four files derived from one source, with a byte-level gate.
+      - name: Brand art regeneration
+        run: python tools/gen_brand.py --check
+
       # This tree has never been run through rustfmt, so formatting reports
       # rather than blocks. Remove `continue-on-error` once `cargo fmt --all`
       # has been committed and reviewed.

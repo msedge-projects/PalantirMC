@@ -27,7 +27,7 @@ takes a sequence of subpaths and cubic Beziers; egui's `epaint::PathShape` takes
   with holes cannot be expressed here at all: see `--report` and the module
   docstring of the generated file.
 
-    python tools/gen_icons_egui.py            # write crates/sift-ui/src/icons.rs
+    python tools/gen_icons_egui.py            # write the egui crate's src/icons.rs
     python tools/gen_icons_egui.py --check    # fail if the file on disk is not this
     python tools/gen_icons_egui.py --report   # glyph/shape counts and what cannot be drawn
 
@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -57,7 +58,37 @@ if str(TOOLS) not in sys.path:
 import gen_icons  # noqa: E402  -- after the path fix-up above, and it is the point
 
 ROOT = gen_icons.ROOT
-OUT = ROOT / "crates" / "sift-ui" / "src" / "icons.rs"
+
+# The crate this writes into, by the names it has had. The egui crate was renamed
+# while this tool was being written (`palantir-egui` -> `sift-ui`), and a hard-coded
+# destination is a megabyte of generated file in a directory nobody reads the day it
+# is renamed again. The first name that exists wins; there is only ever one.
+EGUI_CRATE_NAMES = ("sift-ui", "palantir-egui")
+
+# Where the iced file this one mirrors lives, asked of the generator that writes it
+# rather than written out here. The tree has been renamed once already and a second
+# literal path is a second thing to forget; `gen_icons.OUT` is the answer the iced
+# generator itself uses.
+ICED = gen_icons.OUT
+ICED_FROM_ROOT = ICED.relative_to(ROOT).as_posix()
+
+
+def output() -> Path:
+    """The file to write: the egui crate's `src/icons.rs`.
+
+    `include_str!` in the generated test is resolved from the directory of the file
+    containing it, so the path to the iced file is computed against whichever
+    directory this lands in. The path is returned from here rather than
+    `ICED_INCLUDE` being a module constant for the same reason `OUT` is not one:
+    importing this module must not decide where the tree is.
+    """
+    for name in EGUI_CRATE_NAMES:
+        crate = ROOT / "crates" / name
+        if crate.is_dir():
+            return crate / "src" / "icons.rs"
+    raise SystemExit(
+        "no egui crate under crates/ (looked for " + " and ".join(EGUI_CRATE_NAMES) + ")"
+    )
 
 # How flat a flattened cubic has to be, as a fraction of the view box's long side.
 #
@@ -212,31 +243,44 @@ def subpaths(element, tolerance: float) -> list[tuple[list[tuple[float, float]],
 # --------------------------------------------------------------------------
 
 
-def cross(o, a, b) -> float:
-    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-
-def is_convex(points: list[tuple[float, float]]) -> bool:
-    """Whether the points, in order, wind the same way at every corner.
-
-    The tolerance is relative to the edge lengths so that a nearly-straight corner
-    after rounding does not read as a reversal: the emitted coordinates are only
-    kept to three decimals.
-    """
+def signed_area(points: list[tuple[float, float]]) -> float:
+    """The shoelace area. Its sign is the contour's winding direction."""
+    total = 0.0
     count = len(points)
-    if count < 3:
-        return False
-    sign = 0
     for index in range(count):
-        o, a, b = points[index], points[(index + 1) % count], points[(index + 2) % count]
-        value = cross(o, a, b)
-        scale = math.hypot(a[0] - o[0], a[1] - o[1]) * math.hypot(b[0] - a[0], b[1] - a[1])
-        if scale == 0.0 or abs(value) <= 1e-9 * scale:
+        x1, y1 = points[index]
+        x2, y2 = points[(index + 1) % count]
+        total += x1 * y2 - x2 * y1
+    return 0.5 * total
+
+
+def fan_covers(points: list[tuple[float, float]]) -> bool:
+    """Whether epaint's triangle fan covers exactly this contour.
+
+    epaint fills a path with the triangles `(0, i-1, i)` taken from the first point
+    and documents the result as convex-only. Convexity is sufficient and not
+    necessary: the fan is exact for any contour that is star-shaped as seen from
+    its first point, and a fan triangle leaves the contour only where an edge turns
+    away from that point. That weaker test is the one used here, because it is what
+    the tessellator actually draws.
+
+    The tolerance is a perpendicular distance, so it does not move with the icon's
+    units, and it is far below the emitted coordinates' precision.
+    """
+    area = signed_area(points)
+    if area == 0.0:
+        return False
+    sign = 1.0 if area > 0 else -1.0
+    origin = points[0]
+    count = len(points)
+    for index in range(count):
+        a, b = points[index], points[(index + 1) % count]
+        edge_x, edge_y = b[0] - a[0], b[1] - a[1]
+        length = math.hypot(edge_x, edge_y)
+        if length == 0.0:
             continue
-        corner = 1 if value > 0 else -1
-        if sign == 0:
-            sign = corner
-        elif sign != corner:
+        apart = edge_x * (origin[1] - a[1]) - edge_y * (origin[0] - a[0])
+        if sign * apart / length < -1e-3:
             return False
     return True
 
@@ -255,24 +299,66 @@ def point_inside(point, polygon: list[tuple[float, float]]) -> bool:
     return inside
 
 
-def fill_limitation(shape_list: list[tuple[list[tuple[float, float]], bool]]) -> str | None:
+def orientation(a, b, c) -> int:
+    value = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    if abs(value) < 1e-9:
+        return 0
+    return 1 if value > 0 else -1
+
+
+def on_segment(a, b, c) -> bool:
+    return (min(a[0], b[0]) - 1e-9 <= c[0] <= max(a[0], b[0]) + 1e-9
+            and min(a[1], b[1]) - 1e-9 <= c[1] <= max(a[1], b[1]) + 1e-9)
+
+
+def edges_cross(a, b, c, d) -> bool:
+    first, second = orientation(a, b, c), orientation(a, b, d)
+    third, fourth = orientation(c, d, a), orientation(c, d, b)
+    if first != second and third != fourth:
+        return True
+    return ((first == 0 and on_segment(a, b, c))
+            or (second == 0 and on_segment(a, b, d))
+            or (third == 0 and on_segment(c, d, a))
+            or (fourth == 0 and on_segment(c, d, b)))
+
+
+def contours_cross(first: list[tuple[float, float]],
+                   second: list[tuple[float, float]]) -> bool:
+    for outer_index in range(len(first)):
+        for inner_index in range(len(second)):
+            if edges_cross(first[outer_index], first[(outer_index + 1) % len(first)],
+                           second[inner_index], second[(inner_index + 1) % len(second)]):
+                return True
+    return False
+
+
+def fill_limitation(shape_list: list[tuple[list[tuple[float, float]], bool]],
+                    even_odd: bool) -> str | None:
     """Why epaint cannot draw this filled element, or `None` if it can.
 
     `PathShape` has a fill colour and no fill rule, and epaint's fill is a triangle
-    fan from the first point of the loop, documented as being for convex polygons.
-    So a contour that is one convex loop is exact; disjoint convex loops are exact
-    one shape each; anything with a hole or a concave outline is not.
+    fan from the first point of each contour. So an element is exact here when
+    every contour is one the fan covers (see `fan_covers`) and the element has no
+    hole; disjoint contours are then exact as one shape each. An element is not
+    exact when a hole is cut -- by `fill-rule="evenodd"`, which punches one at
+    every second nesting, or by a nested contour wound the other way, which
+    `nonzero` subtracts -- because the hole would be filled solid.
     """
     for points, _ in shape_list:
-        if not is_convex(points):
-            return "concave outline"
-    if len(shape_list) > 1:
-        for outer_index, (outer, _) in enumerate(shape_list):
-            for inner_index, (inner, _) in enumerate(shape_list):
-                if outer_index == inner_index:
-                    continue
-                if any(point_inside(point, outer) for point in inner):
-                    return "hole (a subpath nested inside another)"
+        if not fan_covers(points):
+            return "a concave outline the fan cannot cover"
+    for first_index in range(len(shape_list)):
+        for second_index in range(first_index + 1, len(shape_list)):
+            first, second = shape_list[first_index][0], shape_list[second_index][0]
+            if contours_cross(first, second):
+                return "two contours that cross"
+            nested = any(point_inside(point, first) for point in second) \
+                or any(point_inside(point, second) for point in first)
+            if not nested:
+                continue
+            same_winding = signed_area(first) * signed_area(second) > 0.0
+            if even_odd or not same_winding:
+                return "hole (a subpath nested inside another)"
     return None
 
 
@@ -336,6 +422,17 @@ def number(value: float, places: int = DECIMALS) -> str:
     return text if "." in text else text + ".0"
 
 
+def width_text(value: float) -> str:
+    """A stroke width the way Rust's `Display` for `f32` spells it.
+
+    `gen_icons.width_text` is the iced generator's answer to exactly this question
+    -- it rounds to the emitted precision and then asks for the shortest spelling
+    that round-trips through `f32` -- so the two files' exception lists are spelled
+    the same way and the width test compares against the same strings.
+    """
+    return gen_icons.width_text(value)
+
+
 def point_source(point: tuple[float, float]) -> str:
     return f"({number(point[0])}, {number(point[1])})"
 
@@ -390,7 +487,7 @@ def main() -> int:
             found = subpaths(element, tolerance)
             if element.filled:
                 filled_elements += 1
-                reason = fill_limitation(found)
+                reason = fill_limitation(found, element.even_odd)
                 if reason is not None:
                     not_expressible.append((name, index, reason, element.even_odd))
             for points, closed in found:
@@ -403,10 +500,11 @@ def main() -> int:
         (name, rust, len(shapes)) for name, rust, _, _, shapes in geometry
     ]
     total_shapes = sum(count for _, _, count in shape_counts)
+    distinct_counts = len({count for _, _, count in shape_counts})
     total_points = sum(len(points) for _, _, _, _, shapes in geometry for points, _, _ in shapes)
     largest = max(shape_counts, key=lambda entry: entry[2])
     width_exceptions = sorted({
-        f"{name}:{number(element.stroke_width, WIDTH_DECIMALS)}"
+        f"{name}:{width_text(element.stroke_width)}"
         for name, _, _, elements, _ in geometry
         for element in elements
         if abs(element.stroke_width - 2.0) > 0.01
@@ -457,7 +555,7 @@ def main() -> int:
     add("//!")
     add("//! **Generated by `tools/gen_icons_egui.py`. Do not edit.**")
     add("//!")
-    add("//! This is the egui twin of `crates/palantir-desktop/src/icons_gen.rs`: the")
+    add(f"//! This is the egui twin of `{ICED_FROM_ROOT}`: the")
     add(f"//! same {numbers['glyphs']} SVGs out of `vendor/modrinth-app/assets/icons`, read by")
     add("//! the same parser, listed in the same order under the same names, so the two")
     add("//! files can be diffed a glyph at a time. The parser is not copied --")
@@ -483,8 +581,8 @@ def main() -> int:
     add("//! **A `PathShape` is one polyline.** iced's path builder holds subpaths and")
     add("//! cubic Beziers; `epaint::PathShape` holds a `Vec<Pos2>` and nothing else. So")
     add("//! the generator flattens every cubic at generation time -- recursive halving")
-    add("//! until both control points are within {flatness} of the view box's long".format(**numbers))
-    add("//! side of the chord, which is 0.05 px at 24 px and 0.1 px at 48 px, well")
+    add("//! until both control points are within {flatness} of the view box's long side".format(**numbers))
+    add("//! of the chord, which is 0.05 px at 24 px and 0.1 px at 48 px, well")
     add("//! under epaint's half-pixel feathering -- and splits every element into one")
     add("//! shape per subpath, because a `PathShape` cannot hold two. Flattening here")
     add("//! rather than per frame is the whole reason the coordinates in this file are")
@@ -495,21 +593,24 @@ def main() -> int:
     add("//! and these shapes draw the same picture. It is **not** exact for fills, and")
     add("//! that is the one thing this file cannot say:")
     add("//!")
-    add(f"//! **{numbers['unsupported']} of the {numbers['filled_elements']} filled elements have no")
-    add("//! egui shape.** `PathShape` has a fill colour and no fill rule, and epaint")
-    add("//! fills a path with a triangle fan from its first point, documented as")
-    add("//! convex-only. An element that is one convex contour is therefore exact, and")
-    add("//! so is one made of disjoint convex contours -- each becomes its own shape.")
-    add("//! An element with a **hole** or a **concave outline** is not: the hole is")
-    add("//! filled solid, or the fan covers ground the outline does not. These:")
+    add(f"//! **{numbers['unsupported']} of the {numbers['filled_elements']} filled elements have no egui")
+    add("//! shape.** `PathShape` has a fill colour and no fill rule, and epaint")
+    add("//! fills a path with a triangle fan from its first point. That fan covers a")
+    add("//! contour exactly when the contour is star-shaped as seen from that point --")
+    add("//! the toolkit documents convex, which is sufficient and not necessary -- so")
+    add("//! an element of disjoint such contours is exact, one shape each. An element")
+    add("//! with a **hole** or an **outline the fan cannot cover** is not: the hole is")
+    add("//! filled solid (no fill rule to cut it, and a nested contour wound the other")
+    add("//! way is subtracted by the reference's `nonzero`), or the fan paints ground")
+    add("//! the outline does not. These:")
     add("//!")
     for name in sorted(unsupported_by_glyph):
         add(f"//! * `{name}.svg` -- {'; '.join(unsupported_by_glyph[name])}")
     add("//!")
     add("//! The iced side carries the reference's `fill-rule` and honours it, so those")
     add("//! glyphs are drawn correctly there and only approximately here. Nothing else")
-    add(f"//! in the set is affected: the other {numbers['filled_elements'] - numbers['unsupported']}")
-    add("//! filled elements are expressible.")
+    add(f"//! in the set is affected: the other {numbers['filled_elements'] - numbers['unsupported']} filled")
+    add("//! elements are expressible.")
     add("//!")
     add(f"//! **{numbers['no_paint']} elements are not here at all.** They are the shapes the")
     add("//! reference declares with neither a fill nor a stroke -- the clamp path every")
@@ -812,7 +913,7 @@ def main() -> int:
     add("/// screen coordinates: an icon that has moved is a different set of points.")
     add("/// `f32` is not `Eq`, so the three floats are compared by their bits -- two")
     add("/// offsets differing in the last bit are two different pictures anyway.")
-    add("#[derive(Clone, Copy, PartialEq, Eq, Hash)]")
+    add("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]")
     add("struct CacheKey {")
     add("    glyph: Glyph,")
     add("    scale: u32,")
@@ -962,7 +1063,7 @@ def main() -> int:
     add("        // the variants are the same names in the same order. The iced file is")
     add("        // read at compile time rather than copied here, so this fails the day")
     add("        // the two generators disagree instead of the day somebody notices.")
-    add("        let iced = include_str!(\"../../palantir-desktop/src/icons_gen.rs\");")
+    add(f"        let iced = include_str!(\"{ICED_INCLUDE}\");")
     add("        let mut expected: Vec<String> = Vec::new();")
     add("        let mut inside = false;")
     add("        for line in iced.lines() {")
@@ -1055,7 +1156,7 @@ def main() -> int:
     add(f"        assert_eq!(total, {total_shapes}, \"the shape total moved\");")
     add("        let distinct: std::collections::BTreeSet<u32> =")
     add("            PATH_COUNTS.iter().map(|(_, count)| *count).collect();")
-    add("        assert!(distinct.len() >= 20, \"the counts have collapsed: {distinct:?}\");")
+    add(f"        assert_eq!(distinct.len(), {distinct_counts}, \"the counts have collapsed or spread\");")
     add("    }")
     add("")
     add("    #[test]")
@@ -1243,6 +1344,7 @@ def main() -> int:
     add("            .collect();")
     add("        fixed.sort_unstable();")
     add(f"        let expected: Vec<&str> = vec![{', '.join(chr(34) + n + chr(34) for n in fixed_colours)}];")
+    add("        assert!(!fixed.is_empty(), \"the list is empty, so this proves nothing\");")
     add("        assert_eq!(fixed, expected, \"the glyphs with a literal ink moved\");")
     add("        let mut tokens: Vec<String> = every()")
     add("            .into_iter()")
@@ -1259,6 +1361,7 @@ def main() -> int:
     add("        tokens.sort_unstable();")
     add("        tokens.dedup();")
     add(f"        let expected: Vec<&str> = vec![{', '.join(chr(34) + t + chr(34) for t in tokens)}];")
+    add("        assert!(!tokens.is_empty(), \"the list is empty, so this proves nothing\");")
     add("        assert_eq!(tokens, expected, \"the tokens the set asks for moved\");")
     add("    }")
     add("}")

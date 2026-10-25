@@ -68,6 +68,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -285,7 +286,7 @@ def strip_comments(text: str) -> str:
 
     A block comment becomes spaces with its newlines kept, and a `//` comment loses its
     text but keeps its newline, so a declaration's line here is the line an editor
-    shows. `://` is left alone: a `url(https://…)` is not a comment.
+    shows. `://` is left alone: a `url(https://...)` is not a comment.
     """
     text = re.sub(r"/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
     lines = []
@@ -309,7 +310,7 @@ class Decl:
 
 @dataclass
 class Block:
-    """One `selector { … }` with its declarations, `@extend`s and start line."""
+    """One `selector { ... }` with its declarations, `@extend`s and start line."""
 
     selectors: list[str]
     line: int
@@ -366,7 +367,7 @@ def split_tokens(item: str) -> list[str]:
 def parse_declarations(body: str, start_line: int) -> tuple[dict[str, Decl], list[str]]:
     """The custom properties in one block body, with `@extend`s, skipping nested rules.
 
-    `defaults.scss` nests blocks inside `body` (`input[type='number'] { … }`); their
+    `defaults.scss` nests blocks inside `body` (`input[type='number'] { ... }`); their
     declarations belong to a more specific selector than the cascade this models, so
     they are dropped rather than mis-attributed to the parent. A value written across
     several lines is joined with a single space, which is what a browser does with it.
@@ -425,7 +426,7 @@ def parse_declarations(body: str, start_line: int) -> tuple[dict[str, Decl], lis
 
 
 def parse_sheet(text: str) -> list[Block]:
-    """Every top-level `selector { … }` in a stylesheet, in file order."""
+    """Every top-level `selector { ... }` in a stylesheet, in file order."""
     text = strip_comments(text)
     line_starts = [0]
     for index, char in enumerate(text):
@@ -847,6 +848,15 @@ def short(sheet: str) -> str:
     return sheet.rsplit("/", 1)[-1]
 
 
+def wrap_doc(text: str, width: int = 88) -> list[str]:
+    """A doc paragraph wrapped for a `/// ` line, so no comment wraps mid-phrase."""
+    return [
+        f"/// {line}"
+        for line in textwrap.wrap(text, width=width - 4, break_long_words=False,
+                                   break_on_hyphens=False)
+    ]
+
+
 def seconds(millis: int) -> str:
     """`50` -> `0.05s`, `200` -> `0.2s`, so a comment reads the way the sheet writes it."""
     text = f"{millis / 1000:.3f}".rstrip("0").rstrip(".")
@@ -857,8 +867,9 @@ def provenance(resolution: Resolution) -> str:
     """`variables.scss:233`, plus the `var()` chain when the value was reached through one."""
     text = f"{short(resolution.final_sheet)}:{resolution.final_line}"
     if resolution.chain:
-        chain = " -> ".join(f"var({name})" for name, *_ in resolution.chain)
-        text += f" (via {chain} at {short(resolution.declared_sheet)}:{resolution.declared_line})"
+        chain = " -> ".join(name for name, *_ in resolution.chain)
+        text += (f" (via {chain}, declared at "
+                 f"{short(resolution.declared_sheet)}:{resolution.declared_line})")
     return text
 
 
@@ -937,7 +948,7 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     transitions = scan_transitions(tables["dark"])
     picked = [(pick, pick_transition(transitions, pick)) for pick in MOTION_PICKS]
 
-    # The easing consts, in the order they are first used. A `var(--ease-…)` is cited
+    # The easing consts, in the order they are first used. A `var(--ease-*)` is cited
     # at the `:root` line that declares the curve; an inline bezier at the transition
     # that spells it out.
     easings: dict[str, tuple[str, tuple[float, float, float, float], str]] = {}
@@ -982,6 +993,12 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     add("//! [`Theme::BG`], `--color-raised-bg` is [`Theme::RAISED_BG`]. Every initialiser in")
     add("//! [`DARK`] and [`LIGHT`] carries the sheet, the line and the `var()` chain it came")
     add("//! through, so a stale value traces back to the line that moved.")
+    add("//!")
+    add("//! A token the sheet wrote as `rgb()`/a hex triple is stored with `from_rgb`. The few")
+    add("//! it wrote as `rgba(..., a)` with a < 1 are stored with `from_rgba_premultiplied`, the")
+    add("//! const form of the same colour (`from_rgba_unmultiplied` is not a `const fn` in")
+    add("//! every egui version, and these live in `const`s); the alpha they declare is stated")
+    add("//! beside each and asserted in the tests.")
     add("//!")
     add("//! | Source | What came out of it |")
     add("//! | --- | --- |")
@@ -1042,12 +1059,16 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     def emit_scheme(name: str, label: str, note: str) -> None:
         add(f"/// The {label} scheme.")
         add("///")
-        add(f"/// Read from `vendor/modrinth-app/{VARIABLES}`. Each comment below is")
-        add("/// `token: value -- the sheet and line that state it`, plus the `var()` chain the")
-        add("/// value was reached through, so a colour on screen can be traced to the line")
-        add("/// that moved and a stale value cannot hide behind its alias.")
+        for line in wrap_doc(
+            f"Read from `vendor/modrinth-app/{VARIABLES}`. Each comment below is "
+            "`token: value -- the sheet and line that state it`, plus the `var()` chain "
+            "the value was reached through, so a colour on screen can be traced to the "
+            "line that moved and a stale value cannot hide behind its alias."
+        ):
+            add(line)
         add("///")
-        add(note)
+        for line in wrap_doc(note):
+            add(line)
         add(f"pub const {name}: Theme = Theme {{")
         section = ""
         for token in COLOUR_TOKENS:
@@ -1060,7 +1081,7 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
             if res.rgba[3] != 255:
                 comment += f"; stored premultiplied, alpha {res.alpha}"
             if name == "DARK" and res.declared_block not in SCHEME_SELECTORS["dark"]:
-                comment += "; dark does not override it"
+                comment += "; `.dark-mode` does not restate it"
             add(comment)
             add(f"    {field}: {colour_expr(res.rgba)},")
         factor = factors["dark" if name == "DARK" else "light"]
@@ -1072,20 +1093,20 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
 
     emit_scheme(
         "DARK", "dark",
-        "/// The `.dark-mode, .dark, :root[data-theme='dark']` block at\n"
-        f"/// `{VARIABLES}:{dark_block.line}` supplies it, over the `.light-properties` base\n"
-        f"/// at line {light_block.line} and the shared `html` block at line {html_block.line}, in\n"
-        "/// cascade order. This is the scheme the reference opens in (`:root { color-scheme:\n"
-        "/// dark }`, `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one\n"
-        "/// the numbers in `REFERENCE.md` were taken in.",
+        "The `.dark-mode, .dark, :root[data-theme='dark']` block at "
+        f"`{VARIABLES}:{dark_block.line}` supplies it, over the `.light-properties` base "
+        f"at line {light_block.line} and the shared `html` block at line {html_block.line}, "
+        "in cascade order. This is the scheme the reference opens in (`:root { "
+        "color-scheme: dark }`, `app-frontend/src/assets/stylesheets/global.scss:45`), "
+        "so it is the one the numbers in `REFERENCE.md` were taken in.",
     )
     emit_scheme(
         "LIGHT", "light",
-        f"/// The `.light-properties` base at line {light_block.line} and the shared `html` block\n"
-        f"/// at line {html_block.line}, with `.light-mode` (line {blocks['light-mode'][0][1].line})\n"
-        "/// extending the base and declaring nothing of its own. A token the light block does\n"
-        "/// not state falls back to that base, which is why the light column has values for\n"
-        "/// tokens only `html` declares.",
+        f"The `.light-properties` base at line {light_block.line} and the shared `html` "
+        f"block at line {html_block.line}, with `.light-mode` (line "
+        f"{blocks['light-mode'][0][1].line}) extending the base and declaring nothing of "
+        "its own. A token the light block does not state falls back to that base, which "
+        "is why the light column has values for tokens only `html` declares.",
     )
 
     # ---- geometry --------------------------------------------------------
@@ -1157,6 +1178,14 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     add("// ---------------------------------------------------------------------------")
     add("// Motion: the transitions the sheets declare and this shell animates")
     add("//")
+    motion_sources = []
+    for _, row in picked:
+        source = f"{row.sheet}:{row.line}"
+        if source not in motion_sources:
+            motion_sources.append(source)
+    add("// Sources:")
+    for source in motion_sources:
+        add(f"//   `{source}`")
     add("// Durations are in milliseconds and easings are cubic-beziers, because that is")
     add("// what a tween needs. Each constant names the rule it was read from, and the")
     add("// table at the end carries the same numbers with their property.")
@@ -1257,7 +1286,10 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     add("        // is the value `--color-button-bg` resolves to in both schemes.")
     add("        visual.extreme_bg_color = self.BUTTON_BG;")
     add("")
-    add("        // The interface's default text is `--color-base` (defaults.scss:11).")
+    add("        // The interface's default text is `--color-base` (defaults.scss:11). A page")
+    add("        // that wants `SECONDARY` (muted) or `CONTRAST` (a hovered label) sets it on")
+    add("        // the `RichText` itself: an override is exactly what stops egui's own")
+    add("        // `weak()` and the widget `fg_stroke` from choosing a colour.")
     add("        visual.override_text_color = Some(self.BASE);")
     add("")
     add("        visual.hyperlink_color = self.LINK;")
@@ -1488,10 +1520,20 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     add("    }")
     add("")
     add("    #[test]")
+    add("    fn the_pair_the_shell_asks_for_is_the_pair_the_sheet_states() {")
+    add("        // `dark()` and `light()` are what an `eframe` startup calls; they have to be")
+    add("        // the same values a test reads, or the shell paints a scheme nobody checked.")
+    add("        assert_eq!(dark(), DARK);")
+    add("        assert_eq!(light(), LIGHT);")
+    add("    }")
+    add("")
+    add("    #[test]")
     add("    fn every_motion_row_names_its_source_and_a_sane_duration() {")
     add("        assert!(!Theme::motion().is_empty());")
     add("        for motion in Theme::motion() {")
     add("            assert!(motion.millis > 0, \"{} has no duration\", motion.property);")
+    add("            assert!(!motion.easing.name.is_empty(), \"{} has no curve\", motion.property);")
+    add("            assert_eq!(motion.easing.curve.len(), 4, \"{} is not a cubic-bezier\", motion.property);")
     add("            // The reference's longest transition is 2s (`TextLogo.vue`). Every row")
     add("            // past this bound so far was a unit error in the generator, not a slow")
     add("            // animation -- `--check` compares bytes, so only a bound in the tests")
@@ -1535,22 +1577,6 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
         "opaque": len(opaque),
         "translucent": len(translucent_rows),
     }
-
-
-def unresolved_colours(tables: dict[str, dict[str, tuple[str, int, str, str]]]) -> list[str]:
-    """Every colour token whose chain could not be resolved.
-
-    `emit` raises on the first one; this exists so `--report` can list all of them at
-    once instead of one per run. It is not a second resolver -- it asks the same one.
-    """
-    problems: list[str] = []
-    for scheme in ("dark", "light"):
-        for token in COLOUR_TOKENS:
-            try:
-                colour_of(resolve(tables[scheme], token.css, scheme))
-            except SystemExit as error:
-                problems.append(str(error))
-    return problems
 
 
 def main() -> int:

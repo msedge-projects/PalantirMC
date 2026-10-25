@@ -16,6 +16,12 @@
 //! [`DARK`] and [`LIGHT`] carries the sheet, the line and the `var()` chain it came
 //! through, so a stale value traces back to the line that moved.
 //!
+//! A token the sheet wrote as `rgb()`/a hex triple is stored with `from_rgb`. The few
+//! it wrote as `rgba(..., a)` with a < 1 are stored with `from_rgba_premultiplied`, the
+//! const form of the same colour (`from_rgba_unmultiplied` is not a `const fn` in
+//! every egui version, and these live in `const`s); the alpha they declare is stated
+//! beside each and asserted in the tests.
+//!
 //! | Source | What came out of it |
 //! | --- | --- |
 //! | `assets/styles/variables.scss` | 67 colour tokens, 6 radii, 5 gaps |
@@ -437,23 +443,23 @@ pub struct Theme {
 /// The dark scheme.
 ///
 /// Read from `vendor/modrinth-app/assets/styles/variables.scss`. Each comment below is
-/// `token: value -- the sheet and line that state it`, plus the `var()` chain the
-/// value was reached through, so a colour on screen can be traced to the line
-/// that moved and a stale value cannot hide behind its alias.
+/// `token: value -- the sheet and line that state it`, plus the `var()` chain the value
+/// was reached through, so a colour on screen can be traced to the line that moved and
+/// a stale value cannot hide behind its alias.
 ///
 /// The `.dark-mode, .dark, :root[data-theme='dark']` block at
-/// `assets/styles/variables.scss:230` supplies it, over the `.light-properties` base
-/// at line 1 and the shared `html` block at line 190, in
-/// cascade order. This is the scheme the reference opens in (`:root { color-scheme:
-/// dark }`, `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one
-/// the numbers in `REFERENCE.md` were taken in.
+/// `assets/styles/variables.scss:230` supplies it, over the `.light-properties` base at
+/// line 1 and the shared `html` block at line 190, in cascade order. This is the scheme
+/// the reference opens in (`:root { color-scheme: dark }`,
+/// `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one the numbers
+/// in `REFERENCE.md` were taken in.
 pub const DARK: Theme = Theme {
     // ---- page and surfaces ----
-    // --color-bg: #16181c -- variables.scss:233 (via var(--surface-1) at variables.scss:325)
+    // --color-bg: #16181c -- variables.scss:233 (via --surface-1, declared at variables.scss:325)
     BG: egui::Color32::from_rgb(0x16, 0x18, 0x1c),
-    // --color-raised-bg: #27292e -- variables.scss:237 (via var(--surface-3) at variables.scss:326)
+    // --color-raised-bg: #27292e -- variables.scss:237 (via --surface-3, declared at variables.scss:326)
     RAISED_BG: egui::Color32::from_rgb(0x27, 0x29, 0x2e),
-    // --color-super-raised-bg: #34363c -- variables.scss:238 (via var(--surface-4) at variables.scss:327)
+    // --color-super-raised-bg: #34363c -- variables.scss:238 (via --surface-4, declared at variables.scss:327)
     SUPER_RAISED_BG: egui::Color32::from_rgb(0x34, 0x36, 0x3c),
     // --surface-1: #16181c -- variables.scss:233
     SURFACE_1: egui::Color32::from_rgb(0x16, 0x18, 0x1c),
@@ -470,25 +476,25 @@ pub const DARK: Theme = Theme {
     // --surface-5: #42444a -- variables.scss:239
     SURFACE_5: egui::Color32::from_rgb(0x42, 0x44, 0x4a),
     // ---- controls ----
-    // --color-button-bg: #34363c -- variables.scss:238 (via var(--surface-4) at variables.scss:329)
+    // --color-button-bg: #34363c -- variables.scss:238 (via --surface-4, declared at variables.scss:329)
     BUTTON_BG: egui::Color32::from_rgb(0x34, 0x36, 0x3c),
     // --color-button-border: rgba(193, 190, 209, 0.12) -- variables.scss:330; stored premultiplied, alpha 31
     BUTTON_BORDER: egui::Color32::from_rgba_premultiplied(0x17, 0x17, 0x19, 0x1f),
-    // --color-button-bg-selected: rgba(27, 217, 106, 0.25) -- variables.scss:355 (via var(--color-brand-highlight) at variables.scss:376); stored premultiplied, alpha 64
+    // --color-button-bg-selected: rgba(27, 217, 106, 0.25) -- variables.scss:355 (via --color-brand-highlight, declared at variables.scss:376); stored premultiplied, alpha 64
     BUTTON_BG_SELECTED: egui::Color32::from_rgba_premultiplied(0x07, 0x36, 0x1b, 0x40),
-    // --color-button-text-selected: #1bd96a -- variables.scss:272 (via var(--color-brand) -> var(--color-green) -> var(--color-green-500) at variables.scss:377)
+    // --color-button-text-selected: #1bd96a -- variables.scss:272 (via --color-brand -> --color-green -> --color-green-500, declared at variables.scss:377)
     BUTTON_TEXT_SELECTED: egui::Color32::from_rgb(0x1b, 0xd9, 0x6a),
     // ---- lines ----
-    // --color-divider: #34363c -- variables.scss:238 (via var(--color-button-bg) -> var(--surface-4) at variables.scss:333)
+    // --color-divider: #34363c -- variables.scss:238 (via --color-button-bg -> --surface-4, declared at variables.scss:333)
     DIVIDER: egui::Color32::from_rgb(0x34, 0x36, 0x3c),
     // --color-divider-dark: #646c75 -- variables.scss:334
     DIVIDER_DARK: egui::Color32::from_rgb(0x64, 0x6c, 0x75),
     // ---- text ----
-    // --color-base: #b0bac5 -- variables.scss:320 (via var(--color-text-default) at variables.scss:336)
+    // --color-base: #b0bac5 -- variables.scss:320 (via --color-text-default, declared at variables.scss:336)
     BASE: egui::Color32::from_rgb(0xb0, 0xba, 0xc5),
-    // --color-secondary: #96a2b0 -- variables.scss:321 (via var(--color-text-tertiary) at variables.scss:337)
+    // --color-secondary: #96a2b0 -- variables.scss:321 (via --color-text-tertiary, declared at variables.scss:337)
     SECONDARY: egui::Color32::from_rgb(0x96, 0xa2, 0xb0),
-    // --color-contrast: #ffffff -- variables.scss:319 (via var(--color-text-primary) at variables.scss:338)
+    // --color-contrast: #ffffff -- variables.scss:319 (via --color-text-primary, declared at variables.scss:338)
     CONTRAST: egui::Color32::from_rgb(0xff, 0xff, 0xff),
     // --color-accent-contrast: #000000 -- variables.scss:339
     ACCENT_CONTRAST: egui::Color32::from_rgb(0x00, 0x00, 0x00),
@@ -499,24 +505,24 @@ pub const DARK: Theme = Theme {
     // --color-text-tertiary: #96a2b0 -- variables.scss:321
     TEXT_TERTIARY: egui::Color32::from_rgb(0x96, 0xa2, 0xb0),
     // ---- accent ----
-    // --color-brand: #1bd96a -- variables.scss:272 (via var(--color-green) -> var(--color-green-500) at variables.scss:354)
+    // --color-brand: #1bd96a -- variables.scss:272 (via --color-green -> --color-green-500, declared at variables.scss:354)
     BRAND: egui::Color32::from_rgb(0x1b, 0xd9, 0x6a),
     // --color-brand-highlight: rgba(27, 217, 106, 0.25) -- variables.scss:355; stored premultiplied, alpha 64
     BRAND_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x07, 0x36, 0x1b, 0x40),
     // --color-brand-shadow: rgba(27, 217, 106, 0.70) -- variables.scss:356; stored premultiplied, alpha 178
     BRAND_SHADOW: egui::Color32::from_rgba_premultiplied(0x13, 0x97, 0x4a, 0xb2),
     // ---- hues ----
-    // --color-red: #ff496e -- variables.scss:246 (via var(--color-red-500) at variables.scss:252)
+    // --color-red: #ff496e -- variables.scss:246 (via --color-red-500, declared at variables.scss:252)
     RED: egui::Color32::from_rgb(0xff, 0x49, 0x6e),
-    // --color-orange: #ffa347 -- variables.scss:258 (via var(--color-orange-400) at variables.scss:265)
+    // --color-orange: #ffa347 -- variables.scss:258 (via --color-orange-400, declared at variables.scss:265)
     ORANGE: egui::Color32::from_rgb(0xff, 0xa3, 0x47),
-    // --color-green: #1bd96a -- variables.scss:272 (via var(--color-green-500) at variables.scss:278)
+    // --color-green: #1bd96a -- variables.scss:272 (via --color-green-500, declared at variables.scss:278)
     GREEN: egui::Color32::from_rgb(0x1b, 0xd9, 0x6a),
-    // --color-blue: #4f9cff -- variables.scss:284 (via var(--color-blue-400) at variables.scss:291)
+    // --color-blue: #4f9cff -- variables.scss:284 (via --color-blue-400, declared at variables.scss:291)
     BLUE: egui::Color32::from_rgb(0x4f, 0x9c, 0xff),
-    // --color-purple: #c78aff -- variables.scss:297 (via var(--color-purple-400) at variables.scss:304)
+    // --color-purple: #c78aff -- variables.scss:297 (via --color-purple-400, declared at variables.scss:304)
     PURPLE: egui::Color32::from_rgb(0xc7, 0x8a, 0xff),
-    // --color-gray: #9fa4b3 -- variables.scss:311 (via var(--color-gray-500) at variables.scss:317)
+    // --color-gray: #9fa4b3 -- variables.scss:311 (via --color-gray-500, declared at variables.scss:317)
     GRAY: egui::Color32::from_rgb(0x9f, 0xa4, 0xb3),
     // ---- hue washes ----
     // --color-red-highlight: rgba(255, 73, 110, 0.25) -- variables.scss:341; stored premultiplied, alpha 64
@@ -542,20 +548,20 @@ pub const DARK: Theme = Theme {
     // --color-purple-bg: rgba(199, 138, 255, 0.20) -- variables.scss:352; stored premultiplied, alpha 51
     PURPLE_BG: egui::Color32::from_rgba_premultiplied(0x28, 0x1c, 0x33, 0x33),
     // ---- links ----
-    // --color-link: #4f9cff -- variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at variables.scss:216); dark does not override it
+    // --color-link: #4f9cff -- variables.scss:284 (via --color-blue -> --color-blue-400, declared at variables.scss:216); `.dark-mode` does not restate it
     LINK: egui::Color32::from_rgb(0x4f, 0x9c, 0xff),
-    // --color-link-hover: #4f9cff -- variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at variables.scss:217); dark does not override it
+    // --color-link-hover: #4f9cff -- variables.scss:284 (via --color-blue -> --color-blue-400, declared at variables.scss:217); `.dark-mode` does not restate it
     LINK_HOVER: egui::Color32::from_rgb(0x4f, 0x9c, 0xff),
-    // --color-link-active: #4f9cff -- variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at variables.scss:218); dark does not override it
+    // --color-link-active: #4f9cff -- variables.scss:284 (via --color-blue -> --color-blue-400, declared at variables.scss:218); `.dark-mode` does not restate it
     LINK_ACTIVE: egui::Color32::from_rgb(0x4f, 0x9c, 0xff),
     // ---- chrome ----
-    // --color-scrollbar: #42444a -- variables.scss:239 (via var(--surface-5) at variables.scss:331)
+    // --color-scrollbar: #42444a -- variables.scss:239 (via --surface-5, declared at variables.scss:331)
     SCROLLBAR: egui::Color32::from_rgb(0x42, 0x44, 0x4a),
-    // --color-tooltip-bg: #27292e -- variables.scss:237 (via var(--surface-3) at variables.scss:209); dark does not override it
+    // --color-tooltip-bg: #27292e -- variables.scss:237 (via --surface-3, declared at variables.scss:209); `.dark-mode` does not restate it
     TOOLTIP_BG: egui::Color32::from_rgb(0x27, 0x29, 0x2e),
-    // --color-tooltip-text: #ffffff -- variables.scss:319 (via var(--color-contrast) -> var(--color-text-primary) at variables.scss:208); dark does not override it
+    // --color-tooltip-text: #ffffff -- variables.scss:319 (via --color-contrast -> --color-text-primary, declared at variables.scss:208); `.dark-mode` does not restate it
     TOOLTIP_TEXT: egui::Color32::from_rgb(0xff, 0xff, 0xff),
-    // --color-focus-ring: #ea80ff -- variables.scss:222; dark does not override it
+    // --color-focus-ring: #ea80ff -- variables.scss:222; `.dark-mode` does not restate it
     FOCUS_RING: egui::Color32::from_rgb(0xea, 0x80, 0xff),
     // ---- platforms ----
     // --color-platform-fabric: #dbb69b -- variables.scss:389
@@ -600,22 +606,21 @@ pub const DARK: Theme = Theme {
 /// The light scheme.
 ///
 /// Read from `vendor/modrinth-app/assets/styles/variables.scss`. Each comment below is
-/// `token: value -- the sheet and line that state it`, plus the `var()` chain the
-/// value was reached through, so a colour on screen can be traced to the line
-/// that moved and a stale value cannot hide behind its alias.
+/// `token: value -- the sheet and line that state it`, plus the `var()` chain the value
+/// was reached through, so a colour on screen can be traced to the line that moved and
+/// a stale value cannot hide behind its alias.
 ///
-/// The `.light-properties` base at line 1 and the shared `html` block
-/// at line 190, with `.light-mode` (line 225)
-/// extending the base and declaring nothing of its own. A token the light block does
-/// not state falls back to that base, which is why the light column has values for
-/// tokens only `html` declares.
+/// The `.light-properties` base at line 1 and the shared `html` block at line 190, with
+/// `.light-mode` (line 225) extending the base and declaring nothing of its own. A
+/// token the light block does not state falls back to that base, which is why the light
+/// column has values for tokens only `html` declares.
 pub const LIGHT: Theme = Theme {
     // ---- page and surfaces ----
-    // --color-bg: #ebebeb -- variables.scss:2 (via var(--surface-1) at variables.scss:94)
+    // --color-bg: #ebebeb -- variables.scss:2 (via --surface-1, declared at variables.scss:94)
     BG: egui::Color32::from_rgb(0xeb, 0xeb, 0xeb),
-    // --color-raised-bg: #f8f8f8 -- variables.scss:6 (via var(--surface-3) at variables.scss:95)
+    // --color-raised-bg: #f8f8f8 -- variables.scss:6 (via --surface-3, declared at variables.scss:95)
     RAISED_BG: egui::Color32::from_rgb(0xf8, 0xf8, 0xf8),
-    // --color-super-raised-bg: #ffffff -- variables.scss:7 (via var(--surface-4) at variables.scss:96)
+    // --color-super-raised-bg: #ffffff -- variables.scss:7 (via --surface-4, declared at variables.scss:96)
     SUPER_RAISED_BG: egui::Color32::from_rgb(0xff, 0xff, 0xff),
     // --surface-1: #ebebeb -- variables.scss:2
     SURFACE_1: egui::Color32::from_rgb(0xeb, 0xeb, 0xeb),
@@ -632,25 +637,25 @@ pub const LIGHT: Theme = Theme {
     // --surface-5: #dddddd -- variables.scss:8
     SURFACE_5: egui::Color32::from_rgb(0xdd, 0xdd, 0xdd),
     // ---- controls ----
-    // --color-button-bg: #ffffff -- variables.scss:7 (via var(--surface-4) at variables.scss:98)
+    // --color-button-bg: #ffffff -- variables.scss:7 (via --surface-4, declared at variables.scss:98)
     BUTTON_BG: egui::Color32::from_rgb(0xff, 0xff, 0xff),
     // --color-button-border: rgba(161, 161, 161, 0.35) -- variables.scss:99; stored premultiplied, alpha 89
     BUTTON_BORDER: egui::Color32::from_rgba_premultiplied(0x38, 0x38, 0x38, 0x59),
-    // --color-button-bg-selected: #00af5c -- variables.scss:42 (via var(--color-brand) -> var(--color-green) -> var(--color-green-600) at variables.scss:156)
+    // --color-button-bg-selected: #00af5c -- variables.scss:42 (via --color-brand -> --color-green -> --color-green-600, declared at variables.scss:156)
     BUTTON_BG_SELECTED: egui::Color32::from_rgb(0x00, 0xaf, 0x5c),
-    // --color-button-text-selected: #ffffff -- variables.scss:108 (via var(--color-accent-contrast) at variables.scss:157)
+    // --color-button-text-selected: #ffffff -- variables.scss:108 (via --color-accent-contrast, declared at variables.scss:157)
     BUTTON_TEXT_SELECTED: egui::Color32::from_rgb(0xff, 0xff, 0xff),
     // ---- lines ----
-    // --color-divider: #dddddd -- variables.scss:8 (via var(--surface-5) at variables.scss:102)
+    // --color-divider: #dddddd -- variables.scss:8 (via --surface-5, declared at variables.scss:102)
     DIVIDER: egui::Color32::from_rgb(0xdd, 0xdd, 0xdd),
-    // --color-divider-dark: #dddddd -- variables.scss:8 (via var(--surface-5) at variables.scss:103)
+    // --color-divider-dark: #dddddd -- variables.scss:8 (via --surface-5, declared at variables.scss:103)
     DIVIDER_DARK: egui::Color32::from_rgb(0xdd, 0xdd, 0xdd),
     // ---- text ----
-    // --color-base: #2c2e31 -- variables.scss:89 (via var(--color-text-default) at variables.scss:105)
+    // --color-base: #2c2e31 -- variables.scss:89 (via --color-text-default, declared at variables.scss:105)
     BASE: egui::Color32::from_rgb(0x2c, 0x2e, 0x31),
-    // --color-secondary: #484d54 -- variables.scss:90 (via var(--color-text-tertiary) at variables.scss:106)
+    // --color-secondary: #484d54 -- variables.scss:90 (via --color-text-tertiary, declared at variables.scss:106)
     SECONDARY: egui::Color32::from_rgb(0x48, 0x4d, 0x54),
-    // --color-contrast: #1a202c -- variables.scss:88 (via var(--color-text-primary) at variables.scss:107)
+    // --color-contrast: #1a202c -- variables.scss:88 (via --color-text-primary, declared at variables.scss:107)
     CONTRAST: egui::Color32::from_rgb(0x1a, 0x20, 0x2c),
     // --color-accent-contrast: #ffffff -- variables.scss:108
     ACCENT_CONTRAST: egui::Color32::from_rgb(0xff, 0xff, 0xff),
@@ -661,24 +666,24 @@ pub const LIGHT: Theme = Theme {
     // --color-text-tertiary: #484d54 -- variables.scss:90
     TEXT_TERTIARY: egui::Color32::from_rgb(0x48, 0x4d, 0x54),
     // ---- accent ----
-    // --color-brand: #00af5c -- variables.scss:42 (via var(--color-green) -> var(--color-green-600) at variables.scss:123)
+    // --color-brand: #00af5c -- variables.scss:42 (via --color-green -> --color-green-600, declared at variables.scss:123)
     BRAND: egui::Color32::from_rgb(0x00, 0xaf, 0x5c),
-    // --color-brand-highlight: rgba(0, 175, 92, 0.25) -- variables.scss:112 (via var(--color-green-highlight) at variables.scss:124); stored premultiplied, alpha 64
+    // --color-brand-highlight: rgba(0, 175, 92, 0.25) -- variables.scss:112 (via --color-green-highlight, declared at variables.scss:124); stored premultiplied, alpha 64
     BRAND_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x00, 0x2c, 0x17, 0x40),
     // --color-brand-shadow: rgba(0, 175, 92, 0.70) -- variables.scss:125; stored premultiplied, alpha 178
     BRAND_SHADOW: egui::Color32::from_rgba_premultiplied(0x00, 0x7a, 0x40, 0xb2),
     // ---- hues ----
-    // --color-red: #cb2245 -- variables.scss:16 (via var(--color-red-600) at variables.scss:21)
+    // --color-red: #cb2245 -- variables.scss:16 (via --color-red-600, declared at variables.scss:21)
     RED: egui::Color32::from_rgb(0xcb, 0x22, 0x45),
-    // --color-orange: #e08325 -- variables.scss:28 (via var(--color-orange-500) at variables.scss:34)
+    // --color-orange: #e08325 -- variables.scss:28 (via --color-orange-500, declared at variables.scss:34)
     ORANGE: egui::Color32::from_rgb(0xe0, 0x83, 0x25),
-    // --color-green: #00af5c -- variables.scss:42 (via var(--color-green-600) at variables.scss:47)
+    // --color-green: #00af5c -- variables.scss:42 (via --color-green-600, declared at variables.scss:47)
     GREEN: egui::Color32::from_rgb(0x00, 0xaf, 0x5c),
-    // --color-blue: #1f68c0 -- variables.scss:55 (via var(--color-blue-600) at variables.scss:60)
+    // --color-blue: #1f68c0 -- variables.scss:55 (via --color-blue-600, declared at variables.scss:60)
     BLUE: egui::Color32::from_rgb(0x1f, 0x68, 0xc0),
-    // --color-purple: #8e32f3 -- variables.scss:68 (via var(--color-purple-600) at variables.scss:73)
+    // --color-purple: #8e32f3 -- variables.scss:68 (via --color-purple-600, declared at variables.scss:73)
     PURPLE: egui::Color32::from_rgb(0x8e, 0x32, 0xf3),
-    // --color-gray: #595b61 -- variables.scss:81 (via var(--color-gray-600) at variables.scss:86)
+    // --color-gray: #595b61 -- variables.scss:81 (via --color-gray-600, declared at variables.scss:86)
     GRAY: egui::Color32::from_rgb(0x59, 0x5b, 0x61),
     // ---- hue washes ----
     // --color-red-highlight: rgba(203, 34, 69, 0.25) -- variables.scss:110; stored premultiplied, alpha 64
@@ -704,18 +709,18 @@ pub const LIGHT: Theme = Theme {
     // --color-purple-bg: rgba(142, 50, 243, 0.10) -- variables.scss:121; stored premultiplied, alpha 26
     PURPLE_BG: egui::Color32::from_rgba_premultiplied(0x0e, 0x05, 0x19, 0x1a),
     // ---- links ----
-    // --color-link: #1f68c0 -- variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at variables.scss:216)
+    // --color-link: #1f68c0 -- variables.scss:55 (via --color-blue -> --color-blue-600, declared at variables.scss:216)
     LINK: egui::Color32::from_rgb(0x1f, 0x68, 0xc0),
-    // --color-link-hover: #1f68c0 -- variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at variables.scss:217)
+    // --color-link-hover: #1f68c0 -- variables.scss:55 (via --color-blue -> --color-blue-600, declared at variables.scss:217)
     LINK_HOVER: egui::Color32::from_rgb(0x1f, 0x68, 0xc0),
-    // --color-link-active: #1f68c0 -- variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at variables.scss:218)
+    // --color-link-active: #1f68c0 -- variables.scss:55 (via --color-blue -> --color-blue-600, declared at variables.scss:218)
     LINK_ACTIVE: egui::Color32::from_rgb(0x1f, 0x68, 0xc0),
     // ---- chrome ----
     // --color-scrollbar: #96a2b0 -- variables.scss:100
     SCROLLBAR: egui::Color32::from_rgb(0x96, 0xa2, 0xb0),
-    // --color-tooltip-bg: #f8f8f8 -- variables.scss:6 (via var(--surface-3) at variables.scss:209)
+    // --color-tooltip-bg: #f8f8f8 -- variables.scss:6 (via --surface-3, declared at variables.scss:209)
     TOOLTIP_BG: egui::Color32::from_rgb(0xf8, 0xf8, 0xf8),
-    // --color-tooltip-text: #1a202c -- variables.scss:88 (via var(--color-contrast) -> var(--color-text-primary) at variables.scss:208)
+    // --color-tooltip-text: #1a202c -- variables.scss:88 (via --color-contrast -> --color-text-primary, declared at variables.scss:208)
     TOOLTIP_TEXT: egui::Color32::from_rgb(0x1a, 0x20, 0x2c),
     // --color-focus-ring: #ea80ff -- variables.scss:222
     FOCUS_RING: egui::Color32::from_rgb(0xea, 0x80, 0xff),
@@ -830,15 +835,19 @@ pub const FONT_SIZE_XL: f32 = 24.0;
 /// `--font-weight-regular` -- 400, body's `font-weight` (defaults.scss:34).
 pub const FONT_WEIGHT_REGULAR: u16 = 400;
 
-/// `--font-weight-text` -- 500, the weight the whole interface is set in (defaults.scss:35 (via var(--font-weight-medium) at defaults.scss:39)).
+/// `--font-weight-text` -- 500, the weight the whole interface is set in (defaults.scss:35 (via --font-weight-medium, declared at defaults.scss:39)).
 pub const FONT_WEIGHT_TEXT: u16 = 500;
 
-/// `--font-weight-heading` -- 800, headings and titles (defaults.scss:37 (via var(--font-weight-extrabold) at defaults.scss:40)).
+/// `--font-weight-heading` -- 800, headings and titles (defaults.scss:37 (via --font-weight-extrabold, declared at defaults.scss:40)).
 pub const FONT_WEIGHT_HEADING: u16 = 800;
 
 // ---------------------------------------------------------------------------
 // Motion: the transitions the sheets declare and this shell animates
 //
+// Sources:
+//   `assets/styles/classes.scss:193`
+//   `ui/src/styles/tailwind-utilities.css:70`
+//   `ui/src/styles/tailwind-utilities.css:31`
 // Durations are in milliseconds and easings are cubic-beziers, because that is
 // what a tween needs. Each constant names the rule it was read from, and the
 // table at the end carries the same numbers with their property.
@@ -987,7 +996,10 @@ impl Theme {
         // is the value `--color-button-bg` resolves to in both schemes.
         visual.extreme_bg_color = self.BUTTON_BG;
 
-        // The interface's default text is `--color-base` (defaults.scss:11).
+        // The interface's default text is `--color-base` (defaults.scss:11). A page
+        // that wants `SECONDARY` (muted) or `CONTRAST` (a hovered label) sets it on
+        // the `RichText` itself: an override is exactly what stops egui's own
+        // `weak()` and the widget `fg_stroke` from choosing a colour.
         visual.override_text_color = Some(self.BASE);
 
         visual.hyperlink_color = self.LINK;
@@ -1331,10 +1343,20 @@ mod tests {
     }
 
     #[test]
+    fn the_pair_the_shell_asks_for_is_the_pair_the_sheet_states() {
+        // `dark()` and `light()` are what an `eframe` startup calls; they have to be
+        // the same values a test reads, or the shell paints a scheme nobody checked.
+        assert_eq!(dark(), DARK);
+        assert_eq!(light(), LIGHT);
+    }
+
+    #[test]
     fn every_motion_row_names_its_source_and_a_sane_duration() {
         assert!(!Theme::motion().is_empty());
         for motion in Theme::motion() {
             assert!(motion.millis > 0, "{} has no duration", motion.property);
+            assert!(!motion.easing.name.is_empty(), "{} has no curve", motion.property);
+            assert_eq!(motion.easing.curve.len(), 4, "{} is not a cubic-bezier", motion.property);
             // The reference's longest transition is 2s (`TextLogo.vue`). Every row
             // past this bound so far was a unit error in the generator, not a slow
             // animation -- `--check` compares bytes, so only a bound in the tests
