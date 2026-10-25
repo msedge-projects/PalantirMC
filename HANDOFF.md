@@ -292,8 +292,11 @@ started with a measurable slice rather than a rewrite:
 1. **The comparison.** Run the slice and the iced launcher on the same machine with
    the frame log on, scroll both, and compare p95. Nothing else should be done until
    that number exists — it is the whole justification for the migration.
-2. **The slice's lock file** is not committed; the CI job therefore builds without
-   `--locked`. Commit it once the comparison says the stack is worth keeping.
+2. **The slice's lock file is committed** (`crates/sift-ui/Cargo.lock`, 4,093 lines) and CI
+   builds it with `--locked`, in the same form the product build uses: a test job resolving its
+   own versions would be the one place where a green run meant something other than what ships.
+   The workspace also declares its own `[profile.release]` (`lto`, `strip`, `panic=abort`),
+   which took the shipped binary from 20,081,824 to 11,981,120 bytes.
 3. **Pages, one at a time**, if it is: `discover` first (it is the heaviest and the
    one the reader scrolls), then `home`, then the shell chrome. Each needs the theme
    (`tools/gen_theme.py` emits iced types today), the icons (`icons_gen` emits
