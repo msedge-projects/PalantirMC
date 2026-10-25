@@ -1562,6 +1562,28 @@ struct RailRow {
 /// How many rows the rail has: one per tab.
 const TAB_COUNT: usize = Tab::ALL.len();
 
+/// The height the rail wants at the reference's own pitch.
+///
+/// Used only to decide whether it has to be compressed: the rows are the source's 40-point
+/// rows and 4-point gaps, the headings its category line, and the gaps between categories its
+/// `mt-3`.
+fn rail_needed_height() -> f32 {
+    let mut height = 0.0;
+    let mut previous: Option<Tab> = None;
+    for (index, tab) in Tab::ALL.into_iter().enumerate() {
+        let starts_category = previous.map_or(true, |last| last.category() != tab.category());
+        if starts_category {
+            if index > 0 {
+                height += CATEGORY_TOP_GAP;
+            }
+            height += CATEGORY_LINE + CATEGORY_PADDING;
+        }
+        height += RAIL_ROW_HEIGHT + RAIL_ROW_GAP;
+        previous = Some(tab);
+    }
+    height
+}
+
 /// Lay the rail out: category headings first, then a 40-point row and a 4-point gap for
 /// every tab.
 fn rail_rows(dialog: Rect) -> [RailRow; TAB_COUNT] {
@@ -1573,6 +1595,24 @@ fn rail_rows(dialog: Rect) -> [RailRow; TAB_COUNT] {
         row: Rect::NOTHING,
     }; TAB_COUNT];
 
+    // The rail has fourteen rows in four categories, which does not fit the pane at 900
+    // points of window: the last three tabs used to be laid out past the dialog's edge and
+    // skipped as targets, so Syncing, Resources and Troubleshooting could not be reached at
+    // all. The rail is compressed to fit instead -- the reference's own size when it fits, a
+    // proportionally tighter pitch when it does not -- because a settings rail that hides
+    // tabs is a settings rail with unreachable settings.
+    let available = rail.height() - 2.0 * RAIL_PADDING;
+    let needed = rail_needed_height();
+    let scale = if needed > available {
+        (available / needed).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let row_height = RAIL_ROW_HEIGHT * scale;
+    let row_gap = RAIL_ROW_GAP * scale;
+    let category_gap = CATEGORY_TOP_GAP * scale;
+    let category_line = (CATEGORY_LINE + CATEGORY_PADDING) * scale;
+
     let mut y = rail.top() + RAIL_PADDING;
     let mut previous: Option<Tab> = None;
     for (index, tab) in Tab::ALL.into_iter().enumerate() {
@@ -1580,11 +1620,11 @@ fn rail_rows(dialog: Rect) -> [RailRow; TAB_COUNT] {
         let heading = if starts_category {
             // `mt-3` above a category that is not the first child (`TabbedModal.vue:180`).
             if index > 0 {
-                y += CATEGORY_TOP_GAP;
+                y += category_gap;
             }
             let rect = Rect::from_min_size(
                 pos2(rail.left() + RAIL_PADDING, y),
-                vec2(width, CATEGORY_LINE + CATEGORY_PADDING),
+                vec2(width, category_line),
             );
             y = rect.bottom();
             Some(rect)
@@ -1594,10 +1634,10 @@ fn rail_rows(dialog: Rect) -> [RailRow; TAB_COUNT] {
 
         let row = Rect::from_min_size(
             pos2(rail.left() + RAIL_PADDING, y),
-            vec2(width, RAIL_ROW_HEIGHT),
+            vec2(width, row_height),
         );
         rows[index] = RailRow { tab, heading, row };
-        y = row.bottom() + RAIL_ROW_GAP;
+        y = row.bottom() + row_gap;
         previous = Some(tab);
     }
 
