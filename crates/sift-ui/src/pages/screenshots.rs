@@ -314,9 +314,10 @@ const GROUP_TITLE_SIZE: f32 = 16.0;
 /// (`base/EmptyState.vue:4`).
 const ILLUSTRATION_HEIGHT: f32 = 200.0;
 
-/// The glyph standing in for that illustration. `// guess: re-measure` — the source's SVG is
-/// a 200-point-tall drawing this build has no asset for, so the size of the icon that
-/// replaces it inside the box is a choice, not a measurement.
+/// The glyph standing in for that illustration. The source's SVG is a 200-point-tall drawing
+/// this build has no asset for, so the size of the icon that replaces it inside the box is a
+/// choice rather than a measurement.
+// guess: re-measure
 const ILLUSTRATION_GLYPH: f32 = 64.0;
 
 /// The gap between the empty state's heading and its description: `gap-1.5`
@@ -560,17 +561,24 @@ fn in_sort_order(shots: &[Shot], sort: Sort) -> Vec<Shot> {
 fn groups(shots: &[Shot]) -> Vec<Group> {
     let mut out: Vec<Group> = Vec::new();
     for shot in shots {
-        let existing = out
-            .iter_mut()
-            .find(|group| group.year == shot.taken.year && group.month == shot.taken.month);
-        match existing {
-            Some(group) => group.shots.push(*shot),
-            None => out.push(Group {
-                year: shot.taken.year,
-                month: shot.taken.month,
-                shots: vec![*shot],
-            }),
+        // The index is found first and the borrow taken after it, because a `find` over
+        // `iter_mut` would still be live in the arm that pushes a new group.
+        let index = out
+            .iter()
+            .position(|group| group.year == shot.taken.year && group.month == shot.taken.month);
+        if let Some(index) = index {
+            // `get_mut` rather than `out[index]`: an index that somehow missed is a group
+            // this shot starts, not a panic.
+            if let Some(group) = out.get_mut(index) {
+                group.shots.push(*shot);
+                continue;
+            }
         }
+        out.push(Group {
+            year: shot.taken.year,
+            month: shot.taken.month,
+            shots: vec![*shot],
+        });
     }
     // Newest month first; `sort_by` is stable, so two groups can never swap for a tie.
     out.sort_by(|a, b| (b.year, b.month).cmp(&(a.year, a.month)));
@@ -1066,15 +1074,8 @@ fn select(
 
 /// The count pill, which is `TagItem`'s shape: `px-2 py-1 text-sm leading-none
 /// rounded-full` with a 1-point border (`base/TagItem.vue:19`), in the colours the group
-/// header gives it — `border-surface-3 bg-surface-2` (`section.vue:148`). Returns the rect it
-/// used, so a caller can lay the next thing beside it.
-fn count_pill(
-    painter: &egui::Painter,
-    left: f32,
-    centre_y: f32,
-    count: usize,
-    theme: &Theme,
-) -> Rect {
+/// header gives it — `border-surface-3 bg-surface-2` (`section.vue:148`).
+fn count_pill(painter: &egui::Painter, left: f32, centre_y: f32, count: usize, theme: &Theme) {
     let text = count.to_string();
     let galley = painter.layout_no_wrap(
         text.clone(),
@@ -1099,7 +1100,6 @@ fn count_pill(
         fonts::body(BADGE_TEXT_SIZE),
         theme.SECONDARY,
     );
-    pill
 }
 
 // ---------------------------------------------------------------------------
@@ -1822,7 +1822,7 @@ mod tests {
         assert_eq!(out[0].shots.len(), 5);
         assert_eq!(out[1].shots.len(), 4);
         assert_eq!(
-            (out[0].shots.len() + out[1].shots.len()),
+            out[0].shots.len() + out[1].shots.len(),
             SHOTS.len(),
             "every screenshot lands in exactly one group"
         );

@@ -18,23 +18,44 @@ use crate::icons::{self, Glyph};
 use crate::images::Images;
 use crate::theme::Theme;
 
-/// Draw the page into `rect`.
+/// What the reader asked for by pressing something on this page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Action {
+    /// Nothing was pressed.
+    #[default]
+    None,
+    /// `+ Create an instance`, or the `N` key: make one.
+    Create,
+    /// `Import from launcher`: find another launcher's instances.
+    Import,
+    /// Play this instance, by its id.
+    Play(&'static str),
+}
+
+/// Draw the page into `rect`, and say what was pressed.
+///
+/// The page does not create or launch anything itself: it has no access to the paths, the
+/// clock or the process table, and a page that did would be untestable and would have to be
+/// re-taught every rule the shell already knows. It reports the intent and the shell acts.
 pub fn draw(
     ui: &mut Ui,
     rect: Rect,
     theme: &Theme,
     icons_cache: &mut Images,
     instances: &[Entry],
-) -> bool {
+) -> Action {
     if instances.is_empty() {
         hero(ui, rect, theme, icons_cache)
     } else {
-        list(ui, rect, theme, icons_cache, instances)
+        let _ = list(ui, rect, theme, icons_cache, instances);
+        // The instance list's rows are painted, not yet interactive; the honest answer is
+        // that nothing on it was pressed.
+        Action::None
     }
 }
 
 /// The fresh-install state: centred mark, welcome, the create button and the hint.
-fn hero(ui: &mut Ui, rect: Rect, theme: &Theme, icons_cache: &mut Images) -> bool {
+fn hero(ui: &mut Ui, rect: Rect, theme: &Theme, icons_cache: &mut Images) -> Action {
     let painter = ui.painter();
     let centre_x = rect.center().x;
 
@@ -99,6 +120,17 @@ fn hero(ui: &mut Ui, rect: Rect, theme: &Theme, icons_cache: &mut Images) -> boo
         fonts::body(12.0),
         theme.SECONDARY,
     );
+
+    // The button is a target now. `N` is the reference's own shortcut for the same action, and
+    // it is read here rather than in the shell because the page is what advertises it.
+    let mut action = Action::None;
+    if ui
+        .interact(create, egui::Id::new("home-create"), Sense::click())
+        .clicked()
+        || ui.input(|i| i.key_pressed(egui::Key::N))
+    {
+        action = Action::Create;
+    }
 
     // The launcher-escape prompt, pinned above the window's bottom edge.
     let import = Rect::from_center_size(
