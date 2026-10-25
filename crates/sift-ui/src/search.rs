@@ -144,7 +144,7 @@ fn run(query: &str) -> Result<Vec<Hit>, String> {
     let fetched = sift_net::download_file(&url, &path, Duration::from_secs(20))
         .map_err(|error| error.to_string());
     let body = match fetched {
-        Ok(()) => std::fs::read(&path).map_err(|error| error.to_string()),
+        Ok(_bytes) => std::fs::read(&path).map_err(|error| error.to_string()),
         Err(error) => Err(error),
     };
     let _ = std::fs::remove_file(&path);
