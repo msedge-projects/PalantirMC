@@ -87,21 +87,42 @@ def rect_of(window: str) -> tuple[int, int, int, int]:
     )
 
 
-def apply_step(step: dict) -> list[str]:
+def point(value: list, constants: dict) -> tuple[int, int]:
+    """A client-area point from `[x, y]` or a named entry such as `["PARK"]`.
+
+    Named points are how `pages.json` keeps one tuned coordinate in one place: a page
+    that repeats the same `[1400, 12]` four times drifts the moment one is corrected.
+    """
+    if len(value) == 1 and isinstance(value[0], str):
+        named = constants.get(value[0])
+        if named is None:
+            raise ValueError(f"unknown named point {value[0]!r}")
+        return int(named[0]), int(named[1])
+    if len(value) == 2:
+        return int(value[0]), int(value[1])
+    raise ValueError(f"not a point: {value!r}")
+
+
+def apply_step(step: dict, constants: dict) -> list[list[str]]:
     """The xdotool commands for one step of a page's script."""
     if "move" in step:
-        x, y = step["move"]
+        x, y = point(step["move"], constants)
         return [["xdotool", "mousemove", str(x), str(y)]]
     if "click" in step:
-        x, y = step["click"]
+        x, y = point(step["click"], constants)
         return [["xdotool", "mousemove", str(x), str(y)], ["xdotool", "click", "1"]]
     if "wheel" in step:
-        x, y, notches = step["wheel"]
+        spec = step["wheel"]
+        # `[x, y, notches]` or `[["PARK"], notches]`: the notches are last, the point
+        # is whatever comes before them.
+        notches = int(spec[-1])
+        rest = spec[:-1]
+        x, y = point(rest[0] if len(rest) == 1 and isinstance(rest[0], list) else rest, constants)
         # xdotool's wheel buttons are 4 (up) and 5 (down); one click is one notch,
-        # which is exactly what a physical wheel sends.
+        # which is what a physical wheel sends.
         button = "4" if notches > 0 else "5"
         commands = [["xdotool", "mousemove", str(x), str(y)]]
-        for _ in range(abs(int(notches))):
+        for _ in range(abs(notches)):
             commands.append(["xdotool", "click", button])
         return commands
     if "key" in step:
@@ -195,11 +216,9 @@ def main() -> int:
     run(["xdotool", "windowmove", window, "0", "0"], timeout=30)
     run(["sleep", f"{args.settle_ms / 1000:.3f}"], timeout=60)
 
+    constants = document.get("constants", {})
     for step in pages[args.page].get("steps", []):
-        if isinstance(step, str):
-            # A named constant from the pages file's `constants` table.
-            step = document.get("constants", {})[step]
-        for command in apply_step(step):
+        for command in apply_step(step, constants):
             run(command, timeout=30)
     run(["sleep", f"{args.settle_ms / 1000:.3f}"], timeout=60)
 
