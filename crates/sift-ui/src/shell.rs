@@ -398,7 +398,6 @@ impl Shell {
         );
         let painter = ui.painter();
         painter.rect_filled(content, 0, self.theme.BG);
-        let header = Rect::from_min_size(content.min, egui::vec2(content.width(), g::PAGE_HEADER));
 
         // The tab strip: a rounded container holding six pills, the first of which is the
         // page's own type and is active. Measured at 2x from `top.jpg`: the container starts
