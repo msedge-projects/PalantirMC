@@ -1472,7 +1472,7 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
     let content = content_rect(dialog);
     let pane = content.height() - 2.0 * CONTENT_PADDING;
     let limit = (body_height - pane).max(0.0);
-    let wheel = ui.ctx().input(|i| i.raw_scroll_delta.y);
+    let wheel = ui.ctx().input(|i| i.smooth_scroll_delta.y);
     if wheel != 0.0 && ui.rect_contains_pointer(content) {
         state.scroll = (state.scroll - wheel).clamp(0.0, limit);
     }
@@ -1795,6 +1795,10 @@ fn draw_body(
             Block::Rule => 0.0,
         };
     }
+
+    // The height the caller needs: how far below the pane's top the last row fell, with the
+    // scroll offset added back so the number does not move as the reader scrolls.
+    y + scroll - content.top()
 }
 
 /// Draw one labelled block -- a heading or a row -- and return its height.
