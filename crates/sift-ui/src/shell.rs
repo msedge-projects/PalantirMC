@@ -144,6 +144,18 @@ impl Shell {
                 }
                 None => false,
             }
+        } else if self.rail == Rail::Library {
+            let rect = crate::pages::Page::Library.rect();
+            ui.painter().rect_filled(rect, 0, self.theme.BG);
+            let theme = self.theme;
+            let result = crate::pages::library::draw(
+                ui,
+                rect,
+                &theme,
+                &mut self.icons,
+                &self.instances,
+            );
+            result
         } else if self.rail == Rail::Home {
             let rect = crate::pages::Page::Home.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);

@@ -11,6 +11,7 @@
 //! with navigation nobody can trace.
 
 pub mod home;
+pub mod library;
 pub mod project;
 
 use eframe::egui::Rect;
@@ -25,6 +26,8 @@ pub enum Page {
     Discover,
     /// One project's page, reached from a card in Discover.
     Project,
+    /// The installed instances.
+    Library,
 }
 
 impl Page {
@@ -35,6 +38,7 @@ impl Page {
             Page::Discover => "Discover modpacks",
             // A project page's breadcrumb is its own name, which the shell supplies.
             Page::Project => "Project",
+            Page::Library => "Instances",
         }
     }
 
