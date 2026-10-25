@@ -107,3 +107,31 @@ every icon it has ever fetched).
 The measurement itself is worth keeping as a habit rather than a number: startup is polled
 for the window rather than assumed from a sleep, RSS comes from `/proc/<pid>/status`, and idle
 CPU is a `utime+stime` delta over a ten-second window with the app untouched.
+
+## Measured: the release build, 2026-10-25
+
+Same script, same VM, against `target/release/SiftUi` (2m01s to build):
+
+| Budget | Limit | Release | Debug | Verdict |
+| --- | --- | --- | --- | --- |
+| Startup to first window | <= 400 ms | **65 ms** | 65 ms | passes with 6x of room |
+| Idle CPU | 0 ticks | **0 / 10 s** | 0 / 10 s | passes exactly |
+| Idle RSS | <= 120 MB | **119.8 MB** | 134.1 MB | **passes by 0.2 MB** |
+| Exe | <= 28,648,960 B | **20,081,824 B** | 304,157,632 B | passes, 30% under the iced build |
+
+**Every budget passes, and one of them passes too narrowly to leave alone.** 119.8 against 120
+is not a margin, it is a coin toss: the next icon, the next font weight or a platform whose
+allocator rounds differently puts it over. The fix list, in the order worth trying:
+
+1. **The texture cache has no bound.** It keeps every icon it has ever fetched, so RSS depends
+   on how much the reader has browsed. A cap (say 256 textures, oldest dropped) makes the
+   number independent of history, which also makes it repeatable.
+2. **Five Inter weights** are registered (400/500/600/700/800) and the interface uses three of
+   them. Two unused faces are atlas and shaping state for nothing.
+3. The 2.7 MB generated icon table is `const` data in the binary's read-only segment: it costs
+   file size rather than RSS, which is why the exe-over-budget worry and the RSS worry are
+   different worries.
+
+Startup did not move between debug and release, which says the 65 ms is dominated by window
+creation and the first frame rather than by code speed -- worth remembering before optimising
+anything for it.
