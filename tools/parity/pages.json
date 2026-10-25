@@ -41,7 +41,7 @@
     ],
     "RAIL_LIBRARY": [
       32,
-      176
+      169
     ],
     "RAIL_SETTINGS": [
       32,
@@ -187,6 +187,27 @@
         },
         {
           "wait": 400
+        }
+      ]
+    },
+    "library": {
+      "title_hint": "Library",
+      "steps": [
+        {
+          "click": [
+            "RAIL_LIBRARY"
+          ]
+        },
+        {
+          "wait": 900
+        },
+        {
+          "move": [
+            "PARK"
+          ]
+        },
+        {
+          "wait": 300
         }
       ]
     }
