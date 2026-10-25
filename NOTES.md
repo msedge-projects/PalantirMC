@@ -4567,3 +4567,27 @@ flat where iced showed 26-62 ms, the migration is justified and continues page b
 page; if it is not, the answer was in the frame after all and the iced tree was right.
 Nothing in the shipping launcher changed: the root workspace, its lock and its 1,410
 tests are untouched.
+## The two stacks, measured on one machine, in one afternoon
+
+CI built the egui slice (Windows, 4m22s, artifact `palantir-egui-slice`), it was
+installed beside the launcher, and the same `PALANTIRMC_FRAME_LOG` wrote both sets of
+numbers. 300 cards either way, 1280x720, the owner's i3-4150.
+
+| | iced (during a scroll) | egui + fastframe-scroll (continuous) |
+| --- | --- | --- |
+| interval p50 | 16.1 ms | **16.7 ms** |
+| interval p95 | 26-62 ms | **17.6-18.6 ms** |
+| worst frame | 111 ms | **18.6 ms** |
+| work per frame | 0.13-0.27 ms (view build) | 3-5 ms (the whole immediate-mode pass) |
+
+Read the last row carefully, because it is the surprise: egui does **more** work per
+frame -- it rebuilds and re-emits all 300 cards every frame, where iced windows the
+list and builds a tenth of it -- and still holds a tighter frame. Its tail is 18 ms
+where iced's is 26-62. The cost is not in the widgets in either stack; it is in what
+each toolkit does between the widget and the present, and on this hardware egui's is
+three times steadier.
+
+That is the justification the migration was missing, and it is now written down with
+numbers rather than an impression. It does not move a single line by itself: the next
+slice is the one in `HANDOFF.md` §7 item 4 -- `Store` out of the binary crate and into
+a library both can use, then `discover` ported on top of it.
