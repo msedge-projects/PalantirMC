@@ -96,9 +96,9 @@ impl Search {
     ///
     /// The empty query is not asked: Discover with no query shows the reference's own default
     /// feed, which is a different request with its own facets and does not belong here yet.
-    pub fn request(&mut self, query: &str, project_type: &str) {
+    pub fn request(&mut self, query: &str, project_type: &str, index: &str, limit: u32) {
         let query = query.trim();
-        let asked = format!("{project_type}\u{{1}}{query}");
+        let asked = format!("{project_type}\u{{1}}{index}\u{{1}}{limit}\u{{1}}{query}");
         if query.is_empty() || self.current.as_deref() == Some(asked.as_str()) {
             return;
         }
@@ -107,12 +107,13 @@ impl Search {
 
         let owned = query.to_owned();
         let kind = project_type.to_owned();
+        let order = index.to_owned();
         let reply = self.current.clone().unwrap_or_default();
         let sender = self.sender.clone();
         let spawned = std::thread::Builder::new()
             .name("sift-search".to_owned())
             .spawn(move || {
-                let _ = sender.send((reply, run(&owned, &kind)));
+                let _ = sender.send((reply, run(&owned, &kind, &order, limit)));
             });
         if spawned.is_err() {
             self.state = State::Failed {
@@ -148,21 +149,23 @@ impl Search {
 }
 
 /// Fetch and decode one search. Runs on a worker thread.
-fn run(query: &str, project_type: &str) -> Result<(Vec<Hit>, u64), String> {
+fn run(query: &str, project_type: &str, index: &str, limit: u32) -> Result<(Vec<Hit>, u64), String> {
     // The tab the reader is on is a facet, not a filter applied afterwards: the API answers
     // the right kind of project and counts the right total, which a local filter could not.
+    // The sort and the page size are the API's own parameters, not a re-sort afterwards: the
+    // total has to match the order the reader asked for, and only the API can count that.
     let url = sift_net::modrinth::search_url_parts(
         query,
         Some(project_type),
-        Some("relevance"),
-        20,
+        Some(index),
+        limit,
         0,
     );
     // The launcher's own client, streaming to a temporary file: the same timeout and user
     // agent as every other request, and a body that never has to fit on this thread's stack.
     let path = std::env::temp_dir().join(format!(
         "sift-search-{:016x}.json",
-        hash(&format!("{project_type}\u{{1}}{query}"))
+        hash(&format!("{project_type}\u{{1}}{index}\u{{1}}{limit}\u{{1}}{query}"))
     ));
     let fetched = sift_net::download_file(&url, &path, Duration::from_secs(20))
         .map_err(|error| error.to_string());
@@ -262,11 +265,11 @@ mod tests {
     #[test]
     fn the_same_query_is_not_asked_twice() {
         let mut search = Search::default();
-        search.request("   ", "modpack");
+        search.request("   ", "modpack", "relevance", 20);
         assert!(matches!(search.state(), State::Idle), "whitespace is not a query");
-        search.request("sodium", "modpack");
+        search.request("sodium", "modpack", "relevance", 20);
         assert!(matches!(search.state(), State::Loading));
-        search.request("sodium", "modpack");
+        search.request("sodium", "modpack", "relevance", 20);
         assert!(matches!(search.state(), State::Loading), "still the first request");
     }
 

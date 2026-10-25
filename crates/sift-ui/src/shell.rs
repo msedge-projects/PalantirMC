@@ -98,6 +98,10 @@ pub struct Shell {
     /// Which of the tab strip's kinds the search is for: `modpack`, `mod`, `resourcepack`,
     /// `datapack`, `shader` or `plugin`.
     project_type: &'static str,
+    /// The API's sort index: `relevance`, `downloads`, `follows`, `newest`, `updated`.
+    sort_index: &'static str,
+    /// The API's page size, which the reference shows as `View: 20`.
+    page_size: u32,
     /// The skins page's own state.
     skins: crate::pages::skins::State,
     /// The screenshots page's own state.
@@ -124,6 +128,8 @@ impl Default for Shell {
             search: crate::widgets::search::Search::default(),
             results: crate::search::Search::default(),
             project_type: "modpack",
+            sort_index: "relevance",
+            page_size: 20,
             skins: crate::pages::skins::State::default(),
             screenshots: crate::pages::screenshots::State::default(),
             servers: crate::pages::servers::State::default(),
@@ -631,22 +637,42 @@ impl Shell {
         // The field's text drives the network search: a changed query starts one, and a
         // reply already in flight is collected here. Both are cheap when nothing changed.
         if let Some(query) = self.search.query().map(str::to_owned) {
-            self.results.request(&query, self.project_type);
+            self.results.request(&query, self.project_type, self.sort_index, self.page_size);
         }
         self.results.poll();
         // `search.ui` took `ui` mutably, which ended the painter borrow taken above; the
         // painter is re-acquired here, and the compiler is what said so.
         let painter = ui.painter();
-        // The two selects: `Sort by: Relevance` and `View: 20`, each its own rounded box.
+        // The two selects: `Sort by: Relevance` and `View: 20`.
+        //
+        // A press cycles the value rather than opening a dropdown. That is deliberate for this
+        // slice: the values are few and the whole point is that the *search* answers the new
+        // order, which a painted menu would not prove. The dropdown is the next slice, and the
+        // select's own label already reads from the value it will set.
+        const SORTS: [(&str, &str); 5] = [
+            ("Relevance", "relevance"),
+            ("Downloads", "downloads"),
+            ("Follows", "follows"),
+            ("Newest", "newest"),
+            ("Updated", "updated"),
+        ];
+        const SIZES: [u32; 4] = [10, 20, 50, 100];
         let select_w = 150.0;
-        for (index, label) in ["Sort by:  Relevance", "View: 20"]
-            .into_iter()
-            .enumerate()
-        {
+        for index in 0..2 {
             let select = Rect::from_min_size(
                 egui::pos2(field.right() + 12.0 + index as f32 * (select_w + 8.0), row.top()),
                 egui::vec2(select_w, g::SEARCH_ROW),
             );
+            let label = if index == 0 {
+                let name = SORTS
+                    .iter()
+                    .find(|(_, value)| *value == self.sort_index)
+                    .map(|(name, _)| *name)
+                    .unwrap_or("Relevance");
+                format!("Sort by:  {name}")
+            } else {
+                format!("View: {}", self.page_size)
+            };
             painter.rect_filled(select, 8, self.theme.RAISED_BG);
             painter.text(
                 egui::pos2(select.left() + 12.0, select.center().y),
@@ -664,6 +690,27 @@ impl Shell {
                 ),
                 self.theme.SECONDARY,
             );
+            if ui
+                .interact(select, egui::Id::new(("search-select", index)), Sense::click())
+                .clicked()
+            {
+                if index == 0 {
+                    let at = SORTS
+                        .iter()
+                        .position(|(_, value)| *value == self.sort_index)
+                        .unwrap_or(0);
+                    self.sort_index = SORTS[(at + 1) % SORTS.len()].1;
+                } else {
+                    let at = SIZES
+                        .iter()
+                        .position(|size| *size == self.page_size)
+                        .unwrap_or(1);
+                    self.page_size = SIZES[(at + 1) % SIZES.len()];
+                }
+                // A different order or page size is a different question: forget the answer so
+                // the request below asks it again.
+                self.results.forget();
+            }
         }
         // The result count, right-aligned on the same row.
         //
