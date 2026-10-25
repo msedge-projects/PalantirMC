@@ -339,3 +339,31 @@ Renamed 2026-10-25, the first of the rename's surfaces to move:
 Still owed on this surface: the binary is still `SiftLauncher.exe` (it was renamed with the
 crates), the product strings inside it already say `Sift Launcher`, and the data directories
 are still the old ones until the paths slice lands.
+
+## 9. Where the launcher is now — 2026-10-25
+
+The migration is finished in the sense that matters: **there is one UI and it is egui.**
+
+- **`crates/sift-ui` is the product.** Every destination in the reference's rail is a real page
+  (Home, Discover, Skins, Screenshots, Servers), plus a project page reached from a Discover
+  card, a settings modal with fourteen tabs (three ported in full, the rest named as owed), and
+  an About view.
+- **The engine is `crates/sift-game`** — 13,167 lines and 152 tests moved out of the iced crate
+  whole, with no iced, wgpu or windows-sys dependency and `#![forbid(unsafe_code)]`. That
+  extraction is what let the iced crate be deleted without losing the ability to install and
+  run a game.
+- **`crates/sift-desktop` is gone.** 229,277 lines, and with it the `web-sys` pin that forced
+  two workspaces and two lock files.
+- **The launcher talks to Modrinth.** The search box is live: a worker fetches through
+  `sift-net`, the tab strip selects the API's project type, the two selects set its sort index
+  and page size, and the toolbar prints the real `1 - 20 of 175` from `total_hits`.
+- **Creating an instance works.** `+ Create an instance` and `N` write a real instance into
+  `/…/SiftLauncher/instances/` with a vanilla pack profile, and the page switches to
+  `Jump back in`.
+- **The mark is the product's own**, embedded in the binary, drawn in the title bar, the hero
+  and About.
+- **Every lightness budget passes on the shipped profile** — see `docs/LIGHTNESS.md`.
+
+Owed, in the order worth doing: launching from the Play button (the engine is wired and the
+button is not), the eleven remaining settings tabs, the reference's create-instance modal,
+per-row instance menus, real skins/screenshots/servers data, and the release tag.

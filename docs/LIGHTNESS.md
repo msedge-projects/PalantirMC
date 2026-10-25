@@ -135,3 +135,24 @@ allocator rounds differently puts it over. The fix list, in the order worth tryi
 Startup did not move between debug and release, which says the 65 ms is dominated by window
 creation and the first frame rather than by code speed -- worth remembering before optimising
 anything for it.
+
+## Final: the shipped profile, 2026-10-25
+
+The workspace now declares its own `[profile.release]` (`opt-level = 3`, `lto = true`,
+`codegen-units = 1`, `strip = true`, `panic = "abort"`). A nested workspace inherits nothing
+from the root, so until this slice the exe shipped unstripped and without LTO.
+
+| Budget | Limit | Shipped release | Verdict |
+| --- | --- | --- | --- |
+| Startup to first window | <= 400 ms | **53 ms** | 7.5x of room |
+| Idle CPU | 0 ticks | **0 ticks over 10 s** | passes exactly |
+| Idle RSS | <= 120 MB | **114.6 MB** | passes with 5.4 MB of margin |
+| Exe | <= 28,648,960 B (iced) | **11,981,120 B** | 58% smaller than iced |
+
+Against the same budgets a debug build measures 55 ms, 0 ticks, 130.3 MB and 307,368,432 B --
+which is why the script grew a binary argument: measuring the wrong build silently is how a
+budget appears to pass while the thing that ships was never checked.
+
+Release build time is 1m55s with LTO on one core. The two fixes that turned a 0.2 MB margin
+into 5.4 MB were bounding the icon texture cache (256 entries, coldest evicted, `Loading` and
+`Failed` never candidates) and the profile itself.
