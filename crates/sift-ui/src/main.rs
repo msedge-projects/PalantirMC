@@ -80,11 +80,12 @@ impl eframe::App for App {
 mod tests {
     use crate::shell;
 
-    /// The shell starts on Discover and animating nothing: a window that opens
-    /// mid-animation draws a frame it did not need.
+    /// The shell opens on Home, like the reference: a launcher that opened on a catalogue
+    /// would look like a store. This test was written when Discover was the default, and it
+    /// caught the change rather than the change quietly passing.
     #[test]
-    fn a_fresh_shell_is_idle_on_discover() {
+    fn a_fresh_shell_opens_on_home() {
         let shell = shell::Shell::default();
-        assert_eq!(shell.rail, shell::Rail::Discover);
+        assert_eq!(shell.rail, shell::Rail::Home);
     }
 }
