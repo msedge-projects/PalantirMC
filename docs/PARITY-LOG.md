@@ -391,6 +391,34 @@ appeared *underneath* the first card. The fix is not a z-order call — it is dr
 interacting the popover after the list, which also gives its items the click instead of letting
 whichever card overlaps them take it.
 
+### E-31 and E-33 closed: the row menu and the worlds block — 2026-10-25
+
+The kebab on an instance row opens the reference's own five verbs in its own order, with its
+own strings: Play, Edit, Duplicate instance, Open folder, Delete — the last one in red.
+
+| Verb | What it does |
+| --- | --- |
+| Play | launches, the same action as the pill; a press while a launch is out toasts instead of vanishing |
+| Edit | a toast naming the page that does not exist yet |
+| Duplicate instance | a toast naming the folder copy that is not written yet |
+| Open folder | spawns `explorer` (or `xdg-open` on unix), spawn-not-wait |
+| Delete | `remove_dir_all`, refused with a toast while a launch is running |
+
+Under the rows, `Jump in` lists up to three world folders per instance, read from `saves/`
+only and cleaned of their copy timestamps. **A correction came with it:** the heading had said
+`Jump back in`, which is not a string anywhere in the vendored locale — it is `Library` in the
+reference, with `Jump in` on the worlds section.
+
+**What that pair of findings says about the earlier pages:** a heading invented from a memory of
+the reference is indistinguishable from a heading copied from it until someone greps the locale
+file. Every string in these two sections now carries its key.
+
+| # | Region | What still differs |
+| --- | --- | --- |
+| E-39 | Worlds | folder names are not world names: the real label lives in `level.dat`'s `LevelName`, and parsing NBT is owed |
+| E-40 | Worlds | a world row does not launch (`--quickPlaySingleplayer`) and does not print its instance's name |
+| E-41 | Row menu | there is no rename verb in the reference's menu either — `Edit` opens the instance page, which does not exist yet |
+
 ### Open after this pass
 
 | # | Region | What differs |
