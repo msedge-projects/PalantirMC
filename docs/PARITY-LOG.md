@@ -253,6 +253,39 @@ unsupported) and `xdotool type --window` sends synthetic events that winit ignor
 typing works once `xdotool windowfocus --sync <id>` has set the input focus. That is the third
 input-plumbing lesson this rig has taught, and it is now written down.
 
+### The rail's last three pages, captured — 2026-10-25
+
+Skins, Screenshots and Servers all render, and the rail is complete: every one of the
+reference's five destinations is a real page.
+
+**What the captures settle, and what they cannot.** The reference's own account is empty and
+signed out, so two of the three comparisons are between *our populated page* and *its empty
+state*:
+
+| Page | Reference state | Ours | Comparable? |
+| --- | --- | --- | --- |
+| Servers | hosting empty state (`Install mods, invite friends...`) + an invite dialog left open | four servers in `Your servers`, one in `Shared servers`, dots for 4/40, 12/60, Unknown and Offline | structure only |
+| Skins | `Saved skins` holding one add-skin dropzone, then `Default skins` | five saved-skin cards, no preview column | structure only |
+| Screenshots | `No screenshots yet` + illustration | nine shots in an `October 2026` group, two columns | structure only |
+
+That is a rig limit worth naming: **a parity capture compares states, not pages**, so a page
+whose reference state needs data (an installed instance, an uploaded skin, a linked account)
+needs the reference seeded before the comparison means anything. The empty states are the
+easiest to compare now, and they are also the ones a new user sees first.
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-25 | Skins | the reference's left column is a skin preview with `Drag to rotate` and an `Edit skin` button, and its foot is `Editing with a demo account` with a `Sign in to Microsoft` action; ours has neither, because there is no renderer yet |
+| E-26 | Skins | `Saved skins` in the reference holds the add-skin dropzone (`Add skin` / `Drag and drop`) and nothing else when nothing is saved; ours shows five saved samples and no dropzone |
+| E-27 | Skins | the reference has a second section, `Default skins`, with its own grid; ours draws one grid |
+| E-28 | Screenshots | unverified populated layout: our group header, captions (`{instance} · {date}`) and per-tile actions match the source's template but the reference has never shown them with a screenshot in it |
+| E-29 | Servers | our status ladder is visible and correct (4/40 online, 12/60 online, Unknown, Offline) but the reference showed its empty state, so the dot colours have not been compared side by side |
+
+**The most useful thing in these three captures is the least visual:** every page's *empty*
+state is now the state both apps can be compared in, and the reference's empty states are the
+ones a first-run user meets. That is where the next pass should spend its measurements rather
+than in the populated grids.
+
 ### Open after this pass
 
 | # | Region | What differs |
