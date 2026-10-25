@@ -95,6 +95,8 @@ pub struct Shell {
     screenshots: crate::pages::screenshots::State,
     /// The servers page's own state.
     servers: crate::pages::servers::State,
+    /// A one-line message shown after an action, until the next one.
+    toast: Option<String>,
 }
 
 impl Default for Shell {
@@ -115,6 +117,7 @@ impl Default for Shell {
             skins: crate::pages::skins::State::default(),
             screenshots: crate::pages::screenshots::State::default(),
             servers: crate::pages::servers::State::default(),
+            toast: None,
         }
     }
 }
@@ -134,6 +137,27 @@ impl Shell {
         let mut rail_animating = false;
         rail_animating |= self.rail_column(ui);
         rail_animating |= self.right_panel(ui);
+
+        // The toast: one line, bottom-centre over the content column. A message that reported
+        // an action and vanished at the frame's end would be invisible.
+        if let Some(message) = self.toast.clone() {
+            let painter = ui.painter();
+            let galley =
+                painter.layout_no_wrap(message, crate::fonts::body(13.0), self.theme.CONTRAST);
+            let plate = Rect::from_center_size(
+                egui::pos2((g::CONTENT_LEFT + g::PANEL_LEFT) / 2.0, g::WINDOW.1 - 56.0),
+                egui::vec2(galley.size().x + 32.0, 36.0),
+            );
+            painter.rect_filled(plate, 8, self.theme.SUPER_RAISED_BG);
+            painter.galley(
+                egui::pos2(
+                    plate.center().x - galley.size().x / 2.0,
+                    plate.center().y - galley.size().y / 2.0,
+                ),
+                galley,
+                self.theme.CONTRAST,
+            );
+        }
         let content = if let Some(project) = &self.open_project {
             let rect = crate::pages::Page::Project.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);
@@ -197,7 +221,13 @@ impl Shell {
         } else if self.rail == Rail::Home {
             let rect = crate::pages::Page::Home.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);
-            crate::pages::home::draw(ui, rect, &self.theme, &mut self.icons, &self.instances)
+            let theme = self.theme;
+            let action =
+                crate::pages::home::draw(ui, rect, &theme, &mut self.icons, &self.instances);
+            // The page reports intent; the shell owns the paths, the disk and the process
+            // table, so it is the shell that acts.
+            self.act(action);
+            false
         } else {
             self.content_column(ui)
         };
@@ -408,6 +438,55 @@ impl Shell {
             animating = true;
         }
         animating
+    }
+
+    /// Do what a page's press asked for.
+    ///
+    /// Every page's verbs land in this one list: a launcher's actions are few and shared (make
+    /// one, open one, run one), and a page that grew its own copy would be where the rules
+    /// diverged.
+    fn act(&mut self, action: crate::pages::home::Action) {
+        match action {
+            crate::pages::home::Action::None => {}
+            crate::pages::home::Action::Create => self.create_instance(),
+            crate::pages::home::Action::Import => {
+                // The button is honest about not doing it yet rather than silently doing
+                // nothing, which reads as a broken press.
+                self.toast = Some("Importing from another launcher is not wired yet.".to_owned());
+            }
+            crate::pages::home::Action::Play(_id) => {
+                self.toast = Some("Launching is not wired yet.".to_owned());
+            }
+        }
+    }
+
+    /// Create an instance with a name nobody has used, then re-read the list.
+    ///
+    /// The name and the version are the launcher's choices until the reference's create modal
+    /// exists: a default that works beats a button that does nothing, and the instance it makes
+    /// is a real one in the real folder.
+    fn create_instance(&mut self) {
+        let root = crate::data::instances_dir();
+        let mut index = self.instances.len() + 1;
+        while index < 64 {
+            let name = format!("Instance {index}");
+            match sift_core::instance::Instance::create(&root, &name, DEFAULT_MC_VERSION) {
+                Ok(instance) => {
+                    let made = instance
+                        .root()
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or(name);
+                    self.toast = Some(format!("Created {made}."));
+                    self.instances = crate::data::load().0;
+                    return;
+                }
+                // A collision is `unique_dir_name`'s job, but trying the next number costs
+                // nothing and the alternative is a message the reader cannot act on.
+                Err(_) => index += 1,
+            }
+        }
+        self.toast = Some("Could not create an instance: no free name.".to_owned());
     }
 
     /// The right panel: the page's own sections first, then the shared getting-started,

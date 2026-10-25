@@ -164,8 +164,8 @@ fn hero(ui: &mut Ui, rect: Rect, theme: &Theme, icons_cache: &mut Images) -> Act
 
     // A hover on the create button is the only thing that moves, and it is not animated yet:
     // nothing here is in flight, so the frame after this one is not owed.
-    let _ = (create, import, Sense::hover());
-    false
+    let _ = Sense::hover();
+    action
 }
 
 /// The installed state: the reference's instance cards, newest-played first.
