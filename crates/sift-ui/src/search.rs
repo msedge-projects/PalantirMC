@@ -190,16 +190,17 @@ fn hit(source: sift_net::modrinth::ModrinthSearchHit) -> Hit {
     }
 }
 
-/// `19_380_000` -> `19.4M`, the way the reference prints a count.
+/// `19_380_000` -> `19.38M`, the way the reference's cards print a count.
 ///
-/// The thresholds are the reference's own: one decimal below ten million, none above it, and
-/// thousands abbreviated as `K`. A number under a thousand is shown as itself.
+/// Two decimals on millions and one on thousands, both read off the reference's own cards
+/// (`19.38M`, `15.36M`, `2.7K`). A number under a thousand is shown as itself. The project
+/// page prints downloads with one decimal, so a page that wants that formatting rounds this
+/// result rather than growing a second rule here.
 pub fn abbreviate(count: u64) -> String {
     match count {
         0..=999 => count.to_string(),
         1_000..=999_999 => format!("{:.1}K", count as f64 / 1_000.0),
-        1_000_000..=9_999_999 => format!("{:.1}M", count as f64 / 1_000_000.0),
-        _ => format!("{:.0}M", count as f64 / 1_000_000.0),
+        _ => format!("{:.2}M", count as f64 / 1_000_000.0),
     }
 }
 
@@ -223,8 +224,10 @@ mod tests {
         assert_eq!(abbreviate(0), "0");
         assert_eq!(abbreviate(999), "999");
         assert_eq!(abbreviate(1_000), "1.0K");
-        assert_eq!(abbreviate(15_360_000), "15.4M");
-        assert_eq!(abbreviate(19_380_000), "19.4M");
+        assert_eq!(abbreviate(15_360_000), "15.36M");
+        assert_eq!(abbreviate(19_380_000), "19.38M");
+        // The reference prints 2.7K for 2,732 followers, and the project page prints 19.4M
+        // by rounding this result.
         assert_eq!(abbreviate(2_732), "2.7K");
     }
 
