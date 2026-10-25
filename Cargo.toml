@@ -5,9 +5,8 @@ members = [
     "crates/sift-net",
     "crates/sift-loader",
     # The game engine: install, Java selection and launch. A workspace member of
-    # its own so both UI crates can depend on it -- the egui one is in a separate
-    # workspace (see below) and can reach it by path.
-    "crates/sift-game",
+    # its own so the product shell can depend on it -- `crates/sift-ui` is in a
+    # separate workspace (see below) and reaches it by path.
     "crates/sift-game",
     # `crates/sift-ui` is **not** a member: it is the product, and it is its own
     # workspace with its own lock file. The two cannot share one -- that constraint

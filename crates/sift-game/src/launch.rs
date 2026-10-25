@@ -37,31 +37,33 @@
 //! ## What moved with the engine, and the four seams it left
 //!
 //! This file was `sift-desktop/src/launch.rs`; it moved here whole, with its
-//! tests, because the game engine must outlive the iced shell. Four things did
-//! not move, and each one is a parameter or a documented caller obligation
-//! rather than a hidden dependency:
+//! tests, because the game engine must outlive the iced shell -- and the iced
+//! crate has since been deleted. Four things did not move, and each one is a
+//! parameter or a documented caller obligation rather than a hidden dependency:
 //!
 //! * **Preferences.** `LaunchDefaults::from_prefs` used to be a method here. It
-//!   is now `sift-desktop`'s `launch::defaults_from_prefs`, and this crate's
-//!   [`LaunchDefaults`] is built with [`LaunchDefaults::new`]; `JavaPrefs`'
-//!   `from_prefs` moved the same way. `Prefs` is UI settings (it carries the
-//!   colour theme and the generated string table), so it cannot live in a crate
-//!   that has no UI. The behaviour is unchanged; the shell's composition is
-//!   where it always was, read at the moment a run is requested.
+//!   is now the shell's `defaults_from_prefs` (the iced shell had one; `sift-ui`
+//!   needs its own), and this crate's [`LaunchDefaults`] is built with
+//!   [`LaunchDefaults::new`]; `JavaPrefs`' `from_prefs` moved the same way.
+//!   `Prefs` is UI settings (it carries the colour theme and the generated string
+//!   table), so it cannot live in a crate that has no UI. The behaviour is
+//!   unchanged; the shell's composition is where it always was, read at the moment
+//!   a run is requested.
 //! * **The window system.** [`prepare_launch`] and [`run_launch_worker`] each
 //!   gained a `work_area: Option<WorkAreaProbe>` parameter. The maximized-window
 //!   translation needs the primary monitor's work area, and the query is Win32;
 //!   [`WorkAreaProbe`] is the function pointer the caller supplies, called only
-//!   when an instance actually asks to maximize. `sift-desktop`'s three-argument
-//!   `run_launch_worker` shim passes `native::primary_work_area`, so `shell.rs`
-//!   is unchanged; the egui shell passes its own query or `None`.
+//!   when an instance actually asks to maximize. The iced shell's three-argument
+//!   `run_launch_worker` shim passed `native::primary_work_area`; `sift-ui` passes
+//!   its own query or `None`.
 //! * **Power management.** [`run_launch_worker`] used to call
 //!   `awake::Awake::begin()`, which is `SetThreadExecutionState` and therefore
 //!   `unsafe` FFI. The guard is now the caller's, held on the thread the worker
-//!   runs on; `sift-desktop` holds it in `shell.rs` around the worker spawn.
+//!   runs on; the shell holds it around the worker spawn (the iced shell did so in
+//!   `shell.rs`).
 //! * **Branding.** [`crate::brand`] here carries only the product name and
 //!   version the script and run log write; the artwork and window icon stay in
-//!   `sift-desktop`'s brand module, which re-exports those two items.
+//!   the shell's brand module.
 
 use futures::channel::mpsc::Sender;
 use sift_core::{
@@ -217,8 +219,8 @@ impl LaunchDefaults {
     ///
     /// A plain constructor rather than `from_prefs`: the preferences file is the
     /// shell's (it also carries the theme and the language), so reading it is the
-    /// shell's job and this crate stays free of UI settings. `sift-desktop`'s
-    /// `launch::defaults_from_prefs` is that reader, and it is still called at the
+    /// shell's job and this crate stays free of UI settings. The shell's
+    /// `defaults_from_prefs` is that reader, and it is still called at the
     /// moment a run is requested -- the worker does not go back to a file.
     pub fn new(java: JavaPrefs, min_mem_mib: i64, max_mem_mib: i64) -> LaunchDefaults {
         LaunchDefaults {
@@ -279,8 +281,8 @@ pub struct ActiveRunData {
 ///
 /// A function pointer rather than a trait object: the value only travels through
 /// [`prepare_launch`] and [`run_launch_worker`], both stay `Copy + Debug`, and
-/// the one implementation this workspace has is a free function over the window
-/// system (`sift-desktop`'s `native::primary_work_area`). The engine calls it
+/// the one implementation this workspace had is a free function over the window
+/// system (`native::primary_work_area` in the iced shell). The engine calls it
 /// only when an instance actually asks to launch maximized -- the one case where
 /// the Win32 query is worth paying for -- so `None` means "this caller has no
 /// monitor to ask", never "there is no monitor".
@@ -580,8 +582,8 @@ pub fn prepare_auth(
 /// `work_area` is the one window-system fact a launch needs -- the primary
 /// monitor's work area, used only when an instance asks to launch maximized -- and
 /// it is a parameter rather than a call because the query is Win32 and this crate
-/// is safe Rust. `sift-desktop` passes a probe over `native::primary_work_area`;
-/// a headless caller passes `None`.
+/// is safe Rust. A shell passes a probe over its window system's work area; a
+/// headless caller passes `None`.
 pub fn prepare_launch(
     paths: &SiftPaths,
     instance_id: &str,
@@ -1767,8 +1769,8 @@ pub fn run_launch_worker(
     work_area: Option<WorkAreaProbe>,
 ) {
     // The launch's own wake guard used to be taken here. It is the caller's now
-    // (`sift-desktop` holds it around this call, on this thread), because the
-    // request is a Win32 call and this crate is safe Rust.
+    // (the shell holds it around this call, on this thread), because the request
+    // is a Win32 call and this crate is safe Rust.
     let paths = SiftPaths::at(&params.data_root);
     let run_id = params.run_id;
     let mut sender = sender;

@@ -23,6 +23,7 @@ mod brand;
 mod data;
 mod fonts;
 mod frame_log;
+mod game;
 mod geometry;
 mod icons;
 mod pages;

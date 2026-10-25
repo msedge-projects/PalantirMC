@@ -42,10 +42,11 @@
 //! **Power management is the caller's.** This module used to ask Windows to stay
 //! awake inside [`run`], which was a `SetThreadExecutionState` call and therefore
 //! `unsafe` FFI. The engine crate is safe Rust, so the guard lives where the work
-//! is spawned instead: `sift-desktop`'s launch worker thread and its
-//! `Store::repair_instance` hold it, on the same thread [`run`] executes on, and
-//! an egui shell does the same. A caller that does not ask keeps the old
-//! pre-guard behaviour, not a broken install.
+//! is spawned instead: the shell's launch-worker thread and its repair entry point
+//! hold it, on the same thread [`run`] executes on. (The iced shell did so in
+//! `shell.rs` and `Store::repair_instance`; `sift-ui` must do the same at its own
+//! entry points.) A caller that does not ask keeps the old pre-guard behaviour,
+//! not a broken install.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

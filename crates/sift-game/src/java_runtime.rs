@@ -49,10 +49,10 @@ pub const DOWNLOAD_THREADS: usize = 6;
 /// made the tab a promise the launcher did not keep: set Java 21 there, and the
 /// game ran on whatever the scan happened to find.
 ///
-/// The conversion from the shell's preferences lives in `sift-desktop`'s launch
-/// shim (`launch::java_prefs`) rather than here: `Prefs` is the shell's settings
-/// file and carries UI state this crate has no business knowing about. The two
-/// readers below are the whole of the contract a launch needs.
+/// The conversion from the shell's preferences lives in the shell
+/// (`launch::java_prefs` in the iced shell) rather than here: `Prefs` is the
+/// shell's settings file and carries UI state this crate has no business knowing
+/// about. The two readers below are the whole of the contract a launch needs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JavaPrefs {
     /// The "Java executable" path, used when nothing more specific applies.

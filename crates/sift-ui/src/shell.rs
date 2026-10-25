@@ -540,7 +540,7 @@ impl Shell {
                 // nothing, which reads as a broken press.
                 self.toast = Some("Importing from another launcher is not wired yet.".to_owned());
             }
-            crate::pages::home::Action::Play(id) => self.game.start(id),
+            crate::pages::home::Action::Play(id) => self.game.start(&id),
         }
     }
 

@@ -18,9 +18,10 @@
 //! the version, in secondary text -- and puts the licence and the notices under it, because
 //! a footer has room for one line and the notices need more than that.
 //!
-//! **The close box and Escape.** The reference's `NewModal.vue` puts its close button at
-//! `absolute top-4 right-4` and closes on Escape; both are copied here, because a modal that
-//! only closes one way is a modal somebody gets stuck in.
+//! **The three ways out.** The reference's `NewModal.vue` puts its close button at
+//! `absolute top-4 right-4`, defaults `closeOnEsc` to true and defaults
+//! `closeOnClickOutside` to true; all three are copied here, because a modal that only
+//! closes one way is a modal somebody gets stuck in.
 //!
 //! **What is deliberately not drawn.** No links to a repository, a Discord or a licence
 //! page: this view has no way to open a browser ([`crate::pages::home`]'s import button is
@@ -35,9 +36,10 @@ use crate::theme::Theme;
 
 /// The version, from the crate's own manifest.
 ///
-/// `CARGO_PKG_VERSION` is `Cargo.toml`'s `version` -- the same value CI stamps into the
-/// build it makes from that manifest and that the exe's file properties carry. A literal
-/// here would be a second number a release has to edit, and the first time the two
+/// `CARGO_PKG_VERSION` is `crates/sift-ui/Cargo.toml`'s `version` -- the number CI's release
+/// job checks the tag against ("Check tag against crates/sift-ui/Cargo.toml" in
+/// `release.yml`), so the tag, the build it publishes and this line cannot disagree. A
+/// literal here would be a second number a release has to edit, and the first time the two
 /// disagreed the About view would misname the binary it is part of.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -95,10 +97,11 @@ const ATTRIBUTION: [(&str, &str); 5] = [
 ///
 /// Wider than a settings footer and narrower than the settings modal (`min(928px, ...)`):
 /// the widest line here is an attribution at 12 points, which wraps twice at 560 and would
-/// wrap three times at the modal's width for no gain. The height fits the mark, four text
-/// blocks and five two-line rows with 24 points of padding at each end.
+/// wrap three times at the modal's width for no gain. The height is what the rows need --
+/// the mark, four text blocks and five two-line rows, with 24 points of padding at each end
+/// and room to spare for a row that wraps a third line.
 const PLATE_W: f32 = 560.0;
-const PLATE_H: f32 = 560.0;
+const PLATE_H: f32 = 520.0;
 
 /// The mark's box: 96 points, as asked, which is 192 px at 2x and 288 px at 3x.
 const MARK: f32 = 96.0;
@@ -126,8 +129,8 @@ const SCRIM_ALPHA: u8 = 160;
 /// `screen` is the window, as the shell measures it, so the scrim covers the furniture and
 /// not just the page column. `open` is the caller's state -- the same shape the reference's
 /// modal exposes -- and the return value is that state after this frame, so a caller can
-/// keep the frame loop alive for as long as this is drawn. Escape and the close box both
-/// write `false` through it.
+/// keep the frame loop alive for as long as this is drawn. Escape, the close box and a press
+/// on the backdrop all write `false` through it.
 pub fn draw(ui: &mut Ui, screen: Rect, theme: &Theme, open: &mut bool) -> bool {
     if !*open {
         return false;
@@ -192,6 +195,12 @@ pub fn draw(ui: &mut Ui, screen: Rect, theme: &Theme, open: &mut bool) -> bool {
         *open = false;
         return false;
     }
+    // A press on the backdrop closes, as it does in the reference. Hit testing gives a click
+    // to the topmost target, so a press on the plate or the close box never reaches this.
+    if scrim.clicked() {
+        *open = false;
+        return false;
+    }
 
     // The mark, at 96 points: the generated asset when the texture is there, and the plate
     // it would sit on when it is not (a headless run, or a context whose upload failed).
@@ -223,7 +232,9 @@ pub fn draw(ui: &mut Ui, screen: Rect, theme: &Theme, open: &mut bool) -> bool {
         egui::pos2(plate.center().x, mark.bottom() + 50.0),
         Align2::CENTER_TOP,
         LICENCE,
-        fonts::body(13.0),
+        // 12 rather than 13: the sentence is 79 characters, and at 13 it would sit inside
+        // the plate's edge without the padding the rest of the content keeps.
+        fonts::body(12.0),
         theme.SECONDARY,
     );
 

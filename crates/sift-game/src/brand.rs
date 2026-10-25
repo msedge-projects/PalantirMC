@@ -4,8 +4,8 @@
 //! `windowTitle`/`launcherBrand` lines, and the per-instance run log opens with
 //! the same name and version. Those two facts are the engine's business because
 //! the engine writes them; everything else about the brand -- the artwork, the
-//! window icon, the About page -- stays in `sift-desktop/src/brand.rs`, which
-//! re-exports these two items.
+//! window icon, the About page -- belongs to the shell. (The iced shell kept it
+//! in `src/brand.rs` and re-exported these two items; `sift-ui` keeps its own.)
 //!
 //! [`APP_NAME`] is [`sift_core::PRODUCT_NAME`] rather than a second literal: the
 //! name travels into the game, and two spellings of one product name is how a

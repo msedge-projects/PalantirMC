@@ -46,6 +46,7 @@ fastframe-scroll = { path = "../../vendor/fastframe-scroll" }
 sift-net = { path = "../sift-net" }
 # The core crate: instances on disk, the pack profile, and the paths a launcher shares.
 sift-core = { path = "../sift-core" }
+sift-game = { path = "../sift-game" }
 # The formats the project CDN actually serves. Measured, not assumed: asking for
 # `.../icon.png` answers **400**, and the API's own `icon_url` is a hashed `.webp` (with
 # some projects still on `.png`), so both decoders are needed and neither is speculative.

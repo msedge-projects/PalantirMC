@@ -2,10 +2,9 @@
 //!
 //! The launcher's game engine: the half that resolves a version, installs what
 //! is missing, picks a Java and starts Minecraft. It exists so that the engine is
-//! not owned by one UI: `sift-desktop` (iced) and `crates/sift-ui` (egui, its own
-//! workspace) are two shells over the same code, and the extraction is what lets
-//! the first be deleted without losing the second's ability to install and run a
-//! game.
+//! not owned by one UI: `crates/sift-ui` (egui, its own workspace) is the shell
+//! now, and this crate is what lets it install and run a game. The iced shell it
+//! was extracted from (`crates/sift-desktop`) has since been deleted.
 //!
 //! ## What moved
 //!
@@ -37,31 +36,33 @@
 //! ## The seams with the shell
 //!
 //! * **Preferences.** `Prefs` is UI settings (it carries the colour theme and
-//!   depends on the generated string table), so it stays in `sift-desktop`.
+//!   depends on the generated string table), so it belongs to the shell.
 //!   [`launch::LaunchDefaults`] is plain data here; the shell's
-//!   `launch::defaults_from_prefs` and `launch::java_prefs` read its fields.
+//!   `defaults_from_prefs` and `java_prefs` read its fields.
 //!   `LaunchDefaults::from_prefs` and `JavaPrefs::from_prefs` therefore no
-//!   longer exist as methods -- this is a signature change, and the shell's
-//!   tests for both moved with the conversion functions.
+//!   longer exist as methods -- this is a signature change, and a new shell needs
+//!   its own conversion (the iced shell's lived in its launch shim and was deleted
+//!   with it).
 //! * **The window system.** A maximized instance is passed the primary monitor's
 //!   work area, and that query is Win32. [`launch::prepare_launch`] and
 //!   [`launch::run_launch_worker`] gained a `work_area: Option<WorkAreaProbe>`
 //!   parameter -- a function pointer the shell supplies, called only when an
-//!   instance actually asks to maximize. `sift-desktop`'s launch shim passes
-//!   `native::primary_work_area`, so its three-argument `run_launch_worker` is
-//!   unchanged for `shell.rs`; the egui shell passes its own monitor query or
-//!   `None`. Nothing else about the launch changes.
+//!   instance actually asks to maximize. The iced shell's three-argument
+//!   `run_launch_worker` shim passed `native::primary_work_area`; the egui shell
+//!   passes its own monitor query or `None`. Nothing else about the launch
+//!   changes.
 //! * **Power management.** [`install::run`] and [`launch::run_launch_worker`] used
 //!   to call `awake::Awake::begin()`, which is `SetThreadExecutionState` and
 //!   therefore `unsafe` FFI. The guard now belongs to the caller, on the thread
-//!   doing the work: `sift-desktop` asks at the two entry points it owns
-//!   (`shell.rs`'s worker thread and `Store::repair_instance`), which is where
-//!   the behaviour it shipped with lives. A shell that forgets it gets the old
-//!   pre-guard behaviour (the machine may sleep through a long install), so the
-//!   seam is documented in both places rather than being silent.
+//!   doing the work. The iced shell asked at the two entry points it owned
+//!   (`shell.rs`'s worker thread and `Store::repair_instance`); `sift-ui` must do
+//!   the same at its launch and repair entry points. A shell that forgets it gets
+//!   the old pre-guard behaviour (the machine may sleep through a long install),
+//!   so the seam is documented rather than silent.
 //! * **Branding.** [`brand`] carries only the product name and version; the
-//!   artwork, window icon and About page stay in `sift-desktop/src/brand.rs`,
-//!   which re-exports [`brand::APP_NAME`] and [`brand::version`].
+//!   artwork, window icon and About page belong to the shell. The iced shell's
+//!   `src/brand.rs` re-exported [`brand::APP_NAME`] and [`brand::version`]; the
+//!   egui shell can do the same.
 //!
 //! The launch worker still speaks [`launch::LaunchEvent`] down a
 //! `futures::channel::mpsc::Sender`, which is a futures type rather than an iced
@@ -73,10 +74,10 @@
 //!
 //! No `unwrap`/`expect` outside tests, no `unsafe`, no UI dependencies. The
 //! tests that moved with the code are unchanged except where a test was *about* a
-//! seam: the preference conversions' two tests stayed in `sift-desktop` with the
-//! functions they test, the power guard's source check in `sift-desktop/src/awake.rs`
-//! now points at the shell's call sites, and the launch tests pass one extra
-//! `None` for the work-area probe. Their assertions are the ones that ran before.
+//! seam: the launch tests pass one extra `None` for the work-area probe, and the
+//! two preference-conversion tests and the power guard's source check stayed with
+//! the iced shell and were deleted with it. Their assertions are otherwise the
+//! ones that ran before.
 
 // The policy below is "no `unwrap`/`expect` outside tests", so tests have to be
 // exempt or the crate cannot compile under clippy at all. The `cfg_attr(test,

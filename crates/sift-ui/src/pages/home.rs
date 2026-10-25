@@ -29,7 +29,7 @@ pub enum Action {
     /// `Import from launcher`: find another launcher's instances.
     Import,
     /// Play this instance, by its id.
-    Play(&'static str),
+    Play(String),
 }
 
 /// Draw the page into `rect`, and say what was pressed.
@@ -47,10 +47,7 @@ pub fn draw(
     if instances.is_empty() {
         hero(ui, rect, theme, icons_cache)
     } else {
-        let _ = list(ui, rect, theme, icons_cache, instances);
-        // The instance list's rows are painted, not yet interactive; the honest answer is
-        // that nothing on it was pressed.
-        Action::None
+        list(ui, rect, theme, icons_cache, instances)
     }
 }
 
@@ -179,7 +176,7 @@ fn list(
     theme: &Theme,
     icons_cache: &mut Images,
     instances: &[Entry],
-) -> bool {
+) -> Action {
     let painter = ui.painter();
     painter.text(
         egui::pos2(rect.left(), rect.top() + 24.0),
@@ -191,6 +188,7 @@ fn list(
 
     let mut y = rect.top() + 72.0;
     let width = rect.width();
+    let mut action = Action::None;
     for instance in instances.iter().take(6) {
         let card = Rect::from_min_size(
             egui::pos2(rect.left(), y),
@@ -233,9 +231,19 @@ fn list(
             Rect::from_center_size(play.center(), Vec2::splat(18.0)),
             theme.BUTTON_TEXT_SELECTED,
         );
+        // The pill is a target now: a launcher whose play button is a drawing is not a
+        // launcher. The card's own press still does nothing -- the reference opens the
+        // instance's page there, and that page does not exist yet.
+        if ui
+            .interact(play, egui::Id::new(("play", &instance.id)), Sense::click())
+            .clicked()
+            && matches!(action, Action::None)
+        {
+            action = Action::Play(instance.id.clone());
+        }
         y += 108.0;
     }
-    false
+    action
 }
 
 #[cfg(test)]
