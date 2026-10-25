@@ -39,7 +39,6 @@ use egui::{Color32, CornerRadius, Stroke, Visuals};
 #[allow(non_snake_case)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
-
     // ---- page and surfaces ------------------------------------------------------
 
     /// `--color-bg` -- the page itself.
@@ -437,322 +436,325 @@ pub struct Theme {
 
 /// The dark scheme.
 ///
-/// Read from `vendor/modrinth-app/assets/styles/variables.scss`: the `.dark-mode, .dark, :root[data-theme='dark']` block
-/// at line 230, resolved over the `.light-properties` base at
-/// line 1 and the shared `html` block at line 190, in
-/// cascade order. Each comment below is `token: value -- the line that states it`
-/// `(via the chain the value was reached through)`.
+/// Read from `vendor/modrinth-app/assets/styles/variables.scss`. Each comment below is
+/// `token: value -- the sheet and line that state it`, plus the `var()` chain the
+/// value was reached through, so a colour on screen can be traced to the line
+/// that moved and a stale value cannot hide behind its alias.
 ///
-/// This is the scheme the reference opens in (`:root { color-scheme: dark }`,
-/// `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one the
-/// numbers in `REFERENCE.md` were taken in.
+/// The `.dark-mode, .dark, :root[data-theme='dark']` block at
+/// `assets/styles/variables.scss:230` supplies it, over the `.light-properties` base at
+/// line 1 and the shared `html` block at line 190, in
+/// cascade order. This is the scheme the reference opens in (`:root { color-scheme:
+/// dark }`, `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one
+/// the numbers in `REFERENCE.md` were taken in.
 pub const DARK: Theme = Theme {
     // ---- page and surfaces ----
-    // --color-bg: #16181c -- assets/styles/variables.scss:233 (via var(--surface-1) at assets/styles/variables.scss:325)
+    // --color-bg: #16181c -- variables.scss:233 (via var(--surface-1) at variables.scss:325)
     BG: egui::Color32::from_rgb(0x16, 0x18, 0x1c),
-    // --color-raised-bg: #27292e -- assets/styles/variables.scss:237 (via var(--surface-3) at assets/styles/variables.scss:326)
+    // --color-raised-bg: #27292e -- variables.scss:237 (via var(--surface-3) at variables.scss:326)
     RAISED_BG: egui::Color32::from_rgb(0x27, 0x29, 0x2e),
-    // --color-super-raised-bg: #34363c -- assets/styles/variables.scss:238 (via var(--surface-4) at assets/styles/variables.scss:327)
+    // --color-super-raised-bg: #34363c -- variables.scss:238 (via var(--surface-4) at variables.scss:327)
     SUPER_RAISED_BG: egui::Color32::from_rgb(0x34, 0x36, 0x3c),
-    // --surface-1: #16181c -- assets/styles/variables.scss:233
+    // --surface-1: #16181c -- variables.scss:233
     SURFACE_1: egui::Color32::from_rgb(0x16, 0x18, 0x1c),
-    // --surface-1-5: #1a1c20 -- assets/styles/variables.scss:234
+    // --surface-1-5: #1a1c20 -- variables.scss:234
     SURFACE_1_5: egui::Color32::from_rgb(0x1a, 0x1c, 0x20),
-    // --surface-2: #1d1f23 -- assets/styles/variables.scss:235
+    // --surface-2: #1d1f23 -- variables.scss:235
     SURFACE_2: egui::Color32::from_rgb(0x1d, 0x1f, 0x23),
-    // --surface-2-5: #222429 -- assets/styles/variables.scss:236
+    // --surface-2-5: #222429 -- variables.scss:236
     SURFACE_2_5: egui::Color32::from_rgb(0x22, 0x24, 0x29),
-    // --surface-3: #27292e -- assets/styles/variables.scss:237
+    // --surface-3: #27292e -- variables.scss:237
     SURFACE_3: egui::Color32::from_rgb(0x27, 0x29, 0x2e),
-    // --surface-4: #34363c -- assets/styles/variables.scss:238
+    // --surface-4: #34363c -- variables.scss:238
     SURFACE_4: egui::Color32::from_rgb(0x34, 0x36, 0x3c),
-    // --surface-5: #42444a -- assets/styles/variables.scss:239
+    // --surface-5: #42444a -- variables.scss:239
     SURFACE_5: egui::Color32::from_rgb(0x42, 0x44, 0x4a),
     // ---- controls ----
-    // --color-button-bg: #34363c -- assets/styles/variables.scss:238 (via var(--surface-4) at assets/styles/variables.scss:329)
+    // --color-button-bg: #34363c -- variables.scss:238 (via var(--surface-4) at variables.scss:329)
     BUTTON_BG: egui::Color32::from_rgb(0x34, 0x36, 0x3c),
-    // --color-button-border: rgba(193, 190, 209, 0.12) -- assets/styles/variables.scss:330; stored premultiplied, alpha 31
+    // --color-button-border: rgba(193, 190, 209, 0.12) -- variables.scss:330; stored premultiplied, alpha 31
     BUTTON_BORDER: egui::Color32::from_rgba_premultiplied(0x17, 0x17, 0x19, 0x1f),
-    // --color-button-bg-selected: rgba(27, 217, 106, 0.25) -- assets/styles/variables.scss:355 (via var(--color-brand-highlight) at assets/styles/variables.scss:376); stored premultiplied, alpha 64
+    // --color-button-bg-selected: rgba(27, 217, 106, 0.25) -- variables.scss:355 (via var(--color-brand-highlight) at variables.scss:376); stored premultiplied, alpha 64
     BUTTON_BG_SELECTED: egui::Color32::from_rgba_premultiplied(0x07, 0x36, 0x1b, 0x40),
-    // --color-button-text-selected: #1bd96a -- assets/styles/variables.scss:272 (via var(--color-brand) -> var(--color-green) -> var(--color-green-500) at assets/styles/variables.scss:377)
+    // --color-button-text-selected: #1bd96a -- variables.scss:272 (via var(--color-brand) -> var(--color-green) -> var(--color-green-500) at variables.scss:377)
     BUTTON_TEXT_SELECTED: egui::Color32::from_rgb(0x1b, 0xd9, 0x6a),
     // ---- lines ----
-    // --color-divider: #34363c -- assets/styles/variables.scss:238 (via var(--color-button-bg) -> var(--surface-4) at assets/styles/variables.scss:333)
+    // --color-divider: #34363c -- variables.scss:238 (via var(--color-button-bg) -> var(--surface-4) at variables.scss:333)
     DIVIDER: egui::Color32::from_rgb(0x34, 0x36, 0x3c),
-    // --color-divider-dark: #646c75 -- assets/styles/variables.scss:334
+    // --color-divider-dark: #646c75 -- variables.scss:334
     DIVIDER_DARK: egui::Color32::from_rgb(0x64, 0x6c, 0x75),
     // ---- text ----
-    // --color-base: #b0bac5 -- assets/styles/variables.scss:320 (via var(--color-text-default) at assets/styles/variables.scss:336)
+    // --color-base: #b0bac5 -- variables.scss:320 (via var(--color-text-default) at variables.scss:336)
     BASE: egui::Color32::from_rgb(0xb0, 0xba, 0xc5),
-    // --color-secondary: #96a2b0 -- assets/styles/variables.scss:321 (via var(--color-text-tertiary) at assets/styles/variables.scss:337)
+    // --color-secondary: #96a2b0 -- variables.scss:321 (via var(--color-text-tertiary) at variables.scss:337)
     SECONDARY: egui::Color32::from_rgb(0x96, 0xa2, 0xb0),
-    // --color-contrast: #ffffff -- assets/styles/variables.scss:319 (via var(--color-text-primary) at assets/styles/variables.scss:338)
+    // --color-contrast: #ffffff -- variables.scss:319 (via var(--color-text-primary) at variables.scss:338)
     CONTRAST: egui::Color32::from_rgb(0xff, 0xff, 0xff),
-    // --color-accent-contrast: #000000 -- assets/styles/variables.scss:339
+    // --color-accent-contrast: #000000 -- variables.scss:339
     ACCENT_CONTRAST: egui::Color32::from_rgb(0x00, 0x00, 0x00),
-    // --color-text-primary: #ffffff -- assets/styles/variables.scss:319
+    // --color-text-primary: #ffffff -- variables.scss:319
     TEXT_PRIMARY: egui::Color32::from_rgb(0xff, 0xff, 0xff),
-    // --color-text-default: #b0bac5 -- assets/styles/variables.scss:320
+    // --color-text-default: #b0bac5 -- variables.scss:320
     TEXT_DEFAULT: egui::Color32::from_rgb(0xb0, 0xba, 0xc5),
-    // --color-text-tertiary: #96a2b0 -- assets/styles/variables.scss:321
+    // --color-text-tertiary: #96a2b0 -- variables.scss:321
     TEXT_TERTIARY: egui::Color32::from_rgb(0x96, 0xa2, 0xb0),
     // ---- accent ----
-    // --color-brand: #1bd96a -- assets/styles/variables.scss:272 (via var(--color-green) -> var(--color-green-500) at assets/styles/variables.scss:354)
+    // --color-brand: #1bd96a -- variables.scss:272 (via var(--color-green) -> var(--color-green-500) at variables.scss:354)
     BRAND: egui::Color32::from_rgb(0x1b, 0xd9, 0x6a),
-    // --color-brand-highlight: rgba(27, 217, 106, 0.25) -- assets/styles/variables.scss:355; stored premultiplied, alpha 64
+    // --color-brand-highlight: rgba(27, 217, 106, 0.25) -- variables.scss:355; stored premultiplied, alpha 64
     BRAND_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x07, 0x36, 0x1b, 0x40),
-    // --color-brand-shadow: rgba(27, 217, 106, 0.70) -- assets/styles/variables.scss:356; stored premultiplied, alpha 178
+    // --color-brand-shadow: rgba(27, 217, 106, 0.70) -- variables.scss:356; stored premultiplied, alpha 178
     BRAND_SHADOW: egui::Color32::from_rgba_premultiplied(0x13, 0x97, 0x4a, 0xb2),
     // ---- hues ----
-    // --color-red: #ff496e -- assets/styles/variables.scss:246 (via var(--color-red-500) at assets/styles/variables.scss:252)
+    // --color-red: #ff496e -- variables.scss:246 (via var(--color-red-500) at variables.scss:252)
     RED: egui::Color32::from_rgb(0xff, 0x49, 0x6e),
-    // --color-orange: #ffa347 -- assets/styles/variables.scss:258 (via var(--color-orange-400) at assets/styles/variables.scss:265)
+    // --color-orange: #ffa347 -- variables.scss:258 (via var(--color-orange-400) at variables.scss:265)
     ORANGE: egui::Color32::from_rgb(0xff, 0xa3, 0x47),
-    // --color-green: #1bd96a -- assets/styles/variables.scss:272 (via var(--color-green-500) at assets/styles/variables.scss:278)
+    // --color-green: #1bd96a -- variables.scss:272 (via var(--color-green-500) at variables.scss:278)
     GREEN: egui::Color32::from_rgb(0x1b, 0xd9, 0x6a),
-    // --color-blue: #4f9cff -- assets/styles/variables.scss:284 (via var(--color-blue-400) at assets/styles/variables.scss:291)
+    // --color-blue: #4f9cff -- variables.scss:284 (via var(--color-blue-400) at variables.scss:291)
     BLUE: egui::Color32::from_rgb(0x4f, 0x9c, 0xff),
-    // --color-purple: #c78aff -- assets/styles/variables.scss:297 (via var(--color-purple-400) at assets/styles/variables.scss:304)
+    // --color-purple: #c78aff -- variables.scss:297 (via var(--color-purple-400) at variables.scss:304)
     PURPLE: egui::Color32::from_rgb(0xc7, 0x8a, 0xff),
-    // --color-gray: #9fa4b3 -- assets/styles/variables.scss:311 (via var(--color-gray-500) at assets/styles/variables.scss:317)
+    // --color-gray: #9fa4b3 -- variables.scss:311 (via var(--color-gray-500) at variables.scss:317)
     GRAY: egui::Color32::from_rgb(0x9f, 0xa4, 0xb3),
     // ---- hue washes ----
-    // --color-red-highlight: rgba(255, 73, 110, 0.25) -- assets/styles/variables.scss:341; stored premultiplied, alpha 64
+    // --color-red-highlight: rgba(255, 73, 110, 0.25) -- variables.scss:341; stored premultiplied, alpha 64
     RED_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x40, 0x12, 0x1c, 0x40),
-    // --color-orange-highlight: rgba(255, 163, 71, 0.25) -- assets/styles/variables.scss:342; stored premultiplied, alpha 64
+    // --color-orange-highlight: rgba(255, 163, 71, 0.25) -- variables.scss:342; stored premultiplied, alpha 64
     ORANGE_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x40, 0x29, 0x12, 0x40),
-    // --color-green-highlight: rgba(27, 217, 106, 0.25) -- assets/styles/variables.scss:343; stored premultiplied, alpha 64
+    // --color-green-highlight: rgba(27, 217, 106, 0.25) -- variables.scss:343; stored premultiplied, alpha 64
     GREEN_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x07, 0x36, 0x1b, 0x40),
-    // --color-blue-highlight: rgba(79, 156, 255, 0.25) -- assets/styles/variables.scss:344; stored premultiplied, alpha 64
+    // --color-blue-highlight: rgba(79, 156, 255, 0.25) -- variables.scss:344; stored premultiplied, alpha 64
     BLUE_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x14, 0x27, 0x40, 0x40),
-    // --color-purple-highlight: rgba(199, 138, 255, 0.25) -- assets/styles/variables.scss:345; stored premultiplied, alpha 64
+    // --color-purple-highlight: rgba(199, 138, 255, 0.25) -- variables.scss:345; stored premultiplied, alpha 64
     PURPLE_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x32, 0x23, 0x40, 0x40),
-    // --color-gray-highlight: rgba(159, 164, 179, 0.25) -- assets/styles/variables.scss:346; stored premultiplied, alpha 64
+    // --color-gray-highlight: rgba(159, 164, 179, 0.25) -- variables.scss:346; stored premultiplied, alpha 64
     GRAY_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x28, 0x29, 0x2d, 0x40),
-    // --color-red-bg: rgba(255, 73, 110, 0.20) -- assets/styles/variables.scss:348; stored premultiplied, alpha 51
+    // --color-red-bg: rgba(255, 73, 110, 0.20) -- variables.scss:348; stored premultiplied, alpha 51
     RED_BG: egui::Color32::from_rgba_premultiplied(0x33, 0x0f, 0x16, 0x33),
-    // --color-orange-bg: rgba(255, 163, 71, 0.20) -- assets/styles/variables.scss:349; stored premultiplied, alpha 51
+    // --color-orange-bg: rgba(255, 163, 71, 0.20) -- variables.scss:349; stored premultiplied, alpha 51
     ORANGE_BG: egui::Color32::from_rgba_premultiplied(0x33, 0x21, 0x0e, 0x33),
-    // --color-green-bg: rgba(27, 217, 106, 0.20) -- assets/styles/variables.scss:350; stored premultiplied, alpha 51
+    // --color-green-bg: rgba(27, 217, 106, 0.20) -- variables.scss:350; stored premultiplied, alpha 51
     GREEN_BG: egui::Color32::from_rgba_premultiplied(0x05, 0x2b, 0x15, 0x33),
-    // --color-blue-bg: rgba(79, 156, 255, 0.20) -- assets/styles/variables.scss:351; stored premultiplied, alpha 51
+    // --color-blue-bg: rgba(79, 156, 255, 0.20) -- variables.scss:351; stored premultiplied, alpha 51
     BLUE_BG: egui::Color32::from_rgba_premultiplied(0x10, 0x1f, 0x33, 0x33),
-    // --color-purple-bg: rgba(199, 138, 255, 0.20) -- assets/styles/variables.scss:352; stored premultiplied, alpha 51
+    // --color-purple-bg: rgba(199, 138, 255, 0.20) -- variables.scss:352; stored premultiplied, alpha 51
     PURPLE_BG: egui::Color32::from_rgba_premultiplied(0x28, 0x1c, 0x33, 0x33),
     // ---- links ----
-    // --color-link: #4f9cff -- assets/styles/variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at assets/styles/variables.scss:216); the dark block does not override it
+    // --color-link: #4f9cff -- variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at variables.scss:216); dark does not override it
     LINK: egui::Color32::from_rgb(0x4f, 0x9c, 0xff),
-    // --color-link-hover: #4f9cff -- assets/styles/variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at assets/styles/variables.scss:217); the dark block does not override it
+    // --color-link-hover: #4f9cff -- variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at variables.scss:217); dark does not override it
     LINK_HOVER: egui::Color32::from_rgb(0x4f, 0x9c, 0xff),
-    // --color-link-active: #4f9cff -- assets/styles/variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at assets/styles/variables.scss:218); the dark block does not override it
+    // --color-link-active: #4f9cff -- variables.scss:284 (via var(--color-blue) -> var(--color-blue-400) at variables.scss:218); dark does not override it
     LINK_ACTIVE: egui::Color32::from_rgb(0x4f, 0x9c, 0xff),
     // ---- chrome ----
-    // --color-scrollbar: #42444a -- assets/styles/variables.scss:239 (via var(--surface-5) at assets/styles/variables.scss:331)
+    // --color-scrollbar: #42444a -- variables.scss:239 (via var(--surface-5) at variables.scss:331)
     SCROLLBAR: egui::Color32::from_rgb(0x42, 0x44, 0x4a),
-    // --color-tooltip-bg: #27292e -- assets/styles/variables.scss:237 (via var(--surface-3) at assets/styles/variables.scss:209); the dark block does not override it
+    // --color-tooltip-bg: #27292e -- variables.scss:237 (via var(--surface-3) at variables.scss:209); dark does not override it
     TOOLTIP_BG: egui::Color32::from_rgb(0x27, 0x29, 0x2e),
-    // --color-tooltip-text: #ffffff -- assets/styles/variables.scss:319 (via var(--color-contrast) -> var(--color-text-primary) at assets/styles/variables.scss:208); the dark block does not override it
+    // --color-tooltip-text: #ffffff -- variables.scss:319 (via var(--color-contrast) -> var(--color-text-primary) at variables.scss:208); dark does not override it
     TOOLTIP_TEXT: egui::Color32::from_rgb(0xff, 0xff, 0xff),
-    // --color-focus-ring: #ea80ff -- assets/styles/variables.scss:222; the dark block does not override it
+    // --color-focus-ring: #ea80ff -- variables.scss:222; dark does not override it
     FOCUS_RING: egui::Color32::from_rgb(0xea, 0x80, 0xff),
     // ---- platforms ----
-    // --color-platform-fabric: #dbb69b -- assets/styles/variables.scss:389
+    // --color-platform-fabric: #dbb69b -- variables.scss:389
     PLATFORM_FABRIC: egui::Color32::from_rgb(0xdb, 0xb6, 0x9b),
-    // --color-platform-quilt: #c796f9 -- assets/styles/variables.scss:390
+    // --color-platform-quilt: #c796f9 -- variables.scss:390
     PLATFORM_QUILT: egui::Color32::from_rgb(0xc7, 0x96, 0xf9),
-    // --color-platform-forge: #959eef -- assets/styles/variables.scss:391
+    // --color-platform-forge: #959eef -- variables.scss:391
     PLATFORM_FORGE: egui::Color32::from_rgb(0x95, 0x9e, 0xef),
-    // --color-platform-neoforge: #f99e6b -- assets/styles/variables.scss:392
+    // --color-platform-neoforge: #f99e6b -- variables.scss:392
     PLATFORM_NEOFORGE: egui::Color32::from_rgb(0xf9, 0x9e, 0x6b),
-    // --color-platform-liteloader: #7ab0ee -- assets/styles/variables.scss:393
+    // --color-platform-liteloader: #7ab0ee -- variables.scss:393
     PLATFORM_LITELOADER: egui::Color32::from_rgb(0x7a, 0xb0, 0xee),
-    // --color-platform-bukkit: #f6af7b -- assets/styles/variables.scss:394
+    // --color-platform-bukkit: #f6af7b -- variables.scss:394
     PLATFORM_BUKKIT: egui::Color32::from_rgb(0xf6, 0xaf, 0x7b),
-    // --color-platform-bungeecord: #d2c080 -- assets/styles/variables.scss:395
+    // --color-platform-bungeecord: #d2c080 -- variables.scss:395
     PLATFORM_BUNGEECORD: egui::Color32::from_rgb(0xd2, 0xc0, 0x80),
-    // --color-platform-folia: #a5e388 -- assets/styles/variables.scss:396
+    // --color-platform-folia: #a5e388 -- variables.scss:396
     PLATFORM_FOLIA: egui::Color32::from_rgb(0xa5, 0xe3, 0x88),
-    // --color-platform-paper: #eeaaaa -- assets/styles/variables.scss:397
+    // --color-platform-paper: #eeaaaa -- variables.scss:397
     PLATFORM_PAPER: egui::Color32::from_rgb(0xee, 0xaa, 0xaa),
-    // --color-platform-purpur: #c3abf7 -- assets/styles/variables.scss:398
+    // --color-platform-purpur: #c3abf7 -- variables.scss:398
     PLATFORM_PURPUR: egui::Color32::from_rgb(0xc3, 0xab, 0xf7),
-    // --color-platform-spigot: #f1cc84 -- assets/styles/variables.scss:399
+    // --color-platform-spigot: #f1cc84 -- variables.scss:399
     PLATFORM_SPIGOT: egui::Color32::from_rgb(0xf1, 0xcc, 0x84),
-    // --color-platform-velocity: #83d5ef -- assets/styles/variables.scss:400
+    // --color-platform-velocity: #83d5ef -- variables.scss:400
     PLATFORM_VELOCITY: egui::Color32::from_rgb(0x83, 0xd5, 0xef),
-    // --color-platform-waterfall: #78a4fb -- assets/styles/variables.scss:401
+    // --color-platform-waterfall: #78a4fb -- variables.scss:401
     PLATFORM_WATERFALL: egui::Color32::from_rgb(0x78, 0xa4, 0xfb),
-    // --color-platform-sponge: #f9e580 -- assets/styles/variables.scss:402
+    // --color-platform-sponge: #f9e580 -- variables.scss:402
     PLATFORM_SPONGE: egui::Color32::from_rgb(0xf9, 0xe5, 0x80),
-    // --color-platform-ornithe: #87c7ff -- assets/styles/variables.scss:403
+    // --color-platform-ornithe: #87c7ff -- variables.scss:403
     PLATFORM_ORNITHE: egui::Color32::from_rgb(0x87, 0xc7, 0xff),
-    // --color-platform-bta-babric: #72cc4a -- assets/styles/variables.scss:404
+    // --color-platform-bta-babric: #72cc4a -- variables.scss:404
     PLATFORM_BTA_BABRIC: egui::Color32::from_rgb(0x72, 0xcc, 0x4a),
-    // --color-platform-nilloader: #f45e9a -- assets/styles/variables.scss:405
+    // --color-platform-nilloader: #f45e9a -- variables.scss:405
     PLATFORM_NILLOADER: egui::Color32::from_rgb(0xf4, 0x5e, 0x9a),
-    // --hover-brightness: 1.25 -- assets/styles/variables.scss:407
+    // --hover-brightness: 1.25 -- variables.scss:407
     HOVER_BRIGHTNESS: 1.25,
     DARK_MODE: true,
 };
 
 /// The light scheme.
 ///
-/// Read from `vendor/modrinth-app/assets/styles/variables.scss`: the `.light-properties` block
-/// at line 1, resolved over the `.light-properties` base at
-/// line 1 and the shared `html` block at line 190, in
-/// cascade order. Each comment below is `token: value -- the line that states it`
-/// `(via the chain the value was reached through)`.
+/// Read from `vendor/modrinth-app/assets/styles/variables.scss`. Each comment below is
+/// `token: value -- the sheet and line that state it`, plus the `var()` chain the
+/// value was reached through, so a colour on screen can be traced to the line
+/// that moved and a stale value cannot hide behind its alias.
 ///
-/// `.light-mode` only extends `.light-properties`; the light scheme is that base
-/// plus the shared `html` block, which is also where a dark-only token falls back
-/// to when `.dark-mode` does not override it.
+/// The `.light-properties` base at line 1 and the shared `html` block
+/// at line 190, with `.light-mode` (line 225)
+/// extending the base and declaring nothing of its own. A token the light block does
+/// not state falls back to that base, which is why the light column has values for
+/// tokens only `html` declares.
 pub const LIGHT: Theme = Theme {
     // ---- page and surfaces ----
-    // --color-bg: #ebebeb -- assets/styles/variables.scss:2 (via var(--surface-1) at assets/styles/variables.scss:94)
+    // --color-bg: #ebebeb -- variables.scss:2 (via var(--surface-1) at variables.scss:94)
     BG: egui::Color32::from_rgb(0xeb, 0xeb, 0xeb),
-    // --color-raised-bg: #f8f8f8 -- assets/styles/variables.scss:6 (via var(--surface-3) at assets/styles/variables.scss:95)
+    // --color-raised-bg: #f8f8f8 -- variables.scss:6 (via var(--surface-3) at variables.scss:95)
     RAISED_BG: egui::Color32::from_rgb(0xf8, 0xf8, 0xf8),
-    // --color-super-raised-bg: #ffffff -- assets/styles/variables.scss:7 (via var(--surface-4) at assets/styles/variables.scss:96)
+    // --color-super-raised-bg: #ffffff -- variables.scss:7 (via var(--surface-4) at variables.scss:96)
     SUPER_RAISED_BG: egui::Color32::from_rgb(0xff, 0xff, 0xff),
-    // --surface-1: #ebebeb -- assets/styles/variables.scss:2
+    // --surface-1: #ebebeb -- variables.scss:2
     SURFACE_1: egui::Color32::from_rgb(0xeb, 0xeb, 0xeb),
-    // --surface-1-5: #ededed -- assets/styles/variables.scss:3
+    // --surface-1-5: #ededed -- variables.scss:3
     SURFACE_1_5: egui::Color32::from_rgb(0xed, 0xed, 0xed),
-    // --surface-2: #f5f5f5 -- assets/styles/variables.scss:4
+    // --surface-2: #f5f5f5 -- variables.scss:4
     SURFACE_2: egui::Color32::from_rgb(0xf5, 0xf5, 0xf5),
-    // --surface-2-5: #eef1f5 -- assets/styles/variables.scss:5
+    // --surface-2-5: #eef1f5 -- variables.scss:5
     SURFACE_2_5: egui::Color32::from_rgb(0xee, 0xf1, 0xf5),
-    // --surface-3: #f8f8f8 -- assets/styles/variables.scss:6
+    // --surface-3: #f8f8f8 -- variables.scss:6
     SURFACE_3: egui::Color32::from_rgb(0xf8, 0xf8, 0xf8),
-    // --surface-4: #ffffff -- assets/styles/variables.scss:7
+    // --surface-4: #ffffff -- variables.scss:7
     SURFACE_4: egui::Color32::from_rgb(0xff, 0xff, 0xff),
-    // --surface-5: #dddddd -- assets/styles/variables.scss:8
+    // --surface-5: #dddddd -- variables.scss:8
     SURFACE_5: egui::Color32::from_rgb(0xdd, 0xdd, 0xdd),
     // ---- controls ----
-    // --color-button-bg: #ffffff -- assets/styles/variables.scss:7 (via var(--surface-4) at assets/styles/variables.scss:98)
+    // --color-button-bg: #ffffff -- variables.scss:7 (via var(--surface-4) at variables.scss:98)
     BUTTON_BG: egui::Color32::from_rgb(0xff, 0xff, 0xff),
-    // --color-button-border: rgba(161, 161, 161, 0.35) -- assets/styles/variables.scss:99; stored premultiplied, alpha 89
+    // --color-button-border: rgba(161, 161, 161, 0.35) -- variables.scss:99; stored premultiplied, alpha 89
     BUTTON_BORDER: egui::Color32::from_rgba_premultiplied(0x38, 0x38, 0x38, 0x59),
-    // --color-button-bg-selected: #00af5c -- assets/styles/variables.scss:42 (via var(--color-brand) -> var(--color-green) -> var(--color-green-600) at assets/styles/variables.scss:156)
+    // --color-button-bg-selected: #00af5c -- variables.scss:42 (via var(--color-brand) -> var(--color-green) -> var(--color-green-600) at variables.scss:156)
     BUTTON_BG_SELECTED: egui::Color32::from_rgb(0x00, 0xaf, 0x5c),
-    // --color-button-text-selected: #ffffff -- assets/styles/variables.scss:108 (via var(--color-accent-contrast) at assets/styles/variables.scss:157)
+    // --color-button-text-selected: #ffffff -- variables.scss:108 (via var(--color-accent-contrast) at variables.scss:157)
     BUTTON_TEXT_SELECTED: egui::Color32::from_rgb(0xff, 0xff, 0xff),
     // ---- lines ----
-    // --color-divider: #dddddd -- assets/styles/variables.scss:8 (via var(--surface-5) at assets/styles/variables.scss:102)
+    // --color-divider: #dddddd -- variables.scss:8 (via var(--surface-5) at variables.scss:102)
     DIVIDER: egui::Color32::from_rgb(0xdd, 0xdd, 0xdd),
-    // --color-divider-dark: #dddddd -- assets/styles/variables.scss:8 (via var(--surface-5) at assets/styles/variables.scss:103)
+    // --color-divider-dark: #dddddd -- variables.scss:8 (via var(--surface-5) at variables.scss:103)
     DIVIDER_DARK: egui::Color32::from_rgb(0xdd, 0xdd, 0xdd),
     // ---- text ----
-    // --color-base: #2c2e31 -- assets/styles/variables.scss:89 (via var(--color-text-default) at assets/styles/variables.scss:105)
+    // --color-base: #2c2e31 -- variables.scss:89 (via var(--color-text-default) at variables.scss:105)
     BASE: egui::Color32::from_rgb(0x2c, 0x2e, 0x31),
-    // --color-secondary: #484d54 -- assets/styles/variables.scss:90 (via var(--color-text-tertiary) at assets/styles/variables.scss:106)
+    // --color-secondary: #484d54 -- variables.scss:90 (via var(--color-text-tertiary) at variables.scss:106)
     SECONDARY: egui::Color32::from_rgb(0x48, 0x4d, 0x54),
-    // --color-contrast: #1a202c -- assets/styles/variables.scss:88 (via var(--color-text-primary) at assets/styles/variables.scss:107)
+    // --color-contrast: #1a202c -- variables.scss:88 (via var(--color-text-primary) at variables.scss:107)
     CONTRAST: egui::Color32::from_rgb(0x1a, 0x20, 0x2c),
-    // --color-accent-contrast: #ffffff -- assets/styles/variables.scss:108
+    // --color-accent-contrast: #ffffff -- variables.scss:108
     ACCENT_CONTRAST: egui::Color32::from_rgb(0xff, 0xff, 0xff),
-    // --color-text-primary: #1a202c -- assets/styles/variables.scss:88
+    // --color-text-primary: #1a202c -- variables.scss:88
     TEXT_PRIMARY: egui::Color32::from_rgb(0x1a, 0x20, 0x2c),
-    // --color-text-default: #2c2e31 -- assets/styles/variables.scss:89
+    // --color-text-default: #2c2e31 -- variables.scss:89
     TEXT_DEFAULT: egui::Color32::from_rgb(0x2c, 0x2e, 0x31),
-    // --color-text-tertiary: #484d54 -- assets/styles/variables.scss:90
+    // --color-text-tertiary: #484d54 -- variables.scss:90
     TEXT_TERTIARY: egui::Color32::from_rgb(0x48, 0x4d, 0x54),
     // ---- accent ----
-    // --color-brand: #00af5c -- assets/styles/variables.scss:42 (via var(--color-green) -> var(--color-green-600) at assets/styles/variables.scss:123)
+    // --color-brand: #00af5c -- variables.scss:42 (via var(--color-green) -> var(--color-green-600) at variables.scss:123)
     BRAND: egui::Color32::from_rgb(0x00, 0xaf, 0x5c),
-    // --color-brand-highlight: rgba(0, 175, 92, 0.25) -- assets/styles/variables.scss:112 (via var(--color-green-highlight) at assets/styles/variables.scss:124); stored premultiplied, alpha 64
+    // --color-brand-highlight: rgba(0, 175, 92, 0.25) -- variables.scss:112 (via var(--color-green-highlight) at variables.scss:124); stored premultiplied, alpha 64
     BRAND_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x00, 0x2c, 0x17, 0x40),
-    // --color-brand-shadow: rgba(0, 175, 92, 0.70) -- assets/styles/variables.scss:125; stored premultiplied, alpha 178
+    // --color-brand-shadow: rgba(0, 175, 92, 0.70) -- variables.scss:125; stored premultiplied, alpha 178
     BRAND_SHADOW: egui::Color32::from_rgba_premultiplied(0x00, 0x7a, 0x40, 0xb2),
     // ---- hues ----
-    // --color-red: #cb2245 -- assets/styles/variables.scss:16 (via var(--color-red-600) at assets/styles/variables.scss:21)
+    // --color-red: #cb2245 -- variables.scss:16 (via var(--color-red-600) at variables.scss:21)
     RED: egui::Color32::from_rgb(0xcb, 0x22, 0x45),
-    // --color-orange: #e08325 -- assets/styles/variables.scss:28 (via var(--color-orange-500) at assets/styles/variables.scss:34)
+    // --color-orange: #e08325 -- variables.scss:28 (via var(--color-orange-500) at variables.scss:34)
     ORANGE: egui::Color32::from_rgb(0xe0, 0x83, 0x25),
-    // --color-green: #00af5c -- assets/styles/variables.scss:42 (via var(--color-green-600) at assets/styles/variables.scss:47)
+    // --color-green: #00af5c -- variables.scss:42 (via var(--color-green-600) at variables.scss:47)
     GREEN: egui::Color32::from_rgb(0x00, 0xaf, 0x5c),
-    // --color-blue: #1f68c0 -- assets/styles/variables.scss:55 (via var(--color-blue-600) at assets/styles/variables.scss:60)
+    // --color-blue: #1f68c0 -- variables.scss:55 (via var(--color-blue-600) at variables.scss:60)
     BLUE: egui::Color32::from_rgb(0x1f, 0x68, 0xc0),
-    // --color-purple: #8e32f3 -- assets/styles/variables.scss:68 (via var(--color-purple-600) at assets/styles/variables.scss:73)
+    // --color-purple: #8e32f3 -- variables.scss:68 (via var(--color-purple-600) at variables.scss:73)
     PURPLE: egui::Color32::from_rgb(0x8e, 0x32, 0xf3),
-    // --color-gray: #595b61 -- assets/styles/variables.scss:81 (via var(--color-gray-600) at assets/styles/variables.scss:86)
+    // --color-gray: #595b61 -- variables.scss:81 (via var(--color-gray-600) at variables.scss:86)
     GRAY: egui::Color32::from_rgb(0x59, 0x5b, 0x61),
     // ---- hue washes ----
-    // --color-red-highlight: rgba(203, 34, 69, 0.25) -- assets/styles/variables.scss:110; stored premultiplied, alpha 64
+    // --color-red-highlight: rgba(203, 34, 69, 0.25) -- variables.scss:110; stored premultiplied, alpha 64
     RED_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x33, 0x09, 0x11, 0x40),
-    // --color-orange-highlight: rgba(224, 131, 37, 0.25) -- assets/styles/variables.scss:111; stored premultiplied, alpha 64
+    // --color-orange-highlight: rgba(224, 131, 37, 0.25) -- variables.scss:111; stored premultiplied, alpha 64
     ORANGE_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x38, 0x21, 0x09, 0x40),
-    // --color-green-highlight: rgba(0, 175, 92, 0.25) -- assets/styles/variables.scss:112; stored premultiplied, alpha 64
+    // --color-green-highlight: rgba(0, 175, 92, 0.25) -- variables.scss:112; stored premultiplied, alpha 64
     GREEN_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x00, 0x2c, 0x17, 0x40),
-    // --color-blue-highlight: rgba(31, 104, 192, 0.25) -- assets/styles/variables.scss:113; stored premultiplied, alpha 64
+    // --color-blue-highlight: rgba(31, 104, 192, 0.25) -- variables.scss:113; stored premultiplied, alpha 64
     BLUE_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x08, 0x1a, 0x30, 0x40),
-    // --color-purple-highlight: rgba(142, 50, 243, 0.25) -- assets/styles/variables.scss:114; stored premultiplied, alpha 64
+    // --color-purple-highlight: rgba(142, 50, 243, 0.25) -- variables.scss:114; stored premultiplied, alpha 64
     PURPLE_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x24, 0x0d, 0x3d, 0x40),
-    // --color-gray-highlight: rgba(89, 91, 97, 0.25) -- assets/styles/variables.scss:115; stored premultiplied, alpha 64
+    // --color-gray-highlight: rgba(89, 91, 97, 0.25) -- variables.scss:115; stored premultiplied, alpha 64
     GRAY_HIGHLIGHT: egui::Color32::from_rgba_premultiplied(0x16, 0x17, 0x18, 0x40),
-    // --color-red-bg: rgba(203, 34, 69, 0.10) -- assets/styles/variables.scss:117; stored premultiplied, alpha 26
+    // --color-red-bg: rgba(203, 34, 69, 0.10) -- variables.scss:117; stored premultiplied, alpha 26
     RED_BG: egui::Color32::from_rgba_premultiplied(0x15, 0x03, 0x07, 0x1a),
-    // --color-orange-bg: rgba(224, 131, 37, 0.10) -- assets/styles/variables.scss:118; stored premultiplied, alpha 26
+    // --color-orange-bg: rgba(224, 131, 37, 0.10) -- variables.scss:118; stored premultiplied, alpha 26
     ORANGE_BG: egui::Color32::from_rgba_premultiplied(0x17, 0x0d, 0x04, 0x1a),
-    // --color-green-bg: rgba(0, 175, 92, 0.10) -- assets/styles/variables.scss:119; stored premultiplied, alpha 26
+    // --color-green-bg: rgba(0, 175, 92, 0.10) -- variables.scss:119; stored premultiplied, alpha 26
     GREEN_BG: egui::Color32::from_rgba_premultiplied(0x00, 0x12, 0x09, 0x1a),
-    // --color-blue-bg: rgba(31, 104, 192, 0.10) -- assets/styles/variables.scss:120; stored premultiplied, alpha 26
+    // --color-blue-bg: rgba(31, 104, 192, 0.10) -- variables.scss:120; stored premultiplied, alpha 26
     BLUE_BG: egui::Color32::from_rgba_premultiplied(0x03, 0x0b, 0x14, 0x1a),
-    // --color-purple-bg: rgba(142, 50, 243, 0.10) -- assets/styles/variables.scss:121; stored premultiplied, alpha 26
+    // --color-purple-bg: rgba(142, 50, 243, 0.10) -- variables.scss:121; stored premultiplied, alpha 26
     PURPLE_BG: egui::Color32::from_rgba_premultiplied(0x0e, 0x05, 0x19, 0x1a),
     // ---- links ----
-    // --color-link: #1f68c0 -- assets/styles/variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at assets/styles/variables.scss:216)
+    // --color-link: #1f68c0 -- variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at variables.scss:216)
     LINK: egui::Color32::from_rgb(0x1f, 0x68, 0xc0),
-    // --color-link-hover: #1f68c0 -- assets/styles/variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at assets/styles/variables.scss:217)
+    // --color-link-hover: #1f68c0 -- variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at variables.scss:217)
     LINK_HOVER: egui::Color32::from_rgb(0x1f, 0x68, 0xc0),
-    // --color-link-active: #1f68c0 -- assets/styles/variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at assets/styles/variables.scss:218)
+    // --color-link-active: #1f68c0 -- variables.scss:55 (via var(--color-blue) -> var(--color-blue-600) at variables.scss:218)
     LINK_ACTIVE: egui::Color32::from_rgb(0x1f, 0x68, 0xc0),
     // ---- chrome ----
-    // --color-scrollbar: #96a2b0 -- assets/styles/variables.scss:100
+    // --color-scrollbar: #96a2b0 -- variables.scss:100
     SCROLLBAR: egui::Color32::from_rgb(0x96, 0xa2, 0xb0),
-    // --color-tooltip-bg: #f8f8f8 -- assets/styles/variables.scss:6 (via var(--surface-3) at assets/styles/variables.scss:209)
+    // --color-tooltip-bg: #f8f8f8 -- variables.scss:6 (via var(--surface-3) at variables.scss:209)
     TOOLTIP_BG: egui::Color32::from_rgb(0xf8, 0xf8, 0xf8),
-    // --color-tooltip-text: #1a202c -- assets/styles/variables.scss:88 (via var(--color-contrast) -> var(--color-text-primary) at assets/styles/variables.scss:208)
+    // --color-tooltip-text: #1a202c -- variables.scss:88 (via var(--color-contrast) -> var(--color-text-primary) at variables.scss:208)
     TOOLTIP_TEXT: egui::Color32::from_rgb(0x1a, 0x20, 0x2c),
-    // --color-focus-ring: #ea80ff -- assets/styles/variables.scss:222
+    // --color-focus-ring: #ea80ff -- variables.scss:222
     FOCUS_RING: egui::Color32::from_rgb(0xea, 0x80, 0xff),
     // ---- platforms ----
-    // --color-platform-fabric: #8a7b71 -- assets/styles/variables.scss:169
+    // --color-platform-fabric: #8a7b71 -- variables.scss:169
     PLATFORM_FABRIC: egui::Color32::from_rgb(0x8a, 0x7b, 0x71),
-    // --color-platform-quilt: #8b61b4 -- assets/styles/variables.scss:170
+    // --color-platform-quilt: #8b61b4 -- variables.scss:170
     PLATFORM_QUILT: egui::Color32::from_rgb(0x8b, 0x61, 0xb4),
-    // --color-platform-forge: #5b6197 -- assets/styles/variables.scss:171
+    // --color-platform-forge: #5b6197 -- variables.scss:171
     PLATFORM_FORGE: egui::Color32::from_rgb(0x5b, 0x61, 0x97),
-    // --color-platform-neoforge: #dc895c -- assets/styles/variables.scss:172
+    // --color-platform-neoforge: #dc895c -- variables.scss:172
     PLATFORM_NEOFORGE: egui::Color32::from_rgb(0xdc, 0x89, 0x5c),
-    // --color-platform-liteloader: #4c90de -- assets/styles/variables.scss:173
+    // --color-platform-liteloader: #4c90de -- variables.scss:173
     PLATFORM_LITELOADER: egui::Color32::from_rgb(0x4c, 0x90, 0xde),
-    // --color-platform-bukkit: #e78362 -- assets/styles/variables.scss:174
+    // --color-platform-bukkit: #e78362 -- variables.scss:174
     PLATFORM_BUKKIT: egui::Color32::from_rgb(0xe7, 0x83, 0x62),
-    // --color-platform-bungeecord: #c69e39 -- assets/styles/variables.scss:175
+    // --color-platform-bungeecord: #c69e39 -- variables.scss:175
     PLATFORM_BUNGEECORD: egui::Color32::from_rgb(0xc6, 0x9e, 0x39),
-    // --color-platform-folia: #6aa54f -- assets/styles/variables.scss:176
+    // --color-platform-folia: #6aa54f -- variables.scss:176
     PLATFORM_FOLIA: egui::Color32::from_rgb(0x6a, 0xa5, 0x4f),
-    // --color-platform-paper: #e67e7e -- assets/styles/variables.scss:177
+    // --color-platform-paper: #e67e7e -- variables.scss:177
     PLATFORM_PAPER: egui::Color32::from_rgb(0xe6, 0x7e, 0x7e),
-    // --color-platform-purpur: #7763a3 -- assets/styles/variables.scss:178
+    // --color-platform-purpur: #7763a3 -- variables.scss:178
     PLATFORM_PURPUR: egui::Color32::from_rgb(0x77, 0x63, 0xa3),
-    // --color-platform-spigot: #cd7a21 -- assets/styles/variables.scss:179
+    // --color-platform-spigot: #cd7a21 -- variables.scss:179
     PLATFORM_SPIGOT: egui::Color32::from_rgb(0xcd, 0x7a, 0x21),
-    // --color-platform-velocity: #4b98b0 -- assets/styles/variables.scss:180
+    // --color-platform-velocity: #4b98b0 -- variables.scss:180
     PLATFORM_VELOCITY: egui::Color32::from_rgb(0x4b, 0x98, 0xb0),
-    // --color-platform-waterfall: #5f83cb -- assets/styles/variables.scss:181
+    // --color-platform-waterfall: #5f83cb -- variables.scss:181
     PLATFORM_WATERFALL: egui::Color32::from_rgb(0x5f, 0x83, 0xcb),
-    // --color-platform-sponge: #c49528 -- assets/styles/variables.scss:182
+    // --color-platform-sponge: #c49528 -- variables.scss:182
     PLATFORM_SPONGE: egui::Color32::from_rgb(0xc4, 0x95, 0x28),
-    // --color-platform-ornithe: #6097ca -- assets/styles/variables.scss:183
+    // --color-platform-ornithe: #6097ca -- variables.scss:183
     PLATFORM_ORNITHE: egui::Color32::from_rgb(0x60, 0x97, 0xca),
-    // --color-platform-bta-babric: #5ba938 -- assets/styles/variables.scss:184
+    // --color-platform-bta-babric: #5ba938 -- variables.scss:184
     PLATFORM_BTA_BABRIC: egui::Color32::from_rgb(0x5b, 0xa9, 0x38),
-    // --color-platform-nilloader: #dd5088 -- assets/styles/variables.scss:185
+    // --color-platform-nilloader: #dd5088 -- variables.scss:185
     PLATFORM_NILLOADER: egui::Color32::from_rgb(0xdd, 0x50, 0x88),
-    // --hover-brightness: 0.9 -- assets/styles/variables.scss:187
+    // --hover-brightness: 0.9 -- variables.scss:187
     HOVER_BRIGHTNESS: 0.9,
     DARK_MODE: false,
 };
@@ -765,40 +767,40 @@ pub const LIGHT: Theme = Theme {
 // because that is what egui's `CornerRadius` holds; gaps are points.
 // ---------------------------------------------------------------------------
 
-/// `--radius-xs` -- 4.0 points (assets/styles/variables.scss:201).
+/// `--radius-xs` -- 4.0 points (variables.scss:201).
 pub const RADIUS_XS: u8 = 4;
 
-/// `--radius-sm` -- 8.0 points (assets/styles/variables.scss:202).
+/// `--radius-sm` -- 8.0 points (variables.scss:202).
 pub const RADIUS_SM: u8 = 8;
 
-/// `--radius-md` -- 12.0 points (assets/styles/variables.scss:203).
+/// `--radius-md` -- 12.0 points (variables.scss:203).
 pub const RADIUS_MD: u8 = 12;
 
-/// `--radius-lg` -- 16.0 points (assets/styles/variables.scss:204).
+/// `--radius-lg` -- 16.0 points (variables.scss:204).
 pub const RADIUS_LG: u8 = 16;
 
-/// `--radius-xl` -- 20.0 points (assets/styles/variables.scss:205).
+/// `--radius-xl` -- 20.0 points (variables.scss:205).
 pub const RADIUS_XL: u8 = 20;
 
-/// `--radius-max` -- 999999999.0 points (assets/styles/variables.scss:206).
+/// `--radius-max` -- 999999999.0 points (variables.scss:206).
 ///
 /// The sheet writes `999999999px`, which is a pill; 255 is the largest radius
 /// egui's `CornerRadius` can hold, and a pill's exact value cannot be seen.
 pub const RADIUS_MAX: u8 = 255;
 
-/// `--gap-xs` -- 4.0 points (assets/styles/variables.scss:195).
+/// `--gap-xs` -- 4.0 points (variables.scss:195).
 pub const GAP_XS: f32 = 4.0;
 
-/// `--gap-sm` -- 8.0 points (assets/styles/variables.scss:196).
+/// `--gap-sm` -- 8.0 points (variables.scss:196).
 pub const GAP_SM: f32 = 8.0;
 
-/// `--gap-md` -- 12.0 points (assets/styles/variables.scss:197).
+/// `--gap-md` -- 12.0 points (variables.scss:197).
 pub const GAP_MD: f32 = 12.0;
 
-/// `--gap-lg` -- 16.0 points (assets/styles/variables.scss:198).
+/// `--gap-lg` -- 16.0 points (variables.scss:198).
 pub const GAP_LG: f32 = 16.0;
 
-/// `--gap-xl` -- 24.0 points (assets/styles/variables.scss:199).
+/// `--gap-xl` -- 24.0 points (variables.scss:199).
 pub const GAP_XL: f32 = 24.0;
 
 /// The border the sheet writes literally on every control:
@@ -816,22 +818,22 @@ pub const STROKE_WIDTH: f32 = 1.0;
 // the element every page sits in.
 // ---------------------------------------------------------------------------
 
-/// `--font-size-xs` -- 12.0 points, small text: a metadata row, a caption (assets/styles/defaults.scss:24).
+/// `--font-size-xs` -- 12.0 points, small text: a metadata row, a caption (defaults.scss:24).
 pub const FONT_SIZE_XS: f32 = 12.0;
 
-/// `--font-size-nm` -- 16.0 points, body: the size `body` itself is set in (assets/styles/defaults.scss:26).
+/// `--font-size-nm` -- 16.0 points, body: the size `body` itself is set in (defaults.scss:26).
 pub const FONT_SIZE_NM: f32 = 16.0;
 
-/// `--font-size-xl` -- 24.0 points, headings: the 1.5rem the page header's `text-2xl` also resolves to (assets/styles/defaults.scss:29).
+/// `--font-size-xl` -- 24.0 points, headings: the 1.5rem the page header's `text-2xl` also resolves to (defaults.scss:29).
 pub const FONT_SIZE_XL: f32 = 24.0;
 
-/// `--font-weight-regular` -- 400, body's `font-weight` (assets/styles/defaults.scss:34).
+/// `--font-weight-regular` -- 400, body's `font-weight` (defaults.scss:34).
 pub const FONT_WEIGHT_REGULAR: u16 = 400;
 
-/// `--font-weight-text` -- 500, the weight the whole interface is set in (assets/styles/defaults.scss:35).
+/// `--font-weight-text` -- 500, the weight the whole interface is set in (defaults.scss:35 (via var(--font-weight-medium) at defaults.scss:39)).
 pub const FONT_WEIGHT_TEXT: u16 = 500;
 
-/// `--font-weight-heading` -- 800, headings and titles (assets/styles/defaults.scss:37).
+/// `--font-weight-heading` -- 800, headings and titles (defaults.scss:37 (via var(--font-weight-extrabold) at defaults.scss:40)).
 pub const FONT_WEIGHT_HEADING: u16 = 800;
 
 // ---------------------------------------------------------------------------
@@ -859,9 +861,9 @@ pub const EASE_IN_OUT: Easing = Easing {
     curve: [0.42, 0.0, 0.58, 1.0],
 };
 
-/// `--ease-out-expo`, declared at `ui/src/styles/tailwind-utilities.css:70`.
+/// The curve written inline at `ui/src/styles/tailwind-utilities.css:2`.
 pub const EASE_OUT_EXPO: Easing = Easing {
-    name: "var(--ease-out-expo)",
+    name: "--ease-out-expo",
     curve: [0.16, 1.0, 0.3, 1.0],
 };
 
@@ -882,15 +884,15 @@ pub const EASINGS: &[Easing] = &[
 /// -- the press: every clickable scales to 0.95 while held (`assets/styles/classes.scss:193`).
 pub const PRESS_MS: u32 = 50;
 
-/// `filter 0.200s ease-in-out`
+/// `filter 0.2s ease-in-out`
 /// -- a pointer arriving on a control, which the reference does with `filter: brightness()` (`assets/styles/classes.scss:193`).
 pub const HOVER_MS: u32 = 200;
 
-/// `outline 0.200s ease-in-out`
+/// `outline 0.2s ease-in-out`
 /// -- the focus outline (`assets/styles/classes.scss:193`).
 pub const OUTLINE_MS: u32 = 200;
 
-/// `opacity 0.500s ease-in-out`
+/// `opacity 0.5s ease-in-out`
 /// -- a clickable fading in or out (`assets/styles/classes.scss:193`).
 pub const FADE_MS: u32 = 500;
 
@@ -898,7 +900,7 @@ pub const FADE_MS: u32 = 500;
 /// -- a floating panel appearing (`floating-expand`) (`ui/src/styles/tailwind-utilities.css:70`).
 pub const POPOVER_MS: u32 = 125;
 
-/// `transform 0.250s cubic-bezier(0.15, 1.4, 0.64, 0.96)`
+/// `transform 0.25s cubic-bezier(0.15, 1.4, 0.64, 0.96)`
 /// -- the floating action bar sliding in (`ui/src/styles/tailwind-utilities.css:31`).
 pub const FLOATING_BAR_MS: u32 = 250;
 

@@ -2,11 +2,11 @@
 """Compile the reference client's palette, geometry, type and motion into egui.
 
 The egui slice paints nothing from a hand-written table: every colour, radius, gap,
-type size and duration in `crates/palantir-egui/src/theme.rs` is read out of the
+type size and duration in `crates/sift-ui/src/theme.rs` is read out of the
 Modrinth App's own stylesheets here, resolved the way a browser would resolve it, and
 written down with the file and the line it came from.
 
-    python tools/gen_theme_egui.py            # write crates/palantir-egui/src/theme.rs
+    python tools/gen_theme_egui.py            # write crates/sift-ui/src/theme.rs
     python tools/gen_theme_egui.py --check    # fail if the file on disk is not what this emits
     python tools/gen_theme_egui.py --report   # additionally print what every token resolved through
 
@@ -48,7 +48,7 @@ reader can verify in the sheet, so two readings of the same CSS have to agree.
 
 ## What it emits
 
-`crates/palantir-egui/src/theme.rs`:
+`crates/sift-ui/src/theme.rs`:
 
 * a `Theme` struct whose fields are the CSS custom properties in SCREAMING_SNAKE with
   the `--color-` prefix dropped (`--color-bg` -> `BG`, `--color-raised-bg` ->
@@ -73,7 +73,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "modrinth-app"
-OUT = ROOT / "crates" / "palantir-egui" / "src" / "theme.rs"
+OUT = ROOT / "crates" / "sift-ui" / "src" / "theme.rs"
 
 VARIABLES = "assets/styles/variables.scss"
 DEFAULTS = "assets/styles/defaults.scss"
@@ -1013,7 +1013,8 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     for token in COLOUR_TOKENS:
         if token.section != section:
             section = token.section
-            add("")
+            if lines[-1] != "pub struct Theme {":
+                add("")
             add(f"    // ---- {section} ------------------------------------------------------")
             add("")
         field = field_name(token.css)
@@ -1038,17 +1039,15 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     add("")
 
     # ---- the two schemes -------------------------------------------------
-    def emit_scheme(name: str, label: str, block: Block, note: str) -> None:
+    def emit_scheme(name: str, label: str, note: str) -> None:
         add(f"/// The {label} scheme.")
         add("///")
-        add(f"/// Read from `vendor/modrinth-app/{VARIABLES}`: the "
-            f"`{', '.join(block.selectors)}` block")
-        add(f"/// at line {block.line}, resolved over the `{', '.join(light_block.selectors)}` base at")
-        add(f"/// line {light_block.line} and the shared `html` block at line {html_block.line}, in")
-        add("/// cascade order. Each comment below is `token: value -- the line that states it`")
-        add("/// `(via the chain the value was reached through)`.")
+        add(f"/// Read from `vendor/modrinth-app/{VARIABLES}`. Each comment below is")
+        add("/// `token: value -- the sheet and line that state it`, plus the `var()` chain the")
+        add("/// value was reached through, so a colour on screen can be traced to the line")
+        add("/// that moved and a stale value cannot hide behind its alias.")
         add("///")
-        add(f"/// {note}")
+        add(note)
         add(f"pub const {name}: Theme = Theme {{")
         section = ""
         for token in COLOUR_TOKENS:
@@ -1057,32 +1056,37 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
                 add(f"    // ---- {section} ----")
             res = resolutions["dark" if name == "DARK" else "light"][token.css]
             field = field_name(token.css)
-            bits = [f"    // {token.css}: {value_text(res.rgba)} -- {res.final_sheet}:{res.final_line}"]
-            if res.chain:
-                chain = " -> ".join(f"var({var})" for var, *_ in res.chain)
-                bits.append(f" (via {chain} at {res.declared_sheet}:{res.declared_line})")
+            comment = f"    // {token.css}: {value_text(res.rgba)} -- {provenance(res)}"
             if res.rgba[3] != 255:
-                bits.append(f"; stored premultiplied, alpha {res.alpha}")
+                comment += f"; stored premultiplied, alpha {res.alpha}"
             if name == "DARK" and res.declared_block not in SCHEME_SELECTORS["dark"]:
-                bits.append("; the dark block does not override it")
-            add("".join(bits))
+                comment += "; dark does not override it"
+            add(comment)
             add(f"    {field}: {colour_expr(res.rgba)},")
-        add(f"    // --hover-brightness: {fnum(float(factors['dark' if name == 'DARK' else 'light'].value))}"
-            f" -- {factors['dark' if name == 'DARK' else 'light'].final_sheet}:"
-            f"{factors['dark' if name == 'DARK' else 'light'].final_line}")
-        add(f"    HOVER_BRIGHTNESS: {fnum(float(factors['dark' if name == 'DARK' else 'light'].value))},")
+        factor = factors["dark" if name == "DARK" else "light"]
+        add(f"    // --hover-brightness: {fnum(float(factor.value))} -- {provenance(factor)}")
+        add(f"    HOVER_BRIGHTNESS: {fnum(float(factor.value))},")
         add(f"    DARK_MODE: {'true' if name == 'DARK' else 'false'},")
         add("};")
         add("")
 
-    emit_scheme("DARK", "dark", dark_block,
-                "This is the scheme the reference opens in (`:root { color-scheme: dark }`,\n"
-                "/// `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one the\n"
-                "/// numbers in `REFERENCE.md` were taken in.")
-    emit_scheme("LIGHT", "light", light_block,
-                "`.light-mode` only extends `.light-properties`; the light scheme is that base\n"
-                "/// plus the shared `html` block, which is also where a dark-only token falls back\n"
-                "/// to when `.dark-mode` does not override it.")
+    emit_scheme(
+        "DARK", "dark",
+        "/// The `.dark-mode, .dark, :root[data-theme='dark']` block at\n"
+        f"/// `{VARIABLES}:{dark_block.line}` supplies it, over the `.light-properties` base at\n"
+        f"/// line {light_block.line} and the shared `html` block at line {html_block.line}, in\n"
+        "/// cascade order. This is the scheme the reference opens in (`:root { color-scheme:\n"
+        "/// dark }`, `app-frontend/src/assets/stylesheets/global.scss:45`), so it is the one\n"
+        "/// the numbers in `REFERENCE.md` were taken in.",
+    )
+    emit_scheme(
+        "LIGHT", "light",
+        f"/// The `.light-properties` base at line {light_block.line} and the shared `html` block\n"
+        f"/// at line {html_block.line}, with `.light-mode` (line {blocks['light-mode'][0][1].line})\n"
+        "/// extending the base and declaring nothing of its own. A token the light block does\n"
+        "/// not state falls back to that base, which is why the light column has values for\n"
+        "/// tokens only `html` declares.",
+    )
 
     # ---- geometry --------------------------------------------------------
     add("// ---------------------------------------------------------------------------")
@@ -1104,7 +1108,7 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
         if rounded != points:
             note = (f"\n///\n/// The sheet writes `{res.value}`, which is a pill; 255 is the largest radius\n"
                     "/// egui's `CornerRadius` can hold, and a pill's exact value cannot be seen.")
-        add(f"/// `{token}` -- {fnum(points)} points ({res.final_sheet}:{res.final_line}).{note}")
+        add(f"/// `{token}` -- {fnum(points)} points ({provenance(res)}).{note}")
         add(f"pub const {field}: u8 = {rounded};")
         add("")
     for token in GAP_TOKENS:
@@ -1112,7 +1116,7 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
         points = parse_length(res.value)
         if points is None:
             raise SystemExit(f"{token} = `{res.value}` is not a length")
-        add(f"/// `{token}` -- {fnum(points)} points ({res.final_sheet}:{res.final_line}).")
+        add(f"/// `{token}` -- {fnum(points)} points ({provenance(res)}).")
         add(f"pub const {field_name(token)}: f32 = {fnum(points)};")
         add("")
     add("/// The border the sheet writes literally on every control:")
@@ -1137,7 +1141,7 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
         points = parse_length(res.value)
         if points is None:
             raise SystemExit(f"{token} = `{res.value}` is not a length")
-        add(f"/// `{token}` -- {fnum(points)} points, {note} ({res.final_sheet}:{res.final_line}).")
+        add(f"/// `{token}` -- {fnum(points)} points, {note} ({provenance(res)}).")
         add(f"pub const {field_name(token)}: f32 = {fnum(points)};")
         add("")
     for token, note in TYPE_WEIGHT_TOKENS:
@@ -1145,7 +1149,7 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
         number = parse_number(res.value)
         if number is None:
             raise SystemExit(f"{token} = `{res.value}` is not a weight")
-        add(f"/// `{token}` -- {int(number)}, {note} ({res.final_sheet}:{res.final_line}).")
+        add(f"/// `{token}` -- {int(number)}, {note} ({provenance(res)}).")
         add(f"pub const {field_name(token)}: u16 = {int(number)};")
         add("")
 
@@ -1191,9 +1195,9 @@ def emit() -> tuple[str, list[str], dict[str, int]]:
     add("")
 
     for pick, row in picked:
-        display = row.easing_name
-        wording = f"{row.property} {row.millis / 1000:.3f}s".replace("0.050s", "0.05s")
-        add(f"/// `{wording} {display if not display.startswith('--') else 'var(' + display + ')'}`")
+        display = row.easing_name if not row.easing_name.startswith("--") \
+            else f"var({row.easing_name})"
+        add(f"/// `{row.property} {seconds(row.millis)} {display}`")
         add(f"/// -- {pick.note} (`{row.sheet}:{row.line}`).")
         add(f"pub const {pick.const}: u32 = {row.millis};")
         add("")
