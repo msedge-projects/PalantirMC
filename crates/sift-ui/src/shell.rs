@@ -81,6 +81,10 @@ pub struct Shell {
     icons: crate::images::Images,
     /// The instances on disk, read when the shell starts and when the rail returns to Home.
     instances: Vec<crate::data::Entry>,
+    /// The project whose page is open, if any. `None` means the rail's own page is showing.
+    open_project: Option<crate::pages::project::Project>,
+    /// The open project's tab.
+    project_state: crate::pages::project::State,
 }
 
 impl Default for Shell {
@@ -94,6 +98,8 @@ impl Default for Shell {
             theme: crate::theme::dark(),
             icons: crate::images::Images::default(),
             instances: crate::data::load().0,
+            open_project: None,
+            project_state: crate::pages::project::State::default(),
         }
     }
 }
@@ -113,7 +119,29 @@ impl Shell {
         let mut rail_animating = false;
         rail_animating |= self.rail_column(ui);
         self.right_panel(ui);
-        let content = if self.rail == Rail::Home {
+        let content = if let Some(project) = &self.open_project {
+            let rect = crate::pages::Page::Project.rect();
+            ui.painter().rect_filled(rect, 0, self.theme.BG);
+            // The borrow of `project` and the mutable borrows the page needs are disjoint
+            // fields of `self`, which is why the project is taken out first.
+            let open = self.open_project.clone();
+            match open {
+                Some(project) => {
+                    let theme = self.theme;
+                    let result = crate::pages::project::draw(
+                        ui,
+                        rect,
+                        &theme,
+                        &mut self.icons,
+                        &mut self.project_state,
+                        &project,
+                    );
+                    let _ = project;
+                    result
+                }
+                None => false,
+            }
+        } else if self.rail == Rail::Home {
             let rect = crate::pages::Page::Home.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);
             crate::pages::home::draw(ui, rect, &self.theme, &mut self.icons, &self.instances)
@@ -174,10 +202,16 @@ impl Shell {
             Rect::from_center_size(badge, Vec2::splat(12.0)),
             self.theme.SECONDARY,
         );
+        // A project page's breadcrumb is `rail ▸ project`, which is why the name comes from
+        // the open project when there is one.
+        let crumb = match &self.open_project {
+            Some(project) => format!("{}  >  {}", self.rail.title(), project.title),
+            None => self.rail.title().to_owned(),
+        };
         painter.text(
             egui::pos2(badge.x + 18.0, bar.center().y),
             Align2::LEFT_CENTER,
-            self.rail.title(),
+            crumb,
             crate::fonts::label(15.0),
             self.theme.CONTRAST,
         );
@@ -256,6 +290,8 @@ impl Shell {
             }
             if response.clicked() {
                 self.rail = destination;
+                // The rail is the way out of a project page, so a rail press closes it.
+                self.open_project = None;
                 // Coming home re-reads the folder: an instance may have been created,
                 // imported or deleted while the reader was elsewhere.
                 if destination == Rail::Home {
@@ -524,8 +560,15 @@ impl Shell {
                 // The reference's own six results first, then repeats so the list is long
                 // enough to scroll: a capture compares anatomy, not the catalogue.
                 let results = sample_results();
+                let mut opened = false;
                 for index in 0..12 {
-                    card(ui, &self.theme, &results[index % results.len()], &mut self.icons);
+                    let clicked = card(ui, &self.theme, &results[index % results.len()], &mut self.icons);
+                    opened |= clicked;
+                }
+                if opened {
+                    // Any card opens the sample project for now; the real one carries the
+                    // project's own slug once search is wired.
+                    self.open_project = Some(crate::pages::project::sample());
                 }
             });
         false
@@ -540,7 +583,7 @@ impl Shell {
 /// 96,104; the stats right-aligned on that same row; and the install button at the card's
 /// top-right corner. The card itself is 148 tall with a 12-point gap, which is what the
 /// reference's pitch between two card tops measures.
-fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>, icons: &mut crate::images::Images) {
+fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>, icons: &mut crate::images::Images) -> bool {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, g::CARD), Sense::hover());
     let painter = ui.painter();
@@ -671,6 +714,13 @@ fn card(ui: &mut Ui, theme: &Theme, result: &Card<'_>, icons: &mut crate::images
     }
 
     ui.add_space(g::CARD_GAP);
+    // The whole card is the hit target; the reference navigates on a press anywhere on it.
+    ui.interact(
+        rect,
+        egui::Id::new(("result-card", result.title)),
+        Sense::click(),
+    )
+    .clicked()
 }
 
 /// What a result card shows. The reference's list carries these fields and no others.

@@ -11,6 +11,7 @@
 //! with navigation nobody can trace.
 
 pub mod home;
+pub mod project;
 
 use eframe::egui::Rect;
 
@@ -22,6 +23,8 @@ pub enum Page {
     Home,
     /// Browse and search projects.
     Discover,
+    /// One project's page, reached from a card in Discover.
+    Project,
 }
 
 impl Page {
@@ -30,6 +33,8 @@ impl Page {
         match self {
             Page::Home => "Home",
             Page::Discover => "Discover modpacks",
+            // A project page's breadcrumb is its own name, which the shell supplies.
+            Page::Project => "Project",
         }
     }
 
