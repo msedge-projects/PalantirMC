@@ -44,10 +44,11 @@
 //!
 //! **The layout is arithmetic over those classes, not a guess.** Every number below is a
 //! `const` with the file and line that states it, or is marked `// guess: re-measure` where the
-//! reference has no element to measure -- the two-line MOTD is the only such box, and the brief
-//! is where its line count comes from. [`card_height`], [`section_height`] and
-//! [`content_height`] are the source's own boxes added up, and the tests pin them against the
-//! shell's content column at 1440x900.
+//! reference has no element to measure -- three of those: the two-line MOTD (the brief's line
+//! count), the initial on the icon plate, and the body copy's wrapped line count on the
+//! no-servers screen. [`card_height`], [`section_height`] and [`content_height`] are the
+//! source's own boxes added up, and the tests pin them and the shell's content column at
+//! 1440x900.
 //!
 //! **The dot is the one place the theme is not consulted.** [`status_dot`]'s signature is fixed
 //! by the brief and takes no `Theme`, so its three inks are the dark scheme's `--color-brand`,
@@ -56,7 +57,8 @@
 //! that fix.
 //!
 //! **What this page does not do.** It paints what it is handed: no ping is sent, no MOTD is
-//! fetched, no server is added, nothing is clicked. `State::servers` defaults to the six
+//! fetched, no server is added, and the one pointer target -- the promo's dismiss control --
+//! shows the reference's tooltip and has no banner to hide. `State::servers` defaults to the six
 //! hand-written rows in [`SERVERS`], so a capture shows all three dot states, and handing it an
 //! empty slice shows the source's no-servers screen instead. The search plate is painted only --
 //! the field that takes the keyboard is a sibling's -- and the sort is applied to the order
@@ -71,7 +73,6 @@ use eframe::egui::{self, Align2, Color32, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::fonts;
 use crate::icons::{self, Glyph};
-use crate::images::Images;
 use crate::theme::{self, Theme, STROKE_WIDTH};
 
 // ---------------------------------------------------------------------------
@@ -302,7 +303,8 @@ const ONLINE: &str = "Online";
 
 /// `project.server.status.offline` — "Offline" (`ui/src/locales/en-US/index.json:4016`). The
 /// catalogue also carries the tooltip the reference hangs on the offline tag, "Server is
-/// offline" (`project.server.status.offline.tooltip`, `:4019`); this page has no tooltips yet.
+/// offline" (`project.server.status.offline.tooltip`, `:4019`); this page's labels row has no
+/// hover target, so the word is all it prints.
 const OFFLINE: &str = "Offline";
 
 /// `label.unknown` — "Unknown" (`ui/src/locales/en-US/index.json:2754`). The reference has no
@@ -711,7 +713,9 @@ fn count_phrase(count: usize) -> String {
 /// `filteredData.length` (`index.vue:113`), so the number is the rows the query leaves, not the
 /// rows the page holds.
 fn search_placeholder(count: usize) -> String {
-    format!("{SEARCH_PREFIX} {} {SEARCH_SUFFIX}", count_phrase(count))
+    // No space before the ellipsis: the catalogue's message is
+    // `Search {count} {count, plural, ...}...`, and a space there reads as a typo on screen.
+    format!("{SEARCH_PREFIX} {}{SEARCH_SUFFIX}", count_phrase(count))
 }
 
 /// Whether a row matches the query.
@@ -863,10 +867,10 @@ fn empty_height() -> f32 {
 /// Draw the servers page into `rect`. Returns whether another frame is owed: nothing here
 /// animates, so it is always `false`.
 pub fn draw(
-    ui: &mut Ui,
-    rect: Rect,
-    theme: &Theme,
-    images: &mut Images,
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    theme: &crate::theme::Theme,
+    images: &mut crate::images::Images,
     state: &mut State,
 ) -> bool {
     // The page owns its rect (`pages/mod.rs`'s seam); paint the page colour first so the cards
@@ -1044,6 +1048,7 @@ fn button_width(painter: &egui::Painter, theme: &Theme, label: &str) -> f32 {
     );
     2.0 * BUTTON_PADDING + BUTTON_GLYPH + BUTTON_GAP + text.size().x
 }
+
 /// The search field's plate: `bg-surface-4` inside `border-surface-5` at `rounded-xl`
 /// (`InputFrame.vue:47-57`), a 20-point magnifier in `text-secondary` (`Input.vue:12-16`) and
 /// the source's placeholder in the same muted ink (`Input.vue:51`).
@@ -1078,9 +1083,8 @@ fn search_plate(painter: &egui::Painter, rect: Rect, theme: &Theme, count: usize
         egui::pos2(text_left, rect.top()),
         egui::pos2(text_right, rect.bottom()),
     ));
-    let placeholder = search_placeholder(count);
     let galley = text_painter.layout_no_wrap(
-        placeholder.clone(),
+        search_placeholder(count),
         fonts::label(SEARCH_TEXT),
         theme.SECONDARY,
     );
