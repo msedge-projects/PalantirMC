@@ -5,6 +5,11 @@ members = [
     "crates/palantir-net",
     "crates/palantir-loader",
     "crates/palantir-desktop",
+    # `crates/palantir-egui` is **not** a member, and cannot be: `iced_winit` 0.12
+    # pins `web-sys = "=0.3.67"` and `eframe` 0.36 requires `^0.3.103`, so the two
+    # UI stacks cannot resolve in one lock file. It is its own workspace (see its
+    # `Cargo.toml`) with its own lock, which is what lets the migration have both
+    # stacks alive at once instead of a dead product in between.
 ]
 
 [workspace.package]

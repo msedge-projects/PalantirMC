@@ -1,0 +1,25 @@
+[package]
+name = "fastframe-scroll"
+description = "Scrolling for egui apps that feels like the platform's: a wheel step like other apps', and touchpad gestures on Linux that keep their speed, glide after the lift, and hold one axis"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+authors = ["Carmine Paolino <carmine@paolino.me>"]
+repository = "https://github.com/crmne/fastframe"
+homepage = "https://github.com/crmne/fastframe"
+readme = "README.md"
+keywords = ["egui", "scroll", "touchpad", "kinetic", "desktop"]
+categories = ["gui"]
+
+# The vendored copy's manifest, rewritten to stand alone.
+#
+# Upstream this file inherits `version`, `edition`, `rust-version`, `license`,
+# `authors` and the lints from fastframe's workspace, which a path dependency
+# outside that workspace cannot do. Nothing else is changed: the source under
+# `src/` is the tag's own bytes, and `UPSTREAM.md` beside this file records the
+# commit they came from.
+
+[dependencies]
+# Reads the frame's wheel events and rewrites its smooth scroll delta.
+egui = { version = "0.36.1", default-features = false }

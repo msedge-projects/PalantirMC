@@ -271,3 +271,34 @@ artifact (the run on `master`), and the setup exe from `makensis
 - `dist/` holds CI artifacts and the dummy-payload setup exe. Ignored.
 
 If a later session wants the tree clean, `git status` should show only those.
+
+## 7. The egui migration, and what it still owes
+
+Started 2026-10-25 at the owner's instruction ("just switch to egui fastframe"), and
+started with a measurable slice rather than a rewrite:
+
+- `crates/palantir-egui` — **its own workspace** (the root one cannot hold `iced_winit`
+  0.12's `web-sys =0.3.67` and `eframe` 0.36's `^0.3.103` at once). One page's shape:
+  300 cards, real `fastframe-scroll`, the same `PALANTIRMC_FRAME_LOG` format the iced
+  shell writes.
+- `vendor/fastframe-scroll` — the crate at tag `v0.6.0`, MIT, unmodified source, its
+  own `UPSTREAM.md` with the blob hashes. It is not on crates.io.
+- CI job `egui-slice` builds and tests it on Windows and uploads
+  `palantir-egui-slice`.
+
+**Owed, in order:**
+
+1. **The comparison.** Run the slice and the iced launcher on the same machine with
+   the frame log on, scroll both, and compare p95. Nothing else should be done until
+   that number exists — it is the whole justification for the migration.
+2. **The slice's lock file** is not committed; the CI job therefore builds without
+   `--locked`. Commit it once the comparison says the stack is worth keeping.
+3. **Pages, one at a time**, if it is: `discover` first (it is the heaviest and the
+   one the reader scrolls), then `home`, then the shell chrome. Each needs the theme
+   (`tools/gen_theme.py` emits iced types today), the icons (`icons_gen` emits
+   `iced::widget::canvas` paths, but the path data itself is portable) and the text
+   tables (`text_gen` is strings; it carries over).
+4. **`Store` has to leave the binary** to be shared: it lives in
+   `palantir-desktop/src/store.rs` today, and the egui crate cannot depend on a
+   binary crate. That is the first real refactor of the migration and it should be
+   done before the second page, not during it.

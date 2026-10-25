@@ -4524,3 +4524,46 @@ cannot draw sixty frames a second -- what it guarantees is that scrolling no lon
 *asks* for work that grows with the page. If a scroll still stutters after this, the
 remaining cost is iced's own per-frame draw, and the next step is to measure frame
 intervals on the machine in question rather than to touch the easing again.
+## The move to egui starts with a binary that measures itself
+
+The reader asked for spotifast's feel twice, then said to switch, and spotifast is
+`crmne`'s egui app using `fastframe-scroll` -- the same crate this session had already
+read and declined to adopt as an *iced* reference. So the migration starts, and it
+starts the way the scrolling work should have: with something that can be measured
+before 24,000 lines of presentation are rewritten.
+
+**What was built.** `crates/palantir-egui`, a binary that draws one page's shape -- a
+scrolling column of 300 project cards, 72 points each -- over `fastframe-scroll`'s
+real scrolling (120-point wheel step, Linux touchpad scale and glide, axis hold), and
+writes the **same** frame-interval summary `crates/palantir-desktop/src/frame_log.rs`
+writes. Two stacks, one instrument, one machine: that is what makes "egui is
+smoother" a number rather than a preference.
+
+**fastframe-scroll is vendored, not depended on by git.** `cargo info
+fastframe-scroll` answers "could not find": it is not published. A git dependency
+would make every build fetch a repository, so `vendor/fastframe-scroll` holds the
+tag's own bytes (`src/lib.rs` 11,637 B, `src/tests.rs` 10,331 B, blob hashes in
+`UPSTREAM.md`), the MIT licence, and a manifest rewritten to stand alone because
+upstream inherits everything from its workspace. No source edits.
+
+**The two stacks cannot share a workspace, and that decided the layout.**
+`iced_winit` 0.12 pins `web-sys = "=0.3.67"`; `eframe` 0.36 requires `^0.3.103`; one
+lock file cannot satisfy both. So `crates/palantir-egui` is **its own workspace** with
+its own lock, which is exactly what a migration needs: the iced launcher keeps
+building and shipping while the egui one grows beside it. A rewrite-in-one-commit
+would have a dead product in the middle.
+
+**API drift, found by compiling rather than by reading.** eframe 0.36's `App` is
+`fn ui(&mut self, ui: &mut egui::Ui, frame: &mut Frame)` -- not the `update(ctx)`
+shape every tutorial still shows -- and `egui::TopBottomPanel` is no longer at the
+crate root, so the slice draws its head with `ui.group` instead. Three tests pass on
+Linux: the summary line matches the iced format, an empty window has no line, and the
+list's length is the one its card height implies.
+
+**What is owed, and what decides the rest.** CI's new `egui-slice` job builds the
+Windows exe (`palantir-egui-slice`); the next step is to run it on the same machine
+with `PALANTIRMC_FRAME_LOG` set, twice, and compare the two p95s. If the slice is
+flat where iced showed 26-62 ms, the migration is justified and continues page by
+page; if it is not, the answer was in the frame after all and the iced tree was right.
+Nothing in the shipping launcher changed: the root workspace, its lock and its 1,410
+tests are untouched.

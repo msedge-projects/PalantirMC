@@ -281,3 +281,46 @@ jobs:
           path: dist/
           retention-days: 14
           if-no-files-found: error
+
+  # The egui slice: the other side of the migration, built on its own because its
+  # workspace cannot be the root one (`iced_winit` pins web-sys =0.3.67 and eframe
+  # needs ^0.3.103, so one lock file cannot hold both UI stacks).
+  #
+  # Not `--locked`: the slice's own lock is not committed yet, and a migration
+  # branch that fails on a lock it has not earned is noise. Owed in `HANDOFF.md`.
+  egui-slice:
+    name: Build egui slice
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustc -vV
+          cargo -vV
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-egui-${{ hashFiles('crates/palantir-egui/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-egui-
+
+      - name: Build the slice
+        working-directory: crates/palantir-egui
+        run: cargo build --release
+
+      - name: Test the slice
+        working-directory: crates/palantir-egui
+        run: cargo test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: palantir-egui-slice
+          path: crates/palantir-egui/target/release/PalantirEgui.exe
+          if-no-files-found: error
