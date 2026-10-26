@@ -154,7 +154,7 @@ impl Tab {
     ];
 
     /// The tab's label: the catalogue's own string for the key named in the constant.
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             // `app.settings.tabs.appearance` / `app.settings.tabs.features` / ...
             Tab::Appearance => TAB_APPEARANCE,
@@ -2056,12 +2056,7 @@ fn switch(painter: &egui::Painter, track: Rect, theme: &theme::Theme, on: bool) 
     };
     painter.rect_filled(track, SWITCH_RADIUS, fill);
 
-    let fraction = if on { 1.0 } else { 0.0 };
-    let left = knob_x(track, fraction);
-    let knob = Rect::from_min_size(
-        pos2(left, track.center().y - SWITCH_KNOB / 2.0),
-        Vec2::splat(SWITCH_KNOB),
-    );
+    let knob = switch_knob(if on { 1.0 } else { 0.0 }, track);
     // The source's knob is `bg-black/90` when on and `bg-secondary` when off
     // (`Toggle.vue:24-25`); the brief asks for white on the brand track, which is what is
     // drawn, and the off knob keeps the source's secondary.
@@ -2069,12 +2064,12 @@ fn switch(painter: &egui::Painter, track: Rect, theme: &theme::Theme, on: bool) 
     painter.circle_filled(knob.center(), SWITCH_KNOB / 2.0, knob_fill);
 }
 
-/// Where the knob's left edge sits on a track, for a state in `0.0..=1.0`.
+/// Where the knob sits on a track, for a state in `0.0..=1.0`.
 ///
 /// The fraction is clamped, and a fraction that is not a number is treated as off, so a
 /// caller cannot put the knob outside the track. The travel is what `Toggle.vue:29` states
 /// as `translate-x-[24px]`: the track, less its `p-1` inset at both ends, less the knob.
-fn knob_x(track: egui::Rect, fraction: f32) -> f32 {
+fn switch_knob(fraction: f32, track: Rect) -> Rect {
     let fraction = if fraction.is_finite() {
         fraction.clamp(0.0, 1.0)
     } else {
@@ -2082,7 +2077,10 @@ fn knob_x(track: egui::Rect, fraction: f32) -> f32 {
     };
     let rest = track.left() + SWITCH_INSET;
     let travel = (track.width() - 2.0 * SWITCH_INSET - SWITCH_KNOB).max(0.0);
-    rest + travel * fraction
+    Rect::from_min_size(
+        pos2(rest + travel * fraction, track.center().y - SWITCH_KNOB / 2.0),
+        Vec2::splat(SWITCH_KNOB),
+    )
 }
 
 #[cfg(test)]
@@ -2209,20 +2207,27 @@ mod tests {
     fn the_switch_knob_travels_from_one_end_to_the_other() {
         let track = Rect::from_min_size(pos2(100.0, 40.0), vec2(SWITCH_WIDTH, SWITCH_HEIGHT));
 
-        let off = knob_x(track, 0.0);
-        let half = knob_x(track, 0.5);
-        let on = knob_x(track, 1.0);
+        let off = switch_knob(0.0, track);
+        let half = switch_knob(0.5, track);
+        let on = switch_knob(1.0, track);
 
-        assert!((off - (track.left() + SWITCH_INSET)).abs() < 0.001);
-        assert!((on - (track.right() - SWITCH_INSET - SWITCH_KNOB)).abs() < 0.001);
-        assert!((half - (off + on) / 2.0).abs() < 0.001);
+        assert!((off.left() - (track.left() + SWITCH_INSET)).abs() < 0.001);
+        assert!((on.left() - (track.right() - SWITCH_INSET - SWITCH_KNOB)).abs() < 0.001);
+        assert!((half.left() - (off.left() + on.left()) / 2.0).abs() < 0.001);
         // `translate-x-[24px]`: 48 - 2 * 4 - 16.
-        assert!((on - off - 24.0).abs() < 0.001);
+        assert!((on.left() - off.left() - 24.0).abs() < 0.001);
 
-        assert!((knob_x(track, -3.0) - off).abs() < 0.001);
-        assert!((knob_x(track, 7.5) - on).abs() < 0.001);
-        assert!((knob_x(track, f32::NAN) - off).abs() < 0.001);
-        assert!(knob_x(track, 1.0) + SWITCH_KNOB <= track.right() - SWITCH_INSET + 0.001);
+        // The knob is one 16-point circle, centred on the track at every state.
+        for knob in [off, half, on] {
+            assert!((knob.width() - SWITCH_KNOB).abs() < 0.001);
+            assert!((knob.height() - SWITCH_KNOB).abs() < 0.001);
+            assert!((knob.center().y - track.center().y).abs() < 0.001);
+        }
+
+        assert!((switch_knob(-3.0, track).left() - off.left()).abs() < 0.001);
+        assert!((switch_knob(7.5, track).left() - on.left()).abs() < 0.001);
+        assert!((switch_knob(f32::NAN, track).left() - off.left()).abs() < 0.001);
+        assert!(switch_knob(1.0, track).right() <= track.right() - SWITCH_INSET + 0.001);
     }
 
     /// Every tab has its own non-empty label, and there are exactly 14 of them: the source's
@@ -2245,6 +2250,42 @@ mod tests {
         // The source's order, by its first and last labels.
         assert_eq!(Tab::ALL[0].label(), "Appearance");
         assert_eq!(Tab::ALL[TAB_COUNT - 1].label(), "Troubleshooting");
+    }
+
+    /// Every label is the catalogue's own string, pinned one by one with the key it comes
+    /// from, and `Tab::ALL` is the order those rows appear in the source.
+    ///
+    /// The test above proves the labels are distinct and start and end where the source's
+    /// list does; this one is what catches a label that has drifted *within* that order --
+    /// "Java and memory" becoming "Java", say -- against `en-US/index.json`.
+    #[test]
+    fn every_tab_label_is_the_catalogues_string() {
+        // `app.settings.tabs.*` and the `sidebar.label` keys live in the app's catalogue
+        // (`apps/app-frontend/src/locales/en-US/index.json`); the three
+        // `commonSettingsMessages` tabs read from the ui package's
+        // (`packages/ui/src/locales/en-US/index.json`).
+        let catalogue: [(Tab, &str, &str); TAB_COUNT] = [
+            (Tab::Appearance, "Appearance", "app.settings.tabs.appearance"),
+            (Tab::Features, "Features", "app.settings.tabs.features"),
+            (Tab::Behavior, "Behavior", "app.settings.tabs.behavior"),
+            (Tab::Language, "Language", "app.settings.tabs.language"),
+            (Tab::FeatureFlags, "Feature flags", "settings.feature-flags.title"),
+            (Tab::Profile, "Profile", "settings.profile.navigation-title"),
+            (Tab::Social, "Social", "settings.social.title"),
+            (Tab::Privacy, "Privacy", "app.settings.tabs.privacy"),
+            (Tab::JavaAndMemory, "Java and memory", "app.settings.tabs.java-and-memory"),
+            (Tab::Window, "Window", "app.settings.tabs.window"),
+            (Tab::LaunchHooks, "Launch hooks", "app.settings.tabs.launch-hooks"),
+            (Tab::Syncing, "Syncing", "app.settings.tabs.syncing"),
+            (Tab::Resources, "Resources", "app.settings.tabs.resources"),
+            (Tab::Troubleshooting, "Troubleshooting", "app.settings.tabs.troubleshooting"),
+        ];
+        assert_eq!(catalogue.len(), TAB_COUNT);
+
+        for (index, (tab, label, key)) in catalogue.into_iter().enumerate() {
+            assert_eq!(Tab::ALL[index], tab, "{key} is the rail's row {index}");
+            assert_eq!(tab.label(), label, "{key} in the catalogue");
+        }
     }
 
     /// Every tab carries a body. Before this pass eleven tabs stopped at their heading; a tab
