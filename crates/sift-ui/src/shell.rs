@@ -87,6 +87,8 @@ pub struct Shell {
     icons: crate::images::Images,
     /// The one game this shell starts, and the worker that reports on it.
     game: crate::game::Game,
+    /// The pack install behind the Discover cards' Install buttons, and its worker.
+    install: crate::install::Install,
     /// The instances on disk, read when the shell starts and when the rail returns to Home.
     instances: Vec<crate::data::Entry>,
     /// The Home page's own state: which row's kebab popover is open, and the `saves/` names
@@ -137,6 +139,7 @@ impl Default for Shell {
             theme: crate::theme::dark(),
             icons: crate::images::Images::default(),
             game: crate::game::Game::default(),
+            install: crate::install::Install::default(),
             instances: crate::data::load().0,
             home: crate::pages::home::State::default(),
             open_project: None,
@@ -166,6 +169,13 @@ impl Shell {
         self.scrolling.apply(&ctx);
         // Take the launch worker's latest word before any of the window reads it.
         self.game.poll();
+        // The pack install's word, and the sentence it owes when one ends. The toast names
+        // the instance a finished install created, and the list is re-read so Home shows it:
+        // a failed install can leave a folder behind too, which is why both outcomes do.
+        if let Some(line) = self.install.poll() {
+            self.toast = Some(line);
+            self.instances = crate::data::load().0;
+        }
 
         let window = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(g::WINDOW.0, g::WINDOW.1));
         ui.painter().rect_filled(window, 0, self.theme.BG);
@@ -296,6 +306,7 @@ impl Shell {
             || self.icons.loading()
             || self.results.loading()
             || self.game.busy()
+            || self.install.busy()
     }
 
     /// The top bar: the mark and the page's name at the left, window controls at the right.
@@ -596,6 +607,25 @@ impl Shell {
                     self.instance_name(&instance)
                 ));
             }
+        }
+    }
+
+    /// Install one card's pack, or say why the press did nothing.
+    ///
+    /// **One install at a time**, like the one game: a second worker would import a second
+    /// pack into the same instances folder while the first is still filling it, and the
+    /// engine's own transfer ceiling is one queue. The refusal is said rather than swallowed,
+    /// because a press that silently does nothing reads as a broken button.
+    fn press_install(&mut self, card: &Card) {
+        if self.install.busy() {
+            self.toast = Some(
+                "An install is already running: this launcher installs one pack at a time."
+                    .to_owned(),
+            );
+        } else {
+            // The title is the instance's name: `install_pack_archive`'s own rule is that a
+            // reader wants the project's name rather than the archive's file stem.
+            self.install.start(&card.id, &card.title);
         }
     }
 
@@ -935,6 +965,10 @@ impl Shell {
                     crate::search::State::Ready { hits, .. } => hits
                         .iter()
                         .map(|hit| Card {
+                            // The project's id, which is what the Install button is keyed by
+                            // and what the version request needs; a card that dropped it
+                            // could only offer a button that had nothing to install.
+                            id: hit.id.clone(),
                             title: hit.title.clone(),
                             author: hit.author.clone(),
                             summary: hit.summary.clone(),
@@ -959,8 +993,15 @@ impl Shell {
                 let results: &[Card] = if live.is_empty() { &sample } else { &live };
                 let mut opened = false;
                 for index in 0..results.len().max(1) {
-                    let clicked = card(ui, &self.theme, index, &results[index % results.len()], &mut self.icons);
-                    opened |= clicked;
+                    let result = &results[index % results.len()];
+                    // The button's word comes from the install, not from the card: a card
+                    // cannot know whether its own project is the one being installed.
+                    let label = self.install.label(&result.id);
+                    match card(ui, &self.theme, index, result, &mut self.icons, label) {
+                        Press::None => {}
+                        Press::Card => opened = true,
+                        Press::Install => self.press_install(result),
+                    }
                 }
                 if opened {
                     // Any card opens the sample project for now; the real one carries the
@@ -1050,7 +1091,8 @@ fn card(
     index: usize,
     result: &Card,
     icons: &mut crate::images::Images,
-) -> bool {
+    install_label: &str,
+) -> Press {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, g::CARD), Sense::hover());
     let painter = ui.painter();
@@ -1148,7 +1190,7 @@ fn card(
     painter.text(
         install.center(),
         Align2::CENTER_CENTER,
-        "Install",
+        install_label,
         crate::fonts::semibold(13.0),
         theme.BUTTON_TEXT_SELECTED,
     );
@@ -1193,8 +1235,37 @@ fn card(
     // Keyed by row, not by title: the same project can legitimately appear twice in a list
     // (two sources, a repeat), and duplicate widget ids make egui paint a clash warning and
     // box the card in red.
-    ui.interact(rect, egui::Id::new(("result-card", index)), Sense::click())
-        .clicked()
+    let card = ui.interact(rect, egui::Id::new(("result-card", index)), Sense::click());
+    // The button is registered after the card, so it sits above it: egui hands a press to the
+    // last target that claimed the point, and a press on Install must not also open the
+    // project. Answered first for the same reason -- the card's own response is the one a
+    // changed hit-test order would otherwise turn into a page navigation.
+    let button = ui.interact(
+        install,
+        egui::Id::new(("result-install", index)),
+        Sense::click(),
+    );
+    if button.clicked() {
+        Press::Install
+    } else if card.clicked() {
+        Press::Card
+    } else {
+        Press::None
+    }
+}
+
+/// What a press on a result card asked for.
+///
+/// One value rather than two flags: a frame delivers one press to one target, and the button
+/// and the card are both hit targets on the same rect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Press {
+    /// Nothing was pressed.
+    None,
+    /// The card itself: open the project page.
+    Card,
+    /// The Install button.
+    Install,
 }
 
 /// What a result card shows. The reference's list carries these fields and no others.
@@ -1203,6 +1274,9 @@ fn card(
 /// page does not own, and a card that borrowed them would tie the list to the reply's
 /// lifetime for no gain.
 pub struct Card {
+    /// The project's stable id (`"1KVo5zza"`), which is what `version_url` takes and what the
+    /// install button is keyed by.
+    pub id: String,
     /// The project's name.
     pub title: String,
     /// The team that published it.
@@ -1229,12 +1303,17 @@ pub struct Card {
 /// The icon URLs are the API's own `icon_url` answers for those six projects, fetched with
 /// `tools/parity`'s probe rather than constructed: `/data/<id>/icon.png` is not a URL the CDN
 /// serves -- it answers 400 on every id -- and the hashed `_96.webp` is.
+///
+/// Each `id` is read off that same CDN path, which is the only place the sample list carries
+/// one: the six are real projects, so their Install buttons install the real packs rather
+/// than a button that fails on an id nobody published.
 fn sample_results() -> Vec<Card> {
     fn tags(pairs: &[(&str, Glyph)]) -> Vec<(String, Glyph)> {
         pairs.iter().map(|(label, glyph)| ((*label).to_owned(), *glyph)).collect()
     }
     vec![
         Card {
+            id: "1KVo5zza".to_owned(),
             title: "Fabulously Optimized".to_owned(),
             author: "Fabulously Optimized".to_owned(),
             summary: "Beautiful graphics, speedy performance and familiar features in a simple package. Wilderness Bound beta!".to_owned(),
@@ -1251,6 +1330,7 @@ fn sample_results() -> Vec<Card> {
             icon: "https://cdn.modrinth.com/data/1KVo5zza/d8152911f8fd5d7e9a8c499fe89045af81fe816e_96.webp".to_owned(),
         },
         Card {
+            id: "l9m9tuPN".to_owned(),
             title: "Zombie Invade 100 Days".to_owned(),
             author: "FlameFire".to_owned(),
             summary: "Same as Forge Labs 100 Days Zombie Apocalypse in new Minecraft.".to_owned(),
@@ -1265,6 +1345,7 @@ fn sample_results() -> Vec<Card> {
             icon: "https://cdn.modrinth.com/data/l9m9tuPN/fefe3f67c37744344d100638452c7bf059d586a1_96.webp".to_owned(),
         },
         Card {
+            id: "5FFgwNNP".to_owned(),
             title: "Cobblemon Official Modpack [Fabric]".to_owned(),
             author: "Cobbled Studios".to_owned(),
             summary: "The official modpack of the Cobblemon mod, for Fabric!".to_owned(),
@@ -1280,6 +1361,7 @@ fn sample_results() -> Vec<Card> {
             icon: "https://cdn.modrinth.com/data/5FFgwNNP/e7f9ee2e9d361623847853fe2ddce42f519ee64f.png".to_owned(),
         },
         Card {
+            id: "Jkb29YJU".to_owned(),
             title: "COBBLEVERSE - Pokemon Adventure".to_owned(),
             author: "LUMYVERSE".to_owned(),
             summary: "Start a true Pokemon adventure in Minecraft: Cobblemon 1.7.3 [ALL 1025 Pokemon] - Mega Evolutions - Gyms & Badges - Starter Kit.".to_owned(),
@@ -1290,6 +1372,7 @@ fn sample_results() -> Vec<Card> {
             icon: "https://cdn.modrinth.com/data/Jkb29YJU/581ecf54530972afb18a04660afd820f2f24f6c7.png".to_owned(),
         },
         Card {
+            id: "4BV47HRn".to_owned(),
             title: "Better MC [FORGE]".to_owned(),
             author: "Shivaxi".to_owned(),
             summary: "The kitchen-sink pack that keeps its focus: quests, dungeons and a world that rewards exploring.".to_owned(),
@@ -1300,6 +1383,7 @@ fn sample_results() -> Vec<Card> {
             icon: "https://cdn.modrinth.com/data/4BV47HRn/7f5ef7cc61b2593609aabef3ed07a866a4f11b73_96.webp".to_owned(),
         },
         Card {
+            id: "CfpXILxG".to_owned(),
             title: "All the Mods 10".to_owned(),
             author: "ATMTeam".to_owned(),
             summary: "Every mod that matters, curated and tested, with a quest book to hold it together.".to_owned(),
@@ -1364,5 +1448,14 @@ mod tests {
         assert_eq!(sample.len(), 6);
         assert_eq!(sample[0].title, "Fabulously Optimized");
         assert_eq!(sample[5].title, "All the Mods 10");
+    }
+
+    /// Every sample card names its project: the Install button is keyed by that id and the
+    /// install asks the API for it, so an empty one would be a button that could only fail.
+    #[test]
+    fn every_sample_card_names_its_project() {
+        for card in sample_results() {
+            assert!(!card.id.is_empty(), "{} carries no project id", card.title);
+        }
     }
 }

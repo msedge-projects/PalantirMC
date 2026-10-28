@@ -26,6 +26,7 @@ mod frame_log;
 mod game;
 mod geometry;
 mod icons;
+mod install;
 mod pages;
 mod panel;
 mod images;
