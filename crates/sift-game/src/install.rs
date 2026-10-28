@@ -1600,7 +1600,21 @@ fn import_and_fetch(
         .unwrap_or_else(|| name.to_string());
     // The launcher's one wire, so a pack's files draw the same ceiling as
     // everything else it is fetching at that moment.
-    let fetch = fetch_pack_files(wire, &root, &plan.files, DEFAULT_THREADS, progress);
+    //
+    // Into the instance's *game* directory, not its root: a pack's `files[].path` is relative
+    // to the folder the game runs in (`minecraft/`), and a jar two levels above it is a jar
+    // neither the game nor `Instance::mods_dir()` will ever open. The instance was created a
+    // few lines up, so opening it here is reading back what this function just wrote; if it
+    // cannot be opened the install has failed and saying so beats writing somewhere else.
+    let instance = sift_core::instance::Instance::open(&root)
+        .map_err(|error| format!("the imported instance could not be re-opened: {error}"))?;
+    let fetch = fetch_pack_files(
+        wire,
+        &instance.game_root(),
+        &plan.files,
+        DEFAULT_THREADS,
+        progress,
+    );
     Ok(InstalledPack {
         id,
         fetch,
