@@ -2087,10 +2087,16 @@ mod tests {
         let instance =
             Instance::create(&paths.instances_dir(), "Cobblemon", "1.21.4").expect("an instance");
         let root = instance.root().to_path_buf();
-        std::fs::create_dir_all(root.join("mods")).unwrap();
+        // Everything the game owns lives under `minecraft/`, including the mod the reader
+        // dropped in themselves -- the file this test exists to prove survives a re-apply.
+        std::fs::create_dir_all(root.join("minecraft").join("mods")).unwrap();
         std::fs::create_dir_all(root.join("minecraft").join("saves").join("world")).unwrap();
-        std::fs::create_dir_all(root.join("config")).unwrap();
-        std::fs::write(root.join("mods").join("manual.jar"), b"my mod").unwrap();
+        std::fs::create_dir_all(root.join("minecraft").join("config")).unwrap();
+        std::fs::write(
+            root.join("minecraft").join("mods").join("manual.jar"),
+            b"my mod",
+        )
+        .unwrap();
         std::fs::write(
             root.join("minecraft").join("saves").join("world").join("level.dat"),
             b"my world",
