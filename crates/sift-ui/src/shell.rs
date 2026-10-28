@@ -190,9 +190,9 @@ impl Shell {
                     format!("Signed in as {name}.")
                 }
                 crate::account::State::Failed(reason) => format!("Sign-in failed: {reason}"),
-                crate::account::State::Starting | crate::account::State::Idle => {
-                    "Asking Microsoft for a sign-in code…".to_owned()
-                }
+                // Neither state arrives as a change here: the press says `Starting`, and
+                // `Idle` is only ever set by signing out.
+                crate::account::State::Starting | crate::account::State::Idle => String::new(),
             });
         }
         // The pack install's word, and the sentence it owes when one ends. The toast names
@@ -862,7 +862,14 @@ impl Shell {
             _ if self.account.busy() => {
                 self.toast = Some("A sign-in is already in progress.".to_owned());
             }
-            _ => self.account.start(),
+            _ => {
+                self.account.start();
+                // Said now, not when the worker's first word arrives: a request to Microsoft
+                // can take half a minute, and silence reads as a button that does nothing.
+                self.toast = Some(
+                    "Asking Microsoft for a sign-in code…".to_owned(),
+                );
+            }
         }
     }
 
