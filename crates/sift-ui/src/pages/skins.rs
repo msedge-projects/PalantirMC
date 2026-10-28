@@ -636,9 +636,15 @@ pub fn draw(
     }
 
     let grid_top = section_header(ui, rect, toolbar_bottom, theme, SECTION_TITLE);
+    // The Saved grid stops short of the page's foot by the height of the Default skins
+    // heading, so that second heading has somewhere to be drawn that a reader can see.
+    let defaults_strip = SECTION_HEADER_LINE + SECTION_CONTENT_SPACING + HEADING_LINE;
     let grid_rect = Rect::from_min_max(
         egui::pos2(rect.left() + PAGE_PADDING, grid_top),
-        egui::pos2(rect.right() - PAGE_PADDING, rect.bottom() - PAGE_PADDING),
+        egui::pos2(
+            rect.right() - PAGE_PADDING,
+            (rect.bottom() - PAGE_PADDING - defaults_strip).max(grid_top + GRID_MIN_HEIGHT),
+        ),
     );
     if grid_rect.width() < 1.0 || grid_rect.height() < 1.0 {
         return false;
@@ -685,8 +691,8 @@ pub fn draw(
             let rows = slots.div_ceil(columns);
             let content_height =
                 (rows as f32 * (grid.card_height + GRID_GAP) - GRID_GAP).max(GRID_MIN_HEIGHT);
-            // The grid scrolls inside `grid_rect`, so the section below starts at the rect's
-            // own bottom: nothing under a scroll area can know how tall its contents are.
+            // The grid scrolls inside `grid_rect`; the section below starts at the strip
+            // reserved for it, not at whatever the contents measured.
             below_grid = grid_rect.bottom() + SECTION_GAP;
 
             // The source scrolls the whole page; this page owns only the column below its
@@ -714,7 +720,9 @@ pub fn draw(
                                 ),
                             egui::vec2(grid.card_width, grid.card_height),
                         );
-                        match visible.get(slot) {
+                        // Slot zero is the dropzone; the reader's own skins start at the
+                        // second slot (`VirtualSkinSectionList.vue:426-443`).
+                        match slot.checked_sub(1).and_then(|index| visible.get(index)) {
                             Some(skin) => draw_card(painter, card, theme, skin),
                             None => dropzone_tile(painter, card, theme),
                         }
