@@ -678,7 +678,11 @@ pub fn draw(
         }
         None => {
             let columns = grid.columns.max(1);
-            let rows = visible.len().div_ceil(columns);
+            // The reference's Saved-skins grid holds the add dropzone as its first tile
+            // (`VirtualSkinSectionList.vue:426-443`), so the reader's own skins start at the
+            // second slot whether the list is empty or not.
+            let slots = visible.len() + 1;
+            let rows = slots.div_ceil(columns);
             let content_height =
                 (rows as f32 * (grid.card_height + GRID_GAP) - GRID_GAP).max(GRID_MIN_HEIGHT);
             // The grid scrolls inside `grid_rect`, so the section below starts at the rect's
@@ -699,9 +703,9 @@ pub fn draw(
                         Sense::hover(),
                     );
                     let painter = ui.painter();
-                    for (index, skin) in visible.iter().enumerate() {
-                        let column = index % columns;
-                        let row = index / columns;
+                    for slot in 0..slots {
+                        let column = slot % columns;
+                        let row = slot / columns;
                         let card = Rect::from_min_size(
                             area.min
                                 + egui::vec2(
@@ -710,7 +714,10 @@ pub fn draw(
                                 ),
                             egui::vec2(grid.card_width, grid.card_height),
                         );
-                        draw_card(painter, card, theme, skin);
+                        match visible.get(slot) {
+                            Some(skin) => draw_card(painter, card, theme, skin),
+                            None => dropzone_tile(painter, card, theme),
+                        }
                     }
                 });
         }
