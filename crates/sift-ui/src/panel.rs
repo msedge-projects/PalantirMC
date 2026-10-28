@@ -218,6 +218,31 @@ const CARD_RADIUS: u8 = crate::theme::RADIUS_MD;
 // (`https://modrinth.com/news/feed/articles.json`, read live in `GATES.md`'s G101).
 // ---------------------------------------------------------------------------
 
+/// One step of the checklist, as a thing the shell can act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// `Create first instance`.
+    CreateInstance,
+    /// `Sign in to Minecraft`.
+    Minecraft,
+    /// `Sign in to Modrinth`.
+    Modrinth,
+}
+
+impl Step {
+    /// The three, in the order they are drawn.
+    pub const ALL: [Step; 3] = [Step::CreateInstance, Step::Minecraft, Step::Modrinth];
+
+    /// The row's own label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Step::CreateInstance => STEPS[0],
+            Step::Minecraft => STEPS[1],
+            Step::Modrinth => STEPS[2],
+        }
+    }
+}
+
 /// The heading the reference prints above the checklist.
 const GETTING_STARTED: &str = "Getting started";
 
@@ -257,7 +282,7 @@ const HOSTING_ACCENT: &str = "on Modrinth.";
 /// Returns whether anything is still animating. Nothing is: the hovers are steps between
 /// two fills rather than tweens, and egui asks for a frame by itself when the pointer
 /// moves, so no frame is owed after this one.
-pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> bool {
+pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> Option<Step> {
     let painter = ui.painter();
 
     // The panel's own ground, then its one-pixel left rule.
@@ -311,6 +336,7 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> bool {
         theme.CONTRAST,
     );
 
+    let mut pressed = None;
     for (index, step) in STEPS.into_iter().enumerate() {
         let row = Rect::from_min_size(
             egui::pos2(column.left(), row_top(plan.steps_first, index)),
@@ -318,10 +344,16 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> bool {
         );
         // A step brightens under the pointer the way the sheet's does
         // (`hover:brightness-110`, `ui/onboarding-checklist/index.vue:109`), by the
-        // theme's own `--hover-brightness`. No press: see the module documentation.
-        let hovered = ui
-            .interact(row, egui::Id::new(("panel-step", index)), Sense::hover())
-            .hovered();
+        // theme's own `--hover-brightness`, and a press is reported to the shell.
+        let response = ui.interact(
+            row,
+            egui::Id::new(("panel-step", index)),
+            Sense::click(),
+        );
+        if response.clicked() {
+            pressed = Step::ALL.get(index).copied();
+        }
+        let hovered = response.hovered();
         let fill = if hovered {
             theme.hovered(theme.RAISED_BG)
         } else {
@@ -479,7 +511,7 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> bool {
     // Everything below the two lines is the art's room, and stays empty until the promo's
     // mark is loaded as a texture: `BANNER_H` already counts it.
 
-    false
+    pressed
 }
 
 /// The panel's content column: the panel less [`PAD`] on each side.

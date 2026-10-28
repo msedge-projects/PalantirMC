@@ -126,6 +126,8 @@ pub struct Shell {
     open_instance: Option<crate::pages::instance::Instance>,
     /// The open instance page's selected tab.
     instance_state: crate::pages::instance::State,
+    /// The Microsoft account, and the worker that talks to it.
+    account: crate::account::Account,
     /// Whether the About modal is showing.
     about_open: bool,
     /// The settings modal: open flag and selected tab.
@@ -160,6 +162,7 @@ impl Default for Shell {
             toast: None,
             open_instance: None,
             instance_state: crate::pages::instance::State::default(),
+            account: crate::account::Account::default(),
             about_open: false,
             settings: crate::pages::settings::State::default(),
         }
@@ -175,6 +178,23 @@ impl Shell {
         self.scrolling.apply(&ctx);
         // Take the launch worker's latest word before any of the window reads it.
         self.game.poll();
+        // The sign-in worker's, which announces the code the moment Microsoft prints one.
+        let was = self.account.state().clone();
+        self.account.poll();
+        if self.account.state() != &was {
+            self.toast = Some(match self.account.state() {
+                crate::account::State::Waiting { code, uri } => {
+                    format!("To sign in, enter {code} at {uri}")
+                }
+                crate::account::State::SignedIn { name, .. } => {
+                    format!("Signed in as {name}.")
+                }
+                crate::account::State::Failed(reason) => format!("Sign-in failed: {reason}"),
+                crate::account::State::Starting | crate::account::State::Idle => {
+                    "Asking Microsoft for a sign-in code…".to_owned()
+                }
+            });
+        }
         // The pack install's word, and the sentence it owes when one ends. The toast names
         // the instance a finished install created, and the list is re-read so Home shows it:
         // a failed install can leave a folder behind too, which is why both outcomes do.
@@ -327,6 +347,9 @@ impl Shell {
             || self.results.loading()
             || self.game.busy()
             || self.install.busy()
+            // The sign-in worker's next word arrives on its own thread, so the window has to
+            // keep drawing to notice it.
+            || self.account.busy()
     }
 
     /// The top bar: the mark and the page's name at the left, window controls at the right.
@@ -801,7 +824,46 @@ impl Shell {
             );
         }
 
-        crate::panel::draw(ui, shared, &self.theme)
+        let step = crate::panel::draw(ui, shared, &self.theme);
+        if let Some(step) = step {
+            self.panel_step(step);
+        }
+        step.is_some()
+    }
+
+    /// Do what a checklist row asked for.
+    fn panel_step(&mut self, step: crate::panel::Step) {
+        match step {
+            crate::panel::Step::CreateInstance => self.create_instance(),
+            crate::panel::Step::Minecraft => self.start_sign_in(),
+            // Modrinth's own account is a separate service with its own flow; nothing here
+            // can start it, so the row says so rather than doing nothing.
+            crate::panel::Step::Modrinth => {
+                self.toast = Some(
+                    "Signing in to Modrinth needs its own OAuth flow, which this launcher has no                      client for yet."
+                        .to_owned(),
+                );
+            }
+        }
+    }
+
+    /// Ask Microsoft for a code and put it where the reader can see it.
+    fn start_sign_in(&mut self) {
+        match self.account.state() {
+            crate::account::State::SignedIn { name, .. } => {
+                self.toast = Some(format!("Already signed in as {name}."));
+            }
+            crate::account::State::Failed(reason) => {
+                // A fresh press after a failure should try again, not repeat the failure.
+                self.toast = Some(format!("Trying again after: {reason}"));
+                self.account = crate::account::Account::default();
+                self.account.start();
+            }
+            _ if self.account.busy() => {
+                self.toast = Some("A sign-in is already in progress.".to_owned());
+            }
+            _ => self.account.start(),
+        }
     }
 
     /// The tabs, the search row and the scrolling list. Returns whether a glide is running.
