@@ -310,7 +310,7 @@ pub fn import_mrpack(
     }
     let instance = sift_core::instance::Instance::create(instances_dir, name, mc_version)
         .map_err(core_err)?;
-    extract_overrides(&mut archive, plan.overrides.as_str(), instance.game_root())?;
+    extract_overrides(&mut archive, plan.overrides.as_str(), &instance.game_root())?;
     register_loaders(&instance, &plan.loaders)?;
     Ok(instance.root().to_path_buf())
 }
@@ -350,7 +350,7 @@ pub fn apply_mrpack(
         ));
     }
     let plan = plan_mrpack(&mut archive)?;
-    extract_overrides(&mut archive, plan.overrides.as_str(), instance.game_root())?;
+    extract_overrides(&mut archive, plan.overrides.as_str(), &instance.game_root())?;
     register_loaders(instance, &plan.loaders)?;
     Ok(plan)
 }
@@ -632,7 +632,7 @@ pub fn import_curseforge(
     }
     let instance = sift_core::instance::Instance::create(instances_dir, name, mc_version)
         .map_err(core_err)?;
-    extract_overrides(&mut archive, plan.overrides.as_str(), instance.game_root())?;
+    extract_overrides(&mut archive, plan.overrides.as_str(), &instance.game_root())?;
     register_loaders(&instance, &plan.loaders)?;
     Ok(instance.root().to_path_buf())
 }
