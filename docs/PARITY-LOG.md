@@ -567,6 +567,32 @@ reader is a pure function over bytes, so no test needs a filesystem — which is
 **Still owed on this block:** `Last played` has no stamp to show, quick-play launches nothing,
 and the list is capped at three worlds per instance.
 
+### Sign-in reaches Microsoft, and the toast nobody had ever seen — 2026-10-28
+
+Pressing `Sign in to Minecraft` now asks Microsoft for a device code and prints it. The capture
+reads **`To sign in, enter PVSTXTVG at https://www.microsoft.com/link`** — a real code from the
+live endpoint, which means the whole chain a reader never sees (`request_device_code` → `poll` →
+Xbox → XSTS → profile) is reachable from the window.
+
+Getting there took four attempts, and the third one found something bigger than the feature:
+
+| # | What the press did | Why |
+| --- | --- | --- |
+| 1 | nothing | `ui.interact` inside the panel lost the click to an interaction the window registers later in the same frame |
+| 2 | nothing | fixed by testing the pointer against the row rects — the popovers' own device, for the same reason |
+| 3 | nothing visible | the press started the worker but announced nothing until the worker's first word, which can be thirty seconds away |
+| 4 | the code | …and the announcement was drawn **under the content column**, which paints its own background over everything before it |
+
+**The toast bug is the one that matters beyond this feature.** It sat between the panel and the
+content column, so every message this launcher has ever produced — "Editing … is not wired yet",
+"Opened …", the install's summary — was painted and then covered in the same frame. Four rounds
+of this log record actions that set a toast and no capture shows one; that was not the captures'
+fault.
+
+**Still owed for the account:** the session lives in memory only, so a restart asks again; the
+`Sign in to Modrinth` row says plainly that its service needs a flow this launcher has no client
+for; and a finished sign-in does not yet change what a launch sends as the player.
+
 ### Open after this pass
 
 | # | Region | What differs |
