@@ -684,7 +684,7 @@ pub fn draw(
         grid_left = preview.right() + PREVIEW_GAP;
     }
 
-    let grid_top = section_header(ui, rect, toolbar_bottom, theme, SECTION_TITLE);
+    let grid_top = section_header(ui, grid_left, toolbar_bottom, theme, SECTION_TITLE);
     // The Saved grid stops short of the page's foot by the height of the Default skins
     // heading, so that second heading has somewhere to be drawn that a reader can see.
     let defaults_strip = SECTION_HEADER_LINE + SECTION_CONTENT_SPACING + HEADING_LINE;
@@ -780,10 +780,10 @@ pub fn draw(
         }
     }
 
-    let defaults_top = section_header(ui, rect, below_grid, theme, DEFAULT_SECTION_TITLE);
+    let defaults_top = section_header(ui, grid_left, below_grid, theme, DEFAULT_SECTION_TITLE);
     if defaults_top + HEADING_LINE <= rect.bottom() - PAGE_PADDING {
         ui.painter().text(
-            egui::pos2(rect.left() + PAGE_PADDING, defaults_top),
+            egui::pos2(grid_left, defaults_top),
             Align2::LEFT_TOP,
             DEFAULT_SECTION_BODY,
             fonts::body(13.0),
@@ -1015,11 +1015,11 @@ fn text_width(painter: &egui::Painter, text: &str, font: egui::FontId) -> f32 {
 /// this page, so the glyph is drawn in its open orientation (`rotate-180` on the
 /// `DropdownIcon`, `VirtualSkinSectionList.vue:384-387`). Returns the y where the grid
 /// begins.
-fn section_header(ui: &Ui, rect: Rect, top: f32, theme: &Theme, title: &str) -> f32 {
+fn section_header(ui: &Ui, left: f32, top: f32, theme: &Theme, title: &str) -> f32 {
     let painter = ui.painter();
     let glyph = Rect::from_min_size(
         egui::pos2(
-            rect.left() + PAGE_PADDING,
+            left,
             top + (SECTION_HEADER_LINE - SECTION_HEADER_GLYPH) / 2.0,
         ),
         Vec2::splat(SECTION_HEADER_GLYPH),
