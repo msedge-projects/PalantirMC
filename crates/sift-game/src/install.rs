@@ -1497,7 +1497,7 @@ pub fn reapply_pack(
         wire,
         // A pack's `files[].path` is relative to the game directory (`mods/x.jar`), which is
         // `minecraft/` in this layout -- not the instance root, where nothing reads it.
-        instance.game_root(),
+        &instance.game_root(),
         &plan.files,
         DEFAULT_THREADS,
         progress,
