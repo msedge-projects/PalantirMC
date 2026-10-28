@@ -691,9 +691,9 @@ pub fn draw(
             let rows = slots.div_ceil(columns);
             let content_height =
                 (rows as f32 * (grid.card_height + GRID_GAP) - GRID_GAP).max(GRID_MIN_HEIGHT);
-            // The grid scrolls inside `grid_rect`; the section below starts at the strip
-            // reserved for it, not at whatever the contents measured.
-            below_grid = grid_rect.bottom() + SECTION_GAP;
+            // Directly under the cards when they fit, and at the reserved strip when they
+            // do not: the heading follows the content, not the space reserved for it.
+            below_grid = grid_rect.top() + content_height.min(grid_rect.height()) + SECTION_GAP;
 
             // The source scrolls the whole page; this page owns only the column below its
             // section header, so the scroll area starts at the grid.
