@@ -30,6 +30,7 @@ mod install;
 mod pages;
 mod panel;
 mod images;
+mod nbt;
 mod search;
 mod shell;
 /// The reference's palette, geometry, type and motion as egui values.

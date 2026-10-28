@@ -51,6 +51,7 @@ sift-game = { path = "../sift-game" }
 # `.../icon.png` answers **400**, and the API's own `icon_url` is a hashed `.webp` (with
 # some projects still on `.png`), so both decoders are needed and neither is speculative.
 serde_json = "1"
+flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 # The release profile this workspace ships with.

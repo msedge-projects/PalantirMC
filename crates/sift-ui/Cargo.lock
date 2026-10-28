@@ -2788,6 +2788,7 @@ dependencies = [
  "eframe",
  "egui",
  "fastframe-scroll",
+ "flate2",
  "image",
  "serde_json",
  "sift-core",

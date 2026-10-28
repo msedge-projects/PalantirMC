@@ -826,8 +826,13 @@ fn read_worlds(instances: &[Entry]) -> Vec<(String, Vec<String>)> {
                         .map(|kind| kind.is_dir())
                         .unwrap_or(false);
                     if is_folder {
-                        if let Some(name) = entry.file_name().to_str() {
-                            names.push(name.to_owned());
+                        if let Some(folder) = entry.file_name().to_str() {
+                            // The world's own name when `level.dat` has one, and the folder
+                            // when it does not: the folder is what the game would show as a
+                            // fallback too, so a reader still sees something they recognise.
+                            let named = crate::nbt::world_name(&entry.path())
+                                .unwrap_or_else(|| clean_world_name(folder).to_owned());
+                            names.push(named);
                         }
                     }
                 }
