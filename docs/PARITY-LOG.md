@@ -543,6 +543,30 @@ there would be the same substitution the theme cards and the dropzone tile were,
 It needs a decision — draw the skin as a 2D front/side flat-map from the texture, or leave the
 column out until a renderer exists — and it should be decided before it is drawn.
 
+### E-39 closed: worlds carry their names, and the block found its folder — 2026-10-28
+
+`Jump in` listed folder names. It reads `level.dat` now — gzipped NBT, `Data.LevelName` — with
+`flate2`, which the lock already carried through `image`, and a reader that keeps compounds and
+strings and skips every other tag by its own length.
+
+**The capture found a second bug the moment a world existed to find.** With a world on disk the
+block was still empty: `read_worlds` joined `saves` to the *instance root*, while the game keeps
+them under `minecraft/saves`. The same mistake the pack installer made, one folder over — and
+the reason nobody had noticed is that no count of anything had ever been taken where the game
+actually looks.
+
+| | Before | After |
+| --- | --- | --- |
+| saved world at `minecraft/saves/folder-name-world` | block empty | **`Harbour Build`** |
+| `<instance>/saves` | nothing there | still nothing; the older spelling is tried second |
+
+Four tests: the uncompressed path, the gzipped one, a blank name, and a truncated document. The
+reader is a pure function over bytes, so no test needs a filesystem — which is also why
+`tempfile` was not added to this crate for them.
+
+**Still owed on this block:** `Last played` has no stamp to show, quick-play launches nothing,
+and the list is capped at three worlds per instance.
+
 ### Open after this pass
 
 | # | Region | What differs |
