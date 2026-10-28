@@ -833,7 +833,11 @@ impl Shell {
             );
         }
 
-        let step = crate::panel::draw(ui, shared, &self.theme);
+        let signed_in = self
+            .account
+            .session()
+            .map(|(name, _)| name.to_owned());
+        let step = crate::panel::draw(ui, shared, &self.theme, signed_in.as_deref());
         if let Some(step) = step {
             self.panel_step(step);
         }

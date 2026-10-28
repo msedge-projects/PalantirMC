@@ -243,6 +243,18 @@ impl Step {
     }
 }
 
+/// What a checklist row says, given who is signed in.
+///
+/// The Minecraft row is the one that changes: the reference's checklist strikes a finished step
+/// through, and the launcher's own wording for that state is the account's name. A row that
+/// insisted `Sign in to Minecraft` after a successful sign-in would be asking again.
+pub fn row_label(step: Step, account: Option<&str>) -> String {
+    match (step, account) {
+        (Step::Minecraft, Some(name)) => format!("Signed in as {name}"),
+        (step, _) => step.label().to_owned(),
+    }
+}
+
 /// The heading the reference prints above the checklist.
 const GETTING_STARTED: &str = "Getting started";
 
@@ -282,7 +294,7 @@ const HOSTING_ACCENT: &str = "on Modrinth.";
 /// Returns whether anything is still animating. Nothing is: the hovers are steps between
 /// two fills rather than tweens, and egui asks for a frame by itself when the pointer
 /// moves, so no frame is owed after this one.
-pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> Option<Step> {
+pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme, account: Option<&str>) -> Option<Step> {
     let painter = ui.painter();
 
     // The panel's own ground, then its one-pixel left rule.
@@ -381,7 +393,7 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> Option<Step> {
         painter.text(
             egui::pos2(row.left() + ROW_PAD + RING + RING_GAP, row.center().y),
             Align2::LEFT_CENTER,
-            step,
+            row_label(Step::ALL[index], account),
             fonts::body(STEP_SIZE),
             theme.BASE,
         );
@@ -626,6 +638,26 @@ fn plan_with_copy(panel: Rect, copy_height: f32) -> Plan {
         card,
         news_rows: rows,
         banner,
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    /// Only the Minecraft row changes, and only when there is a name to show.
+    #[test]
+    fn the_minecraft_row_names_the_account() {
+        assert_eq!(
+            row_label(Step::Minecraft, Some("Steve")),
+            "Signed in as Steve"
+        );
+        assert_eq!(row_label(Step::Minecraft, None), "Sign in to Minecraft");
+        assert_eq!(
+            row_label(Step::CreateInstance, Some("Steve")),
+            "Create first instance",
+            "other rows are unaffected by the account"
+        );
     }
 }
 
