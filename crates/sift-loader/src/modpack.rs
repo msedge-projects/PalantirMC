@@ -687,9 +687,10 @@ mod tests {
         ]);
         let dir = tempfile::tempdir().unwrap();
         let root = import_mrpack(bytes.as_slice(), dir.path(), "Mr Test").unwrap();
-        assert!(root.join("config").join("test.cfg").is_file());
+        // Overrides land in the game directory, which is what a `.mrpack` means by them.
+        assert!(root.join("minecraft").join("config").join("test.cfg").is_file());
         assert_eq!(
-            std::fs::read(root.join("config").join("test.cfg")).unwrap(),
+            std::fs::read(root.join("minecraft").join("config").join("test.cfg")).unwrap(),
             b"hello"
         );
         let profile = sift_core::pack::PackProfile::load(&root.join("mmc-pack.json")).unwrap();
@@ -720,7 +721,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = import_curseforge(bytes.as_slice(), dir.path(), "Curse Test").unwrap();
         assert_eq!(
-            std::fs::read(root.join("config").join("c.cfg")).unwrap(),
+            std::fs::read(root.join("minecraft").join("config").join("c.cfg")).unwrap(),
             b"curse"
         );
         let profile = sift_core::pack::PackProfile::load(&root.join("mmc-pack.json")).unwrap();
@@ -923,26 +924,38 @@ mod tests {
         let instance =
             sift_core::instance::Instance::create(&instances, "Cobblemon", "1.21.4").unwrap();
         let root = instance.root().to_path_buf();
-        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::create_dir_all(root.join("minecraft").join("config")).unwrap();
         std::fs::create_dir_all(root.join("saves").join("world")).unwrap();
-        std::fs::create_dir_all(root.join("mods")).unwrap();
+        std::fs::create_dir_all(root.join("minecraft").join("mods")).unwrap();
         // What the pack's previous version wrote, and the three things a
         // re-install must not touch.
-        std::fs::write(root.join("config").join("pack.cfg"), b"old").unwrap();
-        std::fs::write(root.join("config").join("left-behind.cfg"), b"mine").unwrap();
+        std::fs::write(
+            root.join("minecraft").join("config").join("pack.cfg"),
+            b"old",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("minecraft").join("config").join("left-behind.cfg"),
+            b"mine",
+        )
+        .unwrap();
         std::fs::write(
             root.join("saves").join("world").join("level.dat"),
             b"my world",
         )
         .unwrap();
-        std::fs::write(root.join("mods").join("manual.jar"), b"my mod").unwrap();
+        std::fs::write(
+            root.join("minecraft").join("mods").join("manual.jar"),
+            b"my mod",
+        )
+        .unwrap();
 
         let plan = apply_mrpack(bytes.as_slice(), &instance).unwrap();
         assert_eq!(plan.minecraft, "1.21.4");
         // The override is written over the root with `overrides/` stripped, and a
         // file of the same name is replaced rather than merged.
         assert_eq!(
-            std::fs::read(root.join("config").join("pack.cfg")).unwrap(),
+            std::fs::read(root.join("minecraft").join("config").join("pack.cfg")).unwrap(),
             b"new"
         );
         // The loader is registered, so the instance the pack was laid over
@@ -952,7 +965,11 @@ mod tests {
         assert!(pack.contains("0.16.9"), "pack: {pack}");
         // And nothing is gone.
         assert!(
-            root.join("config").join("left-behind.cfg").is_file(),
+            root
+                .join("minecraft")
+                .join("config")
+                .join("left-behind.cfg")
+                .is_file(),
             "a config the new pack does not name stays where it is"
         );
         assert!(
@@ -960,7 +977,7 @@ mod tests {
             "the reader's world stays"
         );
         assert!(
-            root.join("mods").join("manual.jar").is_file(),
+            root.join("minecraft").join("mods").join("manual.jar").is_file(),
             "the mod the reader added stays"
         );
     }
