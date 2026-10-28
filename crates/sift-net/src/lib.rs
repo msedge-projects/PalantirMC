@@ -49,6 +49,7 @@ pub mod engine;
 pub mod java;
 pub mod meta;
 pub mod modrinth;
+pub mod slp;
 
 pub use auth::{
     file_part_name, msa_auth_session, skin_upload_body, xsts_message, AuthError,
