@@ -256,6 +256,13 @@ const CATEGORY_SYSTEM: &str = "System"; // app.settings.sidebar.label.system (:2
 const COLOR_THEME_TITLE: &str = "Color theme"; // settings.display.theme.title (ui :6314)
 const COLOR_THEME_DESCRIPTION: &str = "Select your preferred color theme across Modrinth."; // settings.display.theme.description (ui :6284)
 const COLOR_THEME_VALUE: &str = "Dark"; // settings.display.theme.dark (ui :6281), the default from use-theme.ts:38
+/// `settings.display.theme.system` — "Sync with system" (`packages/ui` en-US:6311-6313).
+///
+/// The reference draws it as a row directly under the theme selector, between the cards and
+/// `Sync theme across devices`; the port was missing it because the preview cards were replaced
+/// by a select and the row went with them.
+const THEME_SYSTEM_LABEL: &str = "Sync with system";
+
 const THEME_SYNC_LABEL: &str = "Sync theme across devices"; // settings.display.theme.sync-across-devices (ui :6302)
 const THEME_SYNC_DESCRIPTION: &str = "Use this theme everywhere you're signed in. Turn this off to keep a separate theme on this device."; // settings.display.theme.sync-across-devices.description (ui :6305)
 const ADVANCED_RENDERING_LABEL: &str = "Advanced rendering"; // settings.display.sidebar.advanced-rendering.title (ui :6260)
@@ -721,6 +728,13 @@ const APPEARANCE_BLOCKS: &[Block] = &[
     Block::Standalone(Control::Select {
         value: COLOR_THEME_VALUE,
     }),
+    Block::Row {
+        label: THEME_SYSTEM_LABEL,
+        // The source has no description line for this row (`layout.vue:54-58`).
+        description: None,
+        // Drawn off: `syncSystem` defaults to false in `use-theme.ts`.
+        control: Control::Switch { on: false },
+    },
     Block::Row {
         label: THEME_SYNC_LABEL,
         description: Some(THEME_SYNC_DESCRIPTION),
@@ -2319,7 +2333,7 @@ mod tests {
     #[test]
     fn every_tab_carries_the_blocks_this_pass_ported() {
         let ported: [(Tab, usize); TAB_COUNT] = [
-            (Tab::Appearance, 6),
+            (Tab::Appearance, 7),
             (Tab::Features, 13),
             (Tab::Behavior, 14),
             (Tab::Language, 3),
