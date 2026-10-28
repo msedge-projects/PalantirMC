@@ -93,6 +93,9 @@ pub struct State {
     /// a short one not at all -- the reference scrolls its rail in that case, and a rail whose
     /// last tabs cannot be reached is a settings screen with unreachable settings.
     pub rail_scroll: f32,
+    /// Whether the last frame drew the dialog. Used only to notice the open edge, which is
+    /// when the scroll offsets go back to zero.
+    pub was_open: bool,
     /// The shell keeps drawing while this is true, and stops when it is false.
     pub open: bool,
     /// The selected tab. The source opens on the first one (`index.vue:88-96`).
@@ -1455,6 +1458,15 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
         return false;
     }
 
+    // Opening starts at the top. Without this the dialog inherited whatever offset it had when
+    // it was last closed, and a capture caught it opening on `Account` with `Display`, the
+    // first tab, scrolled out of sight above the rail.
+    if !state.was_open {
+        state.rail_scroll = 0.0;
+        state.scroll = 0.0;
+    }
+    state.was_open = true;
+
     let dialog = dialog_rect(screen);
     {
         let painter = ui.painter();
@@ -1513,6 +1525,9 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
 
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         state.open = false;
+    }
+    if !state.open {
+        state.was_open = false;
     }
 
     state.open
