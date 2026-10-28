@@ -69,6 +69,11 @@
 //! the source puts it in date mode: on every card, through
 //! `app.screenshots.preview.instance-and-date`.
 //!
+//! **The list is the disk.** [`read_shots`] walks each instance's `screenshots/` folder, one
+//! level deep, for `*.png` and `*.jpg`; a file's modification time is its [`Stamp`], in UTC.
+//! A reader with no screenshots gets the empty state, not a sample — the nine-shot array this
+//! page used to ship is gone.
+//!
 //! **What this page cannot do yet.**
 //!
 //! * Load a screenshot. `Shot` carries no path, so [`draw_card`] paints the plate in
@@ -82,12 +87,13 @@
 //!   they need the clock, which [`groups`] does not take.
 //! * Select a sort or a group-by: the two `Combobox`es are painted at their stored values,
 //!   and there is no dropdown, no hover and no press anywhere on this page.
-//! * Read real screenshots. [`SHOTS`] is the capture's sample data; a reader would list each
-//!   instance's `screenshots/` folder and hand the page a `&[Shot]`.
 //! * Show one screenshot. The viewer (`ImageViewerEditor`, `index.vue:1439-1478`), the
 //!   selection bar (`:1640-1702`), drag-and-drop grouping and the ZIP export are untouched.
 //! * Load the empty state's illustration: `NoImagesIllustration` is a 200-point SVG asset
 //!   this build does not carry, so the icon set's `Images` glyph stands in on its box.
+
+use std::fs;
+use std::time::UNIX_EPOCH;
 
 use eframe::egui::{self, Align2, Color32, Rect, Sense, Stroke, Ui, Vec2};
 
@@ -437,7 +443,8 @@ impl Sort {
     }
 }
 
-/// The page's own state: what the toolbar has selected and what the search plate holds.
+/// The page's own state: what the toolbar has selected, what the search plate holds, and the
+/// list read from disk.
 ///
 /// The search string is **read, not typed**. The interactive field is a sibling's
 /// (`crate::widgets::search::Search`), and this page paints only the plate it sits in; a
@@ -449,6 +456,10 @@ pub struct State {
     pub sort: Sort,
     /// The query the search field holds, as typed.
     pub search: String,
+    /// What the last scan of the instances folder found.
+    shots: Vec<Shot>,
+    /// Whether the folder has been read once. Set by [`draw`] on its first frame.
+    scanned: bool,
 }
 
 impl Default for State {
@@ -456,6 +467,8 @@ impl Default for State {
         State {
             sort: Sort::default(),
             search: String::new(),
+            shots: Vec::new(),
+            scanned: false,
         }
     }
 }
@@ -494,10 +507,13 @@ struct Stamp {
 
 /// One screenshot, as far as this page reads it: the instance it belongs to, its file name
 /// (which is what the source's search matches on, `index.vue:408`) and when it was taken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The two names are owned `String`s: they come from a folder listing rather than from a
+/// capture, so there is no `'static` source to borrow from.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Shot {
-    instance: &'static str,
-    file_name: &'static str,
+    instance: String,
+    file_name: String,
     taken: Stamp,
 }
 
@@ -523,7 +539,7 @@ fn filtered(shots: &[Shot], query: Option<&str>) -> Vec<Shot> {
     };
     shots
         .iter()
-        .copied()
+        .cloned()
         .filter(|shot| {
             shot.file_name.to_lowercase().contains(&needle)
                 || shot.instance.to_lowercase().contains(&needle)
@@ -537,7 +553,7 @@ fn filtered(shots: &[Shot], query: Option<&str>) -> Vec<Shot> {
 fn in_sort_order(shots: &[Shot], sort: Sort) -> Vec<Shot> {
     let mut ordered = shots.to_vec();
     match sort {
-        Sort::Name => ordered.sort_by(|a, b| a.file_name.cmp(b.file_name)),
+        Sort::Name => ordered.sort_by(|a, b| a.file_name.cmp(&b.file_name)),
         Sort::Newest => ordered.sort_by(|a, b| b.taken.cmp(&a.taken)),
         Sort::Oldest => ordered.sort_by(|a, b| a.taken.cmp(&b.taken)),
     }
@@ -570,14 +586,14 @@ fn groups(shots: &[Shot]) -> Vec<Group> {
             // `get_mut` rather than `out[index]`: an index that somehow missed is a group
             // this shot starts, not a panic.
             if let Some(group) = out.get_mut(index) {
-                group.shots.push(*shot);
+                group.shots.push(shot.clone());
                 continue;
             }
         }
         out.push(Group {
             year: shot.taken.year,
             month: shot.taken.month,
-            shots: vec![*shot],
+            shots: vec![shot.clone()],
         });
     }
     // Newest month first; `sort_by` is stable, so two groups can never swap for a tie.
@@ -598,9 +614,9 @@ fn in_group_order(groups: Vec<Group>, sort: Sort) -> Vec<Group> {
 /// The heading of a month's group: `formatMonth`, i.e. `useFormatDateTime({ month: 'long',
 /// year: 'numeric' })` (`index.vue:227,1003`), which prints `October 2026` in en-US.
 ///
-/// A month outside 1-12 cannot come from a [`Stamp`] the sample or a reader writes; it still
-/// answers a string rather than panicking, because a heading that reads oddly is a look that
-/// is wrong and a panic is a window that does not open.
+/// A month outside 1-12 cannot come from [`stamp_from_unix`]; it still answers a string
+/// rather than panicking, because a heading that reads oddly is a look that is wrong and a
+/// panic is a window that does not open.
 fn month_title(year: i32, month: u8) -> String {
     let name = MONTHS
         .get(usize::from(month.saturating_sub(1)))
@@ -711,12 +727,23 @@ pub fn draw(
         return false;
     }
 
+    // The folder is read on the first draw, not on every frame: a scan is filesystem I/O on
+    // the UI thread, and the common list is stable for the whole visit. An empty list is
+    // re-read on later draws, because that is the reader who takes their first screenshot
+    // and comes back to find it.
+    // shortcut: the list is scanned on the first draw and while empty, not once it has
+    // shots, until a file watcher can report a new screenshot.
+    if !state.scanned || state.shots.is_empty() {
+        state.shots = read_shots();
+        state.scanned = true;
+    }
+
     // The whole set and the set the search leaves, kept apart: the source branches on
     // `screenshots.length` for "nothing yet" and on `filteredScreenshots.length` for
     // "nothing matched" (`index.vue:1515-1525`), and the two say different things.
-    let visible = in_sort_order(&filtered(&SHOTS, state.query()), state.sort);
+    let visible = in_sort_order(&filtered(&state.shots, state.query()), state.sort);
 
-    if SHOTS.is_empty() {
+    if state.shots.is_empty() {
         empty_state(
             ui.painter(),
             rect,
@@ -730,9 +757,10 @@ pub fn draw(
 
     // Heading and toolbar, and the y the list starts at. The painter borrows `ui` only for
     // the length of the block, because the scroll area below needs `&mut ui`.
+    let count = state.shots.len();
     let list_top = {
         let painter = ui.painter();
-        heading_and_toolbar(painter, rect, theme, state, SHOTS.len())
+        heading_and_toolbar(painter, rect, theme, state, count)
     };
 
     let list_rect = Rect::from_min_max(
@@ -1206,6 +1234,8 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, shot: &Shot, im
     //     }
     //
     // `Shot` carries no path yet, so nothing can be asked for and the cache stays idle.
+    // shortcut: thumbnails are drawn as plates, not decoded images, until `images` takes
+    // local paths.
     let _ = images;
 
     draw_overlay(painter, rect, theme, shot);
@@ -1277,7 +1307,7 @@ fn draw_overlay(painter: &egui::Painter, plate: Rect, theme: &Theme, shot: &Shot
             egui::pos2(inner.left(), date_top - CAPTION_LINE),
             egui::vec2(text_width.max(1.0), CAPTION_LINE),
         ),
-        shot.file_name,
+        &shot.file_name,
         fonts::semibold(CAPTION_SIZE),
         theme.CONTRAST,
     );
@@ -1289,7 +1319,7 @@ fn draw_overlay(painter: &egui::Painter, plate: Rect, theme: &Theme, shot: &Shot
             egui::pos2(inner.left(), date_top),
             egui::vec2(text_width.max(1.0), DATE_LINE),
         ),
-        &instance_and_date(*shot),
+        &instance_and_date(shot.clone()),
         fonts::body(DATE_SIZE),
         theme.SECONDARY,
     );
@@ -1392,118 +1422,178 @@ fn empty_state(
 }
 
 // ---------------------------------------------------------------------------
-// Sample data
+// Reading the disk
 // ---------------------------------------------------------------------------
 
-/// Nine screenshots across three instances and two dates, so both dimensions of the grouping
-/// are visible in one capture: the month headings split the list in two (October 2026, then
-/// September 2026), and every card's caption names its own instance, which is what the
-/// source's date mode does with `showInstanceName` (`index.vue:1569`, `card.vue:240`).
+/// The folder the game writes into under an instance's root: `screenshots/`. The reference
+/// lists the same folder (`instance_list_screenshots`, `helpers/instance.ts:199-205`).
+const SCREENSHOTS_DIR: &str = "screenshots";
+
+/// The two formats the page lists: the game writes PNG, and a screenshot folder may also
+/// hold JPEGs. Any other file in the folder is ignored.
+const SHOT_EXTENSIONS: [&str; 2] = ["png", "jpg"];
+
+/// Seconds in a day: `24 * 60 * 60`.
+const SECONDS_PER_DAY: i64 = 86_400;
+
+/// Seconds in an hour: `60 * 60`.
+const SECONDS_PER_HOUR: i64 = 3_600;
+
+/// Seconds in a minute.
+const SECONDS_PER_MINUTE: i64 = 60;
+
+// The constants below are Howard Hinnant's `civil_from_days`
+// (<https://howardhinnant.github.io/date_algorithms.html#civil_from_days>), which is the
+// standard days-to-civil-date algorithm: no table, no dependency, only integer arithmetic.
+
+/// Days from Hinnant's civil epoch, 0000-03-01, to the Unix epoch, 1970-01-01.
+const CIVIL_EPOCH_DAYS: i64 = 719_468;
+
+/// Days in one 400-year Gregorian era: `400 * 365 + 97` leap days.
+const CIVIL_ERA_DAYS: i64 = 146_097;
+
+/// Days in four common years: `4 * 365`, the first term of the year-of-era estimate.
+const CIVIL_FOUR_YEAR_DAYS: i64 = 1_460;
+
+/// The century term of that estimate: `146097 / 4` rounded down.
+const CIVIL_CENTURY_DAYS: i64 = 36_524;
+
+/// The last day index of an era: `146097 - 1`, the estimate's final term.
+const CIVIL_ERA_LAST_DAY: i64 = 146_096;
+
+/// A common year: 365 days.
+const CIVIL_YEAR_DAYS: i64 = 365;
+
+/// Years in an era.
+const CIVIL_ERA_YEARS: i64 = 400;
+
+/// Leap years recur every 4 years...
+const CIVIL_LEAP_CYCLE: i64 = 4;
+
+/// ...except every 100, which the era's 400-year rule restores.
+const CIVIL_CENTURY_CYCLE: i64 = 100;
+
+/// The March-based month table's stride: five months of 30/31 days make 153.
+const CIVIL_MONTH_STRIDE: i64 = 153;
+
+/// The table's numerator: five months per block.
+const CIVIL_MONTH_BLOCK: i64 = 5;
+
+/// The `+ 2` that rounds the month table's division up to the next boundary.
+const CIVIL_MONTH_BIAS: i64 = 2;
+
+/// March is month index 0, so a March-November index gains 3 to become a civil month.
+const CIVIL_MONTH_OFFSET: i64 = 3;
+
+/// January and February are indices 10 and 11; subtracting 9 makes them 1 and 2.
+const CIVIL_YEAR_WRAP: i64 = 9;
+
+/// The first index that is January in the March-based year.
+const CIVIL_WRAP_INDEX: i64 = 10;
+
+/// January and February belong to the next civil year.
+const CIVIL_LAST_WRAPPED_MONTH: i64 = 2;
+
+/// Day indexes are one-based.
+const CIVIL_FIRST_DAY: i64 = 1;
+
+/// A Unix timestamp as the page's local-agnostic [`Stamp`], in UTC.
 ///
-/// The names are the game's own file-name format — `2026-10-21_14.32.07.png` — which is also
-/// what the search matches on and what `Name` sorts by. One instance name is long enough to
-/// be truncated in a card's caption.
-const SHOTS: [Shot; 9] = [
-    Shot {
-        instance: "Fabulously Optimized",
-        file_name: "2026-10-21_14.32.07.png",
-        taken: Stamp {
-            year: 2026,
-            month: 10,
-            day: 21,
-            hour: 14,
-            minute: 32,
-        },
-    },
-    Shot {
-        instance: "Vanilla Plus",
-        file_name: "2026-10-21_09.05.41.png",
-        taken: Stamp {
-            year: 2026,
-            month: 10,
-            day: 21,
-            hour: 9,
-            minute: 5,
-        },
-    },
-    Shot {
-        instance: "Create: Above and Beyond",
-        file_name: "2026-10-19_22.47.50.png",
-        taken: Stamp {
-            year: 2026,
-            month: 10,
-            day: 19,
-            hour: 22,
-            minute: 47,
-        },
-    },
-    Shot {
-        instance: "Fabulously Optimized",
-        file_name: "2026-10-14_11.20.55.png",
-        taken: Stamp {
-            year: 2026,
-            month: 10,
-            day: 14,
-            hour: 11,
-            minute: 20,
-        },
-    },
-    Shot {
-        instance: "Vanilla Plus",
-        file_name: "2026-10-02_18.03.12.png",
-        taken: Stamp {
-            year: 2026,
-            month: 10,
-            day: 2,
-            hour: 18,
-            minute: 3,
-        },
-    },
-    Shot {
-        instance: "Create: Above and Beyond",
-        file_name: "2026-09-30_16.58.09.png",
-        taken: Stamp {
-            year: 2026,
-            month: 9,
-            day: 30,
-            hour: 16,
-            minute: 58,
-        },
-    },
-    Shot {
-        instance: "Fabulously Optimized",
-        file_name: "2026-09-24_20.11.03.png",
-        taken: Stamp {
-            year: 2026,
-            month: 9,
-            day: 24,
-            hour: 20,
-            minute: 11,
-        },
-    },
-    Shot {
-        instance: "Vanilla Plus",
-        file_name: "2026-09-18_08.39.27.png",
-        taken: Stamp {
-            year: 2026,
-            month: 9,
-            day: 18,
-            hour: 8,
-            minute: 39,
-        },
-    },
-    Shot {
-        instance: "Create: Above and Beyond",
-        file_name: "2026-09-03_13.26.44.png",
-        taken: Stamp {
-            year: 2026,
-            month: 9,
-            day: 3,
-            hour: 13,
-            minute: 26,
-        },
-    },
-];
+/// This is Hinnant's `civil_from_days` after splitting the count into whole days and the
+/// time of day. A timestamp before the epoch clamps to it: a file with a 1969 modification
+/// time is still a screenshot, and returning a `Stamp` rather than panicking keeps the page
+/// drawable.
+fn stamp_from_unix(seconds: i64) -> Stamp {
+    let seconds = seconds.max(0);
+    let days = seconds / SECONDS_PER_DAY;
+    let time = seconds % SECONDS_PER_DAY;
+
+    let shifted = days + CIVIL_EPOCH_DAYS;
+    let era = shifted / CIVIL_ERA_DAYS;
+    let day_of_era = shifted - era * CIVIL_ERA_DAYS;
+    let year_of_era = (day_of_era
+        - day_of_era / CIVIL_FOUR_YEAR_DAYS
+        + day_of_era / CIVIL_CENTURY_DAYS
+        - day_of_era / CIVIL_ERA_LAST_DAY)
+        / CIVIL_YEAR_DAYS;
+    let mut year = year_of_era + era * CIVIL_ERA_YEARS;
+    let day_of_year = day_of_era
+        - (CIVIL_YEAR_DAYS * year_of_era + year_of_era / CIVIL_LEAP_CYCLE
+            - year_of_era / CIVIL_CENTURY_CYCLE);
+    let month_index =
+        (CIVIL_MONTH_BLOCK * day_of_year + CIVIL_MONTH_BIAS) / CIVIL_MONTH_STRIDE;
+    let day = day_of_year
+        - (CIVIL_MONTH_STRIDE * month_index + CIVIL_MONTH_BIAS) / CIVIL_MONTH_BLOCK
+        + CIVIL_FIRST_DAY;
+    let month = if month_index < CIVIL_WRAP_INDEX {
+        month_index + CIVIL_MONTH_OFFSET
+    } else {
+        month_index - CIVIL_YEAR_WRAP
+    };
+    if month <= CIVIL_LAST_WRAPPED_MONTH {
+        year += 1;
+    }
+
+    Stamp {
+        year: year.min(i64::from(i32::MAX)) as i32,
+        month: month as u8,
+        day: day as u8,
+        hour: (time / SECONDS_PER_HOUR) as u8,
+        minute: (time % SECONDS_PER_HOUR / SECONDS_PER_MINUTE) as u8,
+    }
+}
+
+/// Every screenshot on disk: each instance's `screenshots/` folder, one level deep, in the
+/// two formats [`SHOT_EXTENSIONS`] names. A folder or file that cannot be read is skipped —
+/// the same rule `data::load` uses — because one unreadable instance must not hide the rest.
+fn read_shots() -> Vec<Shot> {
+    let mut shots = Vec::new();
+    let Ok(instances) = fs::read_dir(crate::data::instances_dir()) else {
+        // No instances folder yet is an ordinary first run, not an error.
+        return shots;
+    };
+    for instance in instances.flatten() {
+        let Ok(screenshots) = fs::read_dir(instance.path().join(SCREENSHOTS_DIR)) else {
+            continue;
+        };
+        let instance_name = instance.file_name().to_string_lossy().into_owned();
+        for file in screenshots.flatten() {
+            let path = file.path();
+            let extension = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map_or("", |ext| ext);
+            if !SHOT_EXTENSIONS
+                .iter()
+                .any(|known| extension.eq_ignore_ascii_case(*known))
+            {
+                continue;
+            }
+            let Ok(metadata) = file.metadata() else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            let Ok(modified) = metadata.modified() else {
+                continue;
+            };
+            // A modification time before the epoch is clamped rather than dropping the file:
+            // it is still a screenshot, and [`stamp_from_unix`] clamps the same way.
+            let seconds = modified
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |since_epoch| {
+                    since_epoch.as_secs().min(i64::MAX as u64) as i64
+                });
+            shots.push(Shot {
+                instance: instance_name.clone(),
+                file_name: file.file_name().to_string_lossy().into_owned(),
+                taken: stamp_from_unix(seconds),
+            });
+        }
+    }
+    shots
+}
 
 #[cfg(test)]
 mod tests {
@@ -1512,8 +1602,8 @@ mod tests {
     /// A shot with only the fields a grouping test reads.
     fn shot(instance: &'static str, name: &'static str, year: i32, month: u8, day: u8) -> Shot {
         Shot {
-            instance,
-            file_name: name,
+            instance: instance.to_owned(),
+            file_name: name.to_owned(),
             taken: Stamp {
                 year,
                 month,
@@ -1596,10 +1686,14 @@ mod tests {
     fn a_groups_shots_keep_the_order_they_arrived_in() {
         let newest = shot("a", "2026-10-21_14.32.07.png", 2026, 10, 21);
         let oldest = shot("a", "2026-10-02_18.03.12.png", 2026, 10, 2);
-        let out = groups(&[oldest, newest]);
-        assert_eq!(out[0].shots, vec![oldest, newest], "input order, not re-sorted");
+        let out = groups(&[oldest.clone(), newest.clone()]);
+        assert_eq!(
+            out[0].shots,
+            vec![oldest.clone(), newest.clone()],
+            "input order, not re-sorted"
+        );
 
-        let by_name = in_sort_order(&[newest, oldest], Sort::Name);
+        let by_name = in_sort_order(&[newest.clone(), oldest.clone()], Sort::Name);
         let out = groups(&by_name);
         assert_eq!(
             out[0].shots,
@@ -1634,14 +1728,17 @@ mod tests {
         let early = shot("a", "2026-10-02_18.03.12.png", 2026, 10, 2);
         let late = shot("a", "2026-10-21_14.32.07.png", 2026, 10, 21);
         assert_eq!(
-            in_sort_order(&[early, late], Sort::Newest),
-            vec![late, early]
+            in_sort_order(&[early.clone(), late.clone()], Sort::Newest),
+            vec![late.clone(), early.clone()]
         );
         assert_eq!(
-            in_sort_order(&[late, early], Sort::Oldest),
+            in_sort_order(&[late.clone(), early.clone()], Sort::Oldest),
+            vec![early.clone(), late.clone()]
+        );
+        assert_eq!(
+            in_sort_order(&[late.clone(), early.clone()], Sort::Name),
             vec![early, late]
         );
-        assert_eq!(in_sort_order(&[late, early], Sort::Name), vec![early, late]);
     }
 
     /// The search matches a file name and an instance name, ignores case, and asks for
@@ -1712,6 +1809,72 @@ mod tests {
             "Dec 31, 2026, 12:00 PM",
             "noon is 12 PM"
         );
+    }
+
+    /// The known timestamp: 1_700_000_000 is 2023-11-14 22:13:20 UTC. [`Stamp`] keeps whole
+    /// minutes, which is all the card's `Intl` format prints (`card.vue:46`).
+    #[test]
+    fn a_known_timestamp_reads_as_its_utc_date() {
+        assert_eq!(
+            stamp_from_unix(1_700_000_000),
+            Stamp {
+                year: 2023,
+                month: 11,
+                day: 14,
+                hour: 22,
+                minute: 13,
+            }
+        );
+    }
+
+    /// A leap day exists in the civil calendar, and the month table must not skip it:
+    /// 1_709_164_800 is 2024-02-29 00:00 UTC, and the next day is March 1.
+    #[test]
+    fn a_leap_day_is_still_a_day() {
+        assert_eq!(
+            stamp_from_unix(1_709_164_800),
+            Stamp {
+                year: 2024,
+                month: 2,
+                day: 29,
+                hour: 0,
+                minute: 0,
+            }
+        );
+        assert_eq!(
+            stamp_from_unix(1_709_164_800 + SECONDS_PER_DAY),
+            Stamp {
+                year: 2024,
+                month: 3,
+                day: 1,
+                hour: 0,
+                minute: 0,
+            }
+        );
+    }
+
+    /// The Unix epoch is zero seconds: 1970-01-01 00:00 UTC.
+    #[test]
+    fn zero_is_the_unix_epoch() {
+        assert_eq!(
+            stamp_from_unix(0),
+            Stamp {
+                year: 1970,
+                month: 1,
+                day: 1,
+                hour: 0,
+                minute: 0,
+            }
+        );
+    }
+
+    /// A timestamp before the epoch has no date this page can print, so it clamps to the
+    /// epoch instead of wrapping into 1969 or panicking.
+    #[test]
+    fn a_timestamp_before_the_epoch_clamps_to_it() {
+        let epoch = stamp_from_unix(0);
+        assert_eq!(stamp_from_unix(-1), epoch);
+        assert_eq!(stamp_from_unix(i64::MIN), epoch);
     }
 
     /// The caption is `app.screenshots.preview.instance-and-date`, `{instance} · {date}`
@@ -1794,48 +1957,4 @@ mod tests {
         assert!((empty - (GROUP_HEADER_HEIGHT + GROUP_CONTENT_SPACING + GRID_MIN_HEIGHT + GROUP_SPACING)).abs() < 0.001);
     }
 
-    /// The sample is the shape the brief asks for, and the page's own rules agree with it:
-    /// nine shots, three instances, two months, two groups.
-    #[test]
-    fn the_sample_shows_three_instances_over_two_months() {
-        assert_eq!(SHOTS.len(), 9);
-
-        let mut instances: Vec<&str> = SHOTS.iter().map(|shot| shot.instance).collect();
-        instances.sort_unstable();
-        instances.dedup();
-        assert_eq!(instances.len(), 3, "three instances");
-        assert_eq!(instances[0], "Create: Above and Beyond");
-
-        let mut months: Vec<(i32, u8)> = SHOTS
-            .iter()
-            .map(|shot| (shot.taken.year, shot.taken.month))
-            .collect();
-        months.sort_unstable();
-        months.dedup();
-        assert_eq!(months, [(2026, 9), (2026, 10)], "two dates, two months");
-
-        let newest_first = in_sort_order(&SHOTS, Sort::Newest);
-        let out = groups(&newest_first);
-        assert_eq!(out.len(), 2, "the capture shows two group headings");
-        assert_eq!(month_title(out[0].year, out[0].month), "October 2026");
-        assert_eq!(month_title(out[1].year, out[1].month), "September 2026");
-        assert_eq!(out[0].shots.len(), 5);
-        assert_eq!(out[1].shots.len(), 4);
-        assert_eq!(
-            out[0].shots.len() + out[1].shots.len(),
-            SHOTS.len(),
-            "every screenshot lands in exactly one group"
-        );
-
-        // The two totals the page prints: the heading's count and the two group pills.
-        let page_height: f32 = in_group_order(out, Sort::Newest)
-            .iter()
-            .map(|group| {
-                let page = page_width_at(crate::geometry::WINDOW.0);
-                let grid = grid_layout(page - 2.0 * PAGE_PADDING, crate::geometry::WINDOW.0);
-                group_height(grid.columns, grid.card_height, group.shots.len())
-            })
-            .sum();
-        assert!(page_height > 0.0, "the list has something to scroll");
-    }
 }
