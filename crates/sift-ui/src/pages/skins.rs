@@ -369,6 +369,25 @@ const HEADING: &str = "Skin selector";
 /// the title of the first section in the list (`VirtualSkinSectionList.vue:56-60`).
 const SECTION_TITLE: &str = "Saved skins";
 
+/// The preview column's strings, all from the catalogue: the button under the preview
+/// (`app.skins.preview.edit-button`, :3219-3221), and the account bar at its foot
+/// (`app.skins.demo.title` :3153-3155, `.description` :3150-3152, `app.skins.sign-in.button`
+/// :3279-3281).
+const PREVIEW_EDIT: &str = "Edit skin";
+const DEMO_TITLE: &str = "Editing with a demo account";
+const DEMO_DESCRIPTION: &str = "Sign in to your Minecraft account to save and apply skins!";
+const SIGN_IN_MICROSOFT: &str = "Sign in to Microsoft";
+
+/// The preview column's width, and the gap beside it. `// guess: re-measure` -- the
+/// reference's column is a flexible third of the page and this is a fixed plate.
+const PREVIEW_WIDTH: f32 = 320.0;
+const PREVIEW_GAP: f32 = 16.0;
+/// Below this content width the column is dropped rather than squeezing the grid: two cards
+/// and the preview do not fit a page this narrow.
+const PREVIEW_BREAKPOINT: f32 = 900.0;
+/// The preview's corner, matching a card's.
+const PREVIEW_RADIUS: u8 = 20;
+
 /// `app.skins.section.default-skins` — "Default skins" (`locales/en-US/index.json:3248-3250`),
 /// the second section of the reference's right-hand column.
 const DEFAULT_SECTION_TITLE: &str = "Default skins";
@@ -453,7 +472,7 @@ impl Default for Model {
 
 /// The page's own state: which model tab is selected, and what has been typed into the
 /// search plate.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct State {
     /// The selected model tab.
     pub model: Model,
@@ -461,6 +480,20 @@ pub struct State {
     /// at the point of use -- the same rule `widgets/search.rs:254-267` states for the
     /// shell's field.
     pub query: String,
+    /// The skin the preview column shows. Nothing changes it yet: a card is painted, not
+    /// interactive, so this is the first skin until cards report presses.
+    pub selected: &'static str,
+}
+
+impl Default for State {
+    /// The tab the reference opens on, no query, and the first skin in the preview.
+    fn default() -> Self {
+        State {
+            model: Model::default(),
+            query: String::new(),
+            selected: SKINS[0].name,
+        }
+    }
 }
 
 impl State {
@@ -635,14 +668,30 @@ pub fn draw(
         return false;
     }
 
+    // The preview column takes the left third when the page is wide enough to hold it beside
+    // two cards; otherwise the grid keeps the whole width, as it did before the column existed.
+    let content_left = rect.left() + PAGE_PADDING;
+    let content_right = rect.right() - PAGE_PADDING;
+    let content_width = (content_right - content_left).max(0.0);
+    let show_preview = content_width >= PREVIEW_BREAKPOINT;
+    let mut grid_left = content_left;
+    if show_preview {
+        let preview = Rect::from_min_max(
+            egui::pos2(content_left, toolbar_bottom),
+            egui::pos2(content_left + PREVIEW_WIDTH, rect.bottom() - PAGE_PADDING),
+        );
+        draw_preview(ui, preview, theme, state);
+        grid_left = preview.right() + PREVIEW_GAP;
+    }
+
     let grid_top = section_header(ui, rect, toolbar_bottom, theme, SECTION_TITLE);
     // The Saved grid stops short of the page's foot by the height of the Default skins
     // heading, so that second heading has somewhere to be drawn that a reader can see.
     let defaults_strip = SECTION_HEADER_LINE + SECTION_CONTENT_SPACING + HEADING_LINE;
     let grid_rect = Rect::from_min_max(
-        egui::pos2(rect.left() + PAGE_PADDING, grid_top),
+        egui::pos2(grid_left, grid_top),
         egui::pos2(
-            rect.right() - PAGE_PADDING,
+            content_right,
             (rect.bottom() - PAGE_PADDING - defaults_strip).max(grid_top + GRID_MIN_HEIGHT),
         ),
     );
@@ -657,7 +706,7 @@ pub fn draw(
     // columns are counted, so passing 948 at 1440 would take the 8rem branch the source
     // never takes there. egui 0.36 calls the window's content rectangle
     // `Context::content_rect`.
-    let grid = grid_layout(rect.width(), ui.ctx().content_rect().width());
+    let grid = grid_layout_in(grid_rect.width(), ui.ctx().content_rect().width());
     let query = state.query();
     let visible = visible_skins(state.model, query);
 
@@ -1027,7 +1076,13 @@ fn min_card_width(window_width: f32) -> f32 {
 /// (`instance-group/index.vue:127-129`), with the height taken from the skin tile's own
 /// aspect rather than the instance card's `+ 3.375rem`.
 fn grid_layout(page_width: f32, window_width: f32) -> Grid {
-    let grid_width = (page_width - 2.0 * PAGE_PADDING).max(0.0);
+    grid_layout_in(page_width - 2.0 * PAGE_PADDING, window_width)
+}
+
+/// The same arithmetic over a content width that is not the whole page: the preview column
+/// takes its share first, and the grid is resolved inside what is left.
+fn grid_layout_in(grid_width: f32, window_width: f32) -> Grid {
+    let grid_width = grid_width.max(0.0);
     let columns = column_count(grid_width, min_card_width(window_width));
     let card_width = (grid_width - GRID_GAP * (columns.saturating_sub(1)) as f32) / columns as f32;
     Grid {
@@ -1046,6 +1101,95 @@ fn card_height(card_width: f32) -> f32 {
 // ---------------------------------------------------------------------------
 // The card
 // ---------------------------------------------------------------------------
+
+/// Draw the preview column: the chosen skin's tile at preview size, its name, the edit button,
+/// and the account bar at the foot.
+///
+/// `// shortcut: a plate with the skin glyph, not a render; upgrade when a skin texture or a
+/// renderer exists.` The reference draws a rotatable 3D model here (`SkinPreviewRenderer`), and
+/// a still plate is the honest version of that: it shows which skin is being looked at without
+/// pretending to be the skin.
+fn draw_preview(ui: &mut Ui, rect: Rect, theme: &Theme, state: &mut State) {
+    let painter = ui.painter();
+    painter.rect_filled(rect, PREVIEW_RADIUS, theme.RAISED_BG);
+
+    // The account bar takes the foot of the column; the preview gets everything above it.
+    let bar_height = 72.0;
+    let bar = Rect::from_min_max(
+        egui::pos2(rect.left(), rect.bottom() - bar_height),
+        rect.max,
+    );
+    painter.rect_filled(bar, PREVIEW_RADIUS, theme.SUPER_RAISED_BG);
+
+    let chosen = SKINS
+        .iter()
+        .find(|skin| skin.name == state.selected)
+        .copied()
+        .unwrap_or(SKINS[0]);
+    let plate = Rect::from_min_max(rect.min, egui::pos2(rect.right(), bar.top()));
+    let glyph = Rect::from_center_size(
+        plate.center() - egui::vec2(0.0, 24.0),
+        egui::vec2(96.0, 96.0),
+    );
+    icons::draw(painter, Glyph::Shirt, glyph, theme.SECONDARY);
+    painter.text(
+        egui::pos2(plate.center().x, glyph.bottom() + 12.0),
+        Align2::CENTER_TOP,
+        chosen.name,
+        fonts::semibold(18.0),
+        theme.CONTRAST,
+    );
+    painter.text(
+        egui::pos2(plate.center().x, glyph.bottom() + 36.0),
+        Align2::CENTER_TOP,
+        chosen.author,
+        fonts::body(13.0),
+        theme.SECONDARY,
+    );
+
+    // The edit button, centred under the name, in the same plate the toolbar's Add skin uses.
+    let edit_size = egui::vec2(120.0, 32.0);
+    let edit = Rect::from_center_size(
+        egui::pos2(plate.center().x, plate.bottom() - 28.0),
+        edit_size,
+    );
+    painter.rect_filled(edit, 12, theme.BUTTON_BG);
+    painter.text(
+        edit.center(),
+        Align2::CENTER_CENTER,
+        PREVIEW_EDIT,
+        fonts::semibold(13.0),
+        theme.CONTRAST,
+    );
+
+    // The account bar: what the reference says when the skin cannot be saved anywhere.
+    painter.text(
+        egui::pos2(bar.left() + 16.0, bar.top() + 14.0),
+        Align2::LEFT_TOP,
+        DEMO_TITLE,
+        fonts::semibold(12.0),
+        theme.CONTRAST,
+    );
+    painter.text(
+        egui::pos2(bar.left() + 16.0, bar.top() + 32.0),
+        Align2::LEFT_TOP,
+        DEMO_DESCRIPTION,
+        fonts::body(11.0),
+        theme.SECONDARY,
+    );
+    let sign_in = Rect::from_min_max(
+        egui::pos2(bar.left() + 16.0, bar.bottom() - 26.0),
+        egui::pos2(bar.right() - 16.0, bar.bottom() - 6.0),
+    );
+    painter.rect_filled(sign_in, 8, theme.BRAND);
+    painter.text(
+        sign_in.center(),
+        Align2::CENTER_CENTER,
+        SIGN_IN_MICROSOFT,
+        fonts::semibold(11.0),
+        theme.ACCENT_CONTRAST,
+    );
+}
 
 /// One skin card: a plain plate with the skin's name, its author and its model.
 ///
@@ -1293,6 +1437,34 @@ mod tests {
     /// At 1440 the source's `windowWidth < 1280` test is false, so `minWidth` is 10rem =
     /// 160, not 8rem. `floor((948 + 12) / (160 + 12)) = 5` columns of 180 points, and the
     /// four gaps and the two 24-point insets leave exactly the page's 996 points.
+    /// The preview column and the grid together are the content width, and the grid still
+    /// gets at least one column of the minimum size beside the column.
+    #[test]
+    fn the_preview_column_leaves_the_grid_a_real_width() {
+        let page = 1440.0 - 2.0 * PAGE_PADDING;
+        let grid_width = page - PREVIEW_WIDTH - PREVIEW_GAP;
+        assert!(grid_width > 0.0, "the grid keeps a positive width");
+        assert!(
+            page - (PREVIEW_WIDTH + PREVIEW_GAP + grid_width) < 0.01,
+            "column, gap and grid account for the content width exactly"
+        );
+        let grid = grid_layout_in(grid_width, 1440.0);
+        assert!(
+            grid.card_width >= 1.0,
+            "a card {} points wide is not a card",
+            grid.card_width
+        );
+    }
+
+    /// Below the breakpoint the column is not drawn, so the grid has the whole page.
+    #[test]
+    fn a_narrow_page_drops_the_preview_column() {
+        let wide = 1440.0 - 2.0 * PAGE_PADDING;
+        let narrow = 860.0 - 2.0 * PAGE_PADDING;
+        assert!(wide >= PREVIEW_BREAKPOINT, "1440 keeps the column");
+        assert!(narrow < PREVIEW_BREAKPOINT, "860 does not");
+    }
+
     #[test]
     fn the_grid_tiles_the_page_at_1440() {
         let page = page_width_at(crate::geometry::WINDOW.0);
@@ -1462,12 +1634,14 @@ mod tests {
     #[test]
     fn a_whitespace_query_is_no_query() {
         let blank = State {
+            selected: SKINS[0].name,
             query: "   ".to_owned(),
             ..State::default()
         };
         assert_eq!(blank.query(), None);
 
         let padded = State {
+            selected: SKINS[0].name,
             query: "  mossy ".to_owned(),
             ..State::default()
         };
