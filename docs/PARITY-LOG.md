@@ -473,6 +473,37 @@ resets again. A tab you cannot see on the frame you open the dialog is worse tha
 order, the row rhythm (label, description, control on the right), the switch geometry and the
 brand fill on the chosen control. Those took four layout attempts to reach and now match.
 
+### Install works, and the bug it exposed — 2026-10-28
+
+Pressed `Install` on `Sodium Plus` in the live Discover list. What the data folder then showed:
+
+| | Before the fix | After the fix |
+| --- | --- | --- |
+| `<instance>/mods` | **65 jars, 413 MB** | 0 |
+| `<instance>/minecraft/mods` | 0 | **65 jars** |
+| What the game would load | nothing | 65 mods |
+
+**The install reported success and produced a broken instance.** A `.mrpack`'s `overrides/`
+tree and its `files[].path` are both relative to the game directory — `minecraft/` in this
+layout — and the applier wrote both at the instance root, where neither the game's `--gameDir`
+nor `Instance::mods_dir()` would ever look. It was fixed at the four call sites in the shared
+code, not at the one caller that happened to be wired up that night, because every caller had
+the same bug: the importer, the re-apply, and the fetch that follows an import.
+
+**Two lessons worth the space:**
+
+- **A passing test proved the wrong thing.** Five assertions in `sift-game` and eleven in
+  `sift-loader` planted and asserted files at the instance root — they encoded the bug as the
+  expected layout, so the suite was green while every install was broken. They now assert the
+  path the game actually reads, with the same contents and the same intent.
+- **"Installed" is not "loads".** The install's own sentence said `Installed Sodium Plus as
+  Sodium Plus, 66 files` while nothing would have loaded. Counting files where the game looks
+  is the check that matters, and it is now the assertion.
+
+The flow itself is real: search → `Install` → a resolver pass, a 413 MB download of 65 mods,
+an instance named after the project, and a `mmc-pack.json` carrying `26.1.2` and
+`net.fabricmc.fabric-loader 0.19.2` — all from the pack's own manifest.
+
 ### Open after this pass
 
 | # | Region | What differs |
