@@ -12,6 +12,7 @@
 
 pub mod about;
 pub mod home;
+pub mod instance;
 pub mod library;
 pub mod screenshots;
 pub mod servers;
@@ -31,6 +32,8 @@ pub enum Page {
     Discover,
     /// One project's page, reached from a card in Discover.
     Project,
+    /// One instance's page, reached from a row's Edit.
+    Instance,
     /// The installed instances.
     Library,
     /// Skins: the player's own and the catalogue's.
@@ -49,6 +52,7 @@ impl Page {
             Page::Discover => "Discover modpacks",
             // A project page's breadcrumb is its own name, which the shell supplies.
             Page::Project => "Project",
+            Page::Instance => "Instance",
             Page::Library => "Library",
             Page::Screenshots => "Screenshots",
             Page::Servers => "Servers",

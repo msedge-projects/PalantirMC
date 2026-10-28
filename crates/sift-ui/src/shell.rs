@@ -122,6 +122,10 @@ pub struct Shell {
     servers: crate::pages::servers::State,
     /// A one-line message shown after an action, until the next one.
     toast: Option<String>,
+    /// The instance whose page is open, if any.
+    open_instance: Option<crate::pages::instance::Instance>,
+    /// The open instance page's selected tab.
+    instance_state: crate::pages::instance::State,
     /// Whether the About modal is showing.
     about_open: bool,
     /// The settings modal: open flag and selected tab.
@@ -154,6 +158,8 @@ impl Default for Shell {
             screenshots: crate::pages::screenshots::State::default(),
             servers: crate::pages::servers::State::default(),
             toast: None,
+            open_instance: None,
+            instance_state: crate::pages::instance::State::default(),
             about_open: false,
             settings: crate::pages::settings::State::default(),
         }
@@ -205,7 +211,21 @@ impl Shell {
                 self.theme.CONTRAST,
             );
         }
-        let content = if let Some(project) = &self.open_project {
+        let content = if let Some(instance) = self.open_instance.clone() {
+            let rect = crate::pages::Page::Instance.rect();
+            ui.painter().rect_filled(rect, 0, self.theme.BG);
+            let theme = self.theme;
+            let result = crate::pages::instance::draw(
+                ui,
+                rect,
+                &theme,
+                &mut self.icons,
+                &mut self.instance_state,
+                &instance,
+            );
+            let _ = result;
+            false
+        } else if let Some(project) = &self.open_project {
             let rect = crate::pages::Page::Project.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);
             // The borrow of `project` and the mutable borrows the page needs are disjoint
@@ -449,8 +469,10 @@ impl Shell {
             }
             if response.clicked() {
                 self.rail = destination;
-                // The rail is the way out of a project page, so a rail press closes it.
+                // The rail is the way out of a project or an instance page, so a rail press
+                // closes both.
                 self.open_project = None;
+                self.open_instance = None;
                 // Coming home re-reads the folder: an instance may have been created,
                 // imported or deleted while the reader was elsewhere.
                 if destination == Rail::Home {
@@ -583,13 +605,8 @@ impl Shell {
                 }
             }
             Action::Edit(id) => {
-                // The reference opens the instance's own page with its settings tabs
-                // (`pages/instance/layout.vue:182`). That page does not exist in this shell,
-                // so the press says what is missing instead of doing nothing visible.
-                self.toast = Some(format!(
-                    "Editing {} is not wired yet: the instance settings page does not exist.",
-                    self.instance_name(&id)
-                ));
+                // The reference opens the instance's own page (`pages/instance/layout.vue:182`).
+                self.open_instance_page(&id);
             }
             Action::Duplicate(id) => {
                 self.toast = Some(format!(
@@ -634,6 +651,26 @@ impl Shell {
     /// A toast that said `Instance 4` when the row read `Fabric 1.21` would be about a
     /// different thing than the press, so every message the row menu produces goes through
     /// here.
+    /// Open an instance's page, from the row the shell already has.
+    ///
+    /// The page takes plain values rather than a `data::Entry` or a live `Instance`, so this is
+    /// where the two are joined: the entry supplies the name, loader and version it read from
+    /// the pack profile, and the path is the folder the entry's id names.
+    fn open_instance_page(&mut self, id: &str) {
+        let Some(entry) = self.instances.iter().find(|entry| entry.id == id) else {
+            self.toast = Some(format!("No instance called {id} is on disk any more."));
+            return;
+        };
+        self.open_instance = Some(crate::pages::instance::Instance {
+            id: entry.id.clone(),
+            name: entry.name.clone(),
+            loader: entry.loader.clone(),
+            version: entry.version.clone(),
+            path: crate::data::instances_dir().join(&entry.id),
+        });
+        self.open_project = None;
+    }
+
     fn instance_name(&self, id: &str) -> String {
         self.instances
             .iter()
