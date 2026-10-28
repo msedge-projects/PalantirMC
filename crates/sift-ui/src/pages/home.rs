@@ -100,9 +100,11 @@ const MENU_MIN_WIDTH: f32 = 168.0;
 // The worlds section: geometry and type
 // ---------------------------------------------------------------------------
 
-/// The folder inside an instance that holds its worlds: `worlds.ts:222` joins
-/// `<instance>/saves/<world>` to open one.
-const SAVES_DIR: &str = "saves";
+/// Where an instance's worlds are, relative to its root: `worlds.ts:222` joins
+/// `<gameRoot>/saves/<world>`, and this layout's game root is the instance's `minecraft/`
+/// folder (`sift_core::instance::Instance::game_root`). The `.minecraft/` spelling is what an
+/// instance imported from another launcher can use, so both are tried, in that order.
+const SAVES_DIRS: [&str; 2] = ["minecraft/saves", "saves"];
 
 /// How many instance rows are drawn. The reference caps its `Jump in` section at five items
 /// (`MAX_JUMP_BACK_IN = 5`, `RecentWorldsList.vue:67`) and shows the rest in the library; six
@@ -815,9 +817,13 @@ fn read_worlds(instances: &[Entry]) -> Vec<(String, Vec<String>)> {
         .iter()
         .take(ROWS_SHOWN)
         .map(|instance| {
-            let saves = root.join(&instance.id).join(SAVES_DIR);
+            // The first spelling that exists wins, so an instance with either layout reads.
+            let saves = SAVES_DIRS
+                .iter()
+                .map(|dir| root.join(&instance.id).join(dir))
+                .find(|path| path.is_dir());
             let mut names: Vec<String> = Vec::new();
-            if let Ok(entries) = std::fs::read_dir(&saves) {
+            if let Some(entries) = saves.map(std::fs::read_dir).and_then(Result::ok) {
                 for entry in entries.flatten() {
                     // Only folders are worlds: `saves/` also holds `level.dat` caches and
                     // whatever a mod left behind.
