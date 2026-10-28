@@ -2032,11 +2032,15 @@ mod tests {
             "Installed Cobblemon as Cobblemon, 1 file"
         );
         let root = paths.instances_dir().join("Cobblemon");
-        assert!(root.join("mods").join("cobblemon.jar").is_file());
+        // The pack's files go where the game reads them: `<instance>/minecraft/mods`.
+        assert!(root.join("minecraft").join("mods").join("cobblemon.jar").is_file());
         assert_eq!(
-            std::fs::read_to_string(root.join("config").join("cobblemon.json")).unwrap_or_default(),
+            std::fs::read_to_string(
+                root.join("minecraft").join("config").join("cobblemon.json")
+            )
+            .unwrap_or_default(),
             "{}",
-            "the pack's overrides land in the instance root, with `overrides/` stripped"
+            "the pack's overrides land in the game directory, with `overrides/` stripped"
         );
         let pack = sift_core::util::read_text(&root.join("mmc-pack.json")).unwrap_or_default();
         assert!(pack.contains("net.fabricmc.fabric-loader"), "pack: {pack}");
@@ -2105,15 +2109,15 @@ mod tests {
         );
         assert!(reports > 0, "the bar hears about the phase");
         assert_eq!(
-            std::fs::read(root.join("mods").join("cobblemon.jar")).unwrap(),
+            std::fs::read(root.join("minecraft").join("mods").join("cobblemon.jar")).unwrap(),
             mod_bytes
         );
         assert_eq!(
-            std::fs::read(root.join("config").join("cobblemon.json")).unwrap(),
+            std::fs::read(root.join("minecraft").join("config").join("cobblemon.json")).unwrap(),
             b"{}",
             "an override of the same name is replaced"
         );
-        assert!(root.join("mods").join("manual.jar").is_file());
+        assert!(root.join("minecraft").join("mods").join("manual.jar").is_file());
         assert!(root.join("saves").join("world").join("level.dat").is_file());
         assert!(root.join("config").join("left-behind.cfg").is_file());
         let pack = sift_core::util::read_text(&root.join("mmc-pack.json")).unwrap_or_default();
