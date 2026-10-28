@@ -261,6 +261,23 @@ const COLOR_THEME_VALUE: &str = "Dark"; // settings.display.theme.dark (ui :6281
 /// The reference draws it as a row directly under the theme selector, between the cards and
 /// `Sync theme across devices`; the port was missing it because the preview cards were replaced
 /// by a select and the row went with them.
+/// The three themes the reference offers as preview cards: `settings.display.theme.dark`,
+/// `.light` and `.oled` (`packages/ui` en-US:6281-6292).
+const THEME_DARK_LABEL: &str = "Dark";
+const THEME_LIGHT_LABEL: &str = "Light";
+const THEME_OLED_LABEL: &str = "OLED";
+
+/// A theme card's size: `appearance-settings-theme-selector.vue` draws each preview at
+/// `h-16 w-24` (96x64) with `gap-3` between them, and the label under it.
+const THEME_CARD_WIDTH: f32 = 96.0;
+const THEME_CARD_HEIGHT: f32 = 64.0;
+const THEME_CARD_GAP: f32 = 12.0;
+const THEME_CARD_LABEL_HEIGHT: f32 = 20.0;
+/// `rounded-xl` on the preview card.
+const THEME_CARD_RADIUS: u8 = 12;
+/// The label under a card is `text-sm`.
+const THEME_CARD_LABEL_SIZE: f32 = 12.0;
+
 const THEME_SYSTEM_LABEL: &str = "Sync with system";
 
 const THEME_SYNC_LABEL: &str = "Sync theme across devices"; // settings.display.theme.sync-across-devices (ui :6302)
@@ -675,6 +692,50 @@ enum Control {
 }
 
 /// One block of a tab's body, in the order the source lays it out.
+/// One of the reference's three themes, as the selector draws them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeChoice {
+    /// The default (`use-theme.ts` starts on the dark scheme).
+    #[default]
+    Dark,
+    /// The light scheme.
+    Light,
+    /// Pure black, for OLED panels.
+    Oled,
+}
+
+impl ThemeChoice {
+    /// The three, in the source's order.
+    pub const ALL: [ThemeChoice; 3] = [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::Oled];
+
+    /// The catalogue's own word for it.
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeChoice::Dark => THEME_DARK_LABEL,
+            ThemeChoice::Light => THEME_LIGHT_LABEL,
+            ThemeChoice::Oled => THEME_OLED_LABEL,
+        }
+    }
+
+    /// The colour the miniature window is filled with: the theme's own background.
+    fn plate(self, theme: &theme::Theme) -> egui::Color32 {
+        match self {
+            // The dark card shows the current scheme's ground; the light one is the only
+            // light surface in this window, so it is spelled out rather than looked up --
+            // there is one scheme in the product so far.
+            ThemeChoice::Dark => theme.BG,
+            ThemeChoice::Light => egui::Color32::from_rgb(0xf2, 0xf2, 0xf4),
+            ThemeChoice::Oled => egui::Color32::BLACK,
+        }
+    }
+
+    /// The width the whole row needs: three cards and the gaps between them.
+    fn row_width() -> f32 {
+        THEME_CARD_WIDTH * 3.0 + THEME_CARD_GAP * 2.0
+    }
+}
+
+/// One block of a tab's body, in the order the source lays it out.
 #[derive(Debug, Clone, Copy)]
 enum Block {
     /// A section or group heading, with the description that sits under it and, when the
@@ -697,6 +758,13 @@ enum Block {
         description: Option<&'static str>,
         /// The control on the right.
         control: Control,
+    },
+    /// The theme selector's row of preview cards
+    /// (`appearance-settings-theme-selector.vue`): three miniature windows, the chosen one
+    /// ringed in the brand colour. Not a `Control`, which is right-aligned and one plate wide.
+    ThemeCards {
+        /// Which card is ringed.
+        selected: ThemeChoice,
     },
     /// A control on a line of its own, left-aligned. The theme selector is one: the source
     /// puts a row of theme cards under the heading, with no label of its own
@@ -725,9 +793,9 @@ const APPEARANCE_BLOCKS: &[Block] = &[
         big: true,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: COLOR_THEME_VALUE,
-    }),
+    Block::ThemeCards {
+        selected: ThemeChoice::Dark,
+    },
     Block::Row {
         label: THEME_SYSTEM_LABEL,
         // The source has no description line for this row (`layout.vue:54-58`).
@@ -1881,6 +1949,58 @@ fn draw_body(
                 control.draw(&body, theme, left + width, y + control.height() / 2.0);
                 control.height() + ROW_GAP
             }
+            Block::ThemeCards { selected } => {
+                let mut x = left;
+                for choice in ThemeChoice::ALL {
+                    let card = Rect::from_min_size(
+                        pos2(x, y),
+                        vec2(THEME_CARD_WIDTH, THEME_CARD_HEIGHT),
+                    );
+                    body.rect_filled(card, THEME_CARD_RADIUS, choice.plate(theme));
+                    // The ring is what marks the choice; the source draws it in the brand
+                    // colour, two points wide, on the card it belongs to.
+                    if choice == selected {
+                        body.rect_stroke(
+                            card,
+                            THEME_CARD_RADIUS,
+                            Stroke::new(2.0, theme.BRAND),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    // Two bars standing in for the window's title and a content line, so the
+                    // card reads as a window at 96 points wide.
+                    let bar = theme.BASE.gamma_multiply(0.25);
+                    body.rect_filled(
+                        Rect::from_min_size(
+                            pos2(card.left() + 10.0, card.top() + 12.0),
+                            vec2(card.width() - 20.0, 6.0),
+                        ),
+                        3,
+                        bar,
+                    );
+                    body.rect_filled(
+                        Rect::from_min_size(
+                            pos2(card.left() + 10.0, card.top() + 26.0),
+                            vec2((card.width() - 20.0) * 0.6, 6.0),
+                        ),
+                        3,
+                        bar,
+                    );
+                    body.text(
+                        pos2(card.center().x, card.bottom() + 4.0),
+                        Align2::CENTER_TOP,
+                        choice.label(),
+                        fonts::body(THEME_CARD_LABEL_SIZE),
+                        if choice == selected {
+                            theme.CONTRAST
+                        } else {
+                            theme.SECONDARY
+                        },
+                    );
+                    x = card.right() + THEME_CARD_GAP;
+                }
+                THEME_CARD_HEIGHT + THEME_CARD_LABEL_HEIGHT + ROW_GAP
+            }
             // Handled above.
             Block::Rule => 0.0,
         };
@@ -2119,6 +2239,29 @@ mod tests {
     /// A 1440x900 screen, the reference's own window (`geometry::WINDOW`).
     fn screen() -> Rect {
         Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0))
+    }
+
+    /// The three theme cards fit the pane, are named from the catalogue, and start on Dark.
+    #[test]
+    fn the_theme_cards_fit_and_are_named() {
+        let dialog = dialog_rect(screen());
+        let content = content_rect(dialog);
+        let usable = content.width() - 2.0 * CONTENT_PADDING;
+        assert!(
+            ThemeChoice::row_width() <= usable,
+            "three cards and two gaps ({} points) must fit {} of content",
+            ThemeChoice::row_width(),
+            usable
+        );
+        assert_eq!(
+            ThemeChoice::ALL.map(ThemeChoice::label),
+            ["Dark", "Light", "OLED"]
+        );
+        assert_eq!(
+            ThemeChoice::default(),
+            ThemeChoice::Dark,
+            "the source starts on the dark scheme"
+        );
     }
 
     /// The plate is centred, so the two gutters are equal and the centre is the screen's.
@@ -2400,6 +2543,15 @@ mod tests {
                         assert_control_is_lettered(tab, control);
                     }
                     Block::Standalone(control) => assert_control_is_lettered(tab, control),
+                    Block::ThemeCards { .. } => {
+                        for choice in ThemeChoice::ALL {
+                            assert!(
+                                !choice.label().is_empty(),
+                                "{} has an unlabelled theme card",
+                                tab.label()
+                            );
+                        }
+                    }
                     Block::Rule => {}
                 }
             }
