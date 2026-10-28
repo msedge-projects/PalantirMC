@@ -504,6 +504,20 @@ The flow itself is real: search → `Install` → a resolver pass, a 413 MB down
 an instance named after the project, and a `mmc-pack.json` carrying `26.1.2` and
 `net.fabricmc.fabric-loader 0.19.2` — all from the pack's own manifest.
 
+### E-47 closed, E-46 still open — 2026-10-28
+
+`Sync with system` (`settings.display.theme.system`, `packages/ui` en-US:6311-6313) now sits in
+the Appearance tab where the reference draws it: directly under the theme selector, above
+`Sync theme across devices`. The row had never existed in the port — when the reference's three
+preview cards were stood in for by a select, the row beneath them went with them.
+
+**E-46 stays open, deliberately.** The colour theme is still one select plate reading `Dark`
+where the reference draws three cards (`Dark ✦`, `Light`, `OLED`, each a miniature of the
+window, with the chosen one ringed). Those cards are not a right-aligned control, which is the
+shape this file's `Control` enum exists for; drawing them means a new block kind and its
+arithmetic. That is a real slice, not a rename, and forcing it through the existing enum would
+be the kind of stand-in this same entry is about removing.
+
 ### Open after this pass
 
 | # | Region | What differs |
