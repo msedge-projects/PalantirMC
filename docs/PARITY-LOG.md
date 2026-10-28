@@ -452,6 +452,27 @@ claim so a key that does not exist fails the check rather than the reader.
 | E-43 | Settings | rich-text strings are drawn verbatim **with** their markup (`<crowdin-link>`, `<support>`); link rendering is owed |
 | E-44 | Settings | one control per row: the switch wins over the secondary `Edit` (Syncing) and `Reset to default` (Feature flags) |
 
+### Settings, side by side — 2026-10-26
+
+The first capture of the settings modal against the reference's own, and it found one bug and
+three real gaps.
+
+**The bug:** our dialog opened on `Account` with `Display` — the first tab — scrolled out of
+sight above the rail. It inherited whatever rail offset it had when it was last closed. Fixed
+on the open edge: both scrolls go back to zero, and closing forgets the edge so the next open
+resets again. A tab you cannot see on the frame you open the dialog is worse than a slow one.
+
+| # | Region | What differs |
+| --- | --- | --- |
+| E-46 | Appearance | the reference's colour theme is **three preview cards** (`Dark ✦`, `Light`, `OLED`, each a miniature of the window) with a `Sync with system` switch beneath them; ours is one select plate reading `Dark` |
+| E-47 | Appearance | the `Sync with system` row does not exist in our port at all — it sits under the theme cards in the reference and is not in the tab's row list we copied |
+| E-48 | Dialog footer | the reference prints `Modrinth App 0.22.0` and `Linux 13.0.0` at the dialog's foot; ours prints nothing. The first line is `app.settings.app-version`, the shape the About view already borrowed |
+| E-49 | Dialog | the reference's scrim blurs the window behind it; egui has no backdrop blur, so ours dims only. The same limitation applies to every modal, and it is the one difference a screenshot cannot fix without a shader |
+
+**What the pair confirms is right:** the dialog's width and radius, the rail's categories and
+order, the row rhythm (label, description, control on the right), the switch geometry and the
+brand fill on the chosen control. Those took four layout attempts to reach and now match.
+
 ### Open after this pass
 
 | # | Region | What differs |
