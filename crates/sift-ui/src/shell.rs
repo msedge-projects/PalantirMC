@@ -181,6 +181,12 @@ impl Shell {
         // The sign-in worker's, which announces the code the moment Microsoft prints one.
         let was = self.account.state().clone();
         self.account.poll();
+        // The launch reads the account when it starts, so it is told here rather than at the
+        // press: a sign-in that finished one frame before a Play must be the one that launches.
+        self.game.set_account(
+            self.account
+                .launch_identity(),
+        );
         if self.account.state() != &was {
             self.toast = Some(match self.account.state() {
                 crate::account::State::Waiting { code, uri } => {

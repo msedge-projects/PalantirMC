@@ -77,7 +77,7 @@ struct Reply {
 
 /// The function one worker runs. A pointer rather than a trait object so a test
 /// can substitute a worker without starting a network or a game.
-type Worker = fn(String, u64, Sender<Reply>);
+type Worker = fn(String, u64, Option<(String, String, String)>, Sender<Reply>);
 
 /// The launcher's single game process and the channel its worker answers on.
 pub struct Game {
@@ -89,6 +89,8 @@ pub struct Game {
     receiver: Receiver<Reply>,
     /// The real worker in the window; a probe in the tests.
     worker: Worker,
+    /// The signed-in profile the next launch should start as, if there is one.
+    account: Option<(String, String, String)>,
 }
 
 impl Default for Game {
@@ -104,6 +106,7 @@ impl Game {
         Game {
             status: Status::Idle,
             launch: 0,
+            account: None,
             sender,
             receiver,
             worker,
@@ -118,6 +121,14 @@ impl Game {
     /// process. `Preparing` is set here, on the frame that asked, not when the
     /// worker's first message arrives: that is the frame the person who pressed
     /// Play sees.
+    /// Point the next launch at a signed-in profile: its name, uuid and access token.
+    ///
+    /// `None` falls back to the offline player, which is what a reader who has not signed in
+    /// gets and what every earlier round launched as.
+    pub fn set_account(&mut self, account: Option<(String, String, String)>) {
+        self.account = account;
+    }
+
     pub fn start(&mut self, instance_id: &str) {
         if self.busy() {
             return;
@@ -129,9 +140,10 @@ impl Game {
         let instance_id = instance_id.to_owned();
         let sender = self.sender.clone();
         let worker = self.worker;
+        let account = self.account.clone();
         let spawned = std::thread::Builder::new()
             .name("sift-launch".to_owned())
-            .spawn(move || worker(instance_id, launch, sender));
+            .spawn(move || worker(instance_id, launch, account, sender));
         if let Err(error) = spawned {
             self.status = Status::Failed(format!("could not start a launch worker: {error}"));
         }
@@ -166,7 +178,12 @@ impl Game {
 }
 
 /// One worker: run the engine and always leave a terminal status behind.
-fn run_launch(instance_id: String, launch: u64, sender: Sender<Reply>) {
+fn run_launch(
+    instance_id: String,
+    launch: u64,
+    account: Option<(String, String, String)>,
+    sender: Sender<Reply>,
+) {
     let status = match launch_instance(&instance_id, launch, &sender) {
         Ok(status) => status,
         Err(reason) => Status::Failed(reason),
@@ -322,7 +339,12 @@ mod tests {
     /// The one fake-worker count this module's start test reads.
     static WORKERS_STARTED: AtomicUsize = AtomicUsize::new(0);
 
-    fn fake_worker(_instance: String, _launch: u64, _sender: Sender<Reply>) {
+    fn fake_worker(
+        _instance: String,
+        _launch: u64,
+        _account: Option<(String, String, String)>,
+        _sender: Sender<Reply>,
+    ) {
         WORKERS_STARTED.fetch_add(1, Ordering::SeqCst);
     }
 

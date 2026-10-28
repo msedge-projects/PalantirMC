@@ -43,7 +43,7 @@ pub enum State {
 #[derive(Debug)]
 enum Message {
     Waiting { code: String, uri: String },
-    SignedIn { name: String, uuid: String },
+    SignedIn { name: String, uuid: String, token: String },
     Failed(String),
 }
 
@@ -51,6 +51,8 @@ enum Message {
 #[derive(Debug, Default)]
 pub struct Account {
     state: State,
+    /// The game's access token, kept out of `State` so it cannot reach a `{:?}`.
+    token: Option<String>,
     receiver: Option<Receiver<Message>>,
 }
 
@@ -64,6 +66,18 @@ impl Account {
     pub fn session(&self) -> Option<(&str, &str)> {
         match &self.state {
             State::SignedIn { name, uuid } => Some((name.as_str(), uuid.as_str())),
+            _ => None,
+        }
+    }
+
+    /// What a launch needs to start as this account: name, uuid and access token.
+    ///
+    /// `None` when nobody is signed in, which is the offline player's case.
+    pub fn launch_identity(&self) -> Option<(String, String, String)> {
+        match (&self.state, &self.token) {
+            (State::SignedIn { name, uuid }, Some(token)) => {
+                Some((name.clone(), uuid.clone(), token.clone()))
+            }
             _ => None,
         }
     }
@@ -102,7 +116,10 @@ impl Account {
         while let Ok(message) = receiver.try_recv() {
             self.state = match message {
                 Message::Waiting { code, uri } => State::Waiting { code, uri },
-                Message::SignedIn { name, uuid } => State::SignedIn { name, uuid },
+                Message::SignedIn { name, uuid, token } => {
+                    self.token = Some(token);
+                    State::SignedIn { name, uuid }
+                }
                 Message::Failed(reason) => State::Failed(reason),
             };
         }
@@ -111,6 +128,7 @@ impl Account {
     /// Forget the session. Nothing is stored, so this is the whole of signing out.
     pub fn sign_out(&mut self) {
         self.state = State::Idle;
+        self.token = None;
         self.receiver = None;
     }
 }
@@ -170,6 +188,7 @@ fn run(sender: Sender<Message>) {
             let _ = sender.send(Message::SignedIn {
                 name: session.name,
                 uuid: session.uuid,
+                token: session.access_token,
             });
         }
         Err(error) => {
@@ -206,10 +225,35 @@ mod tests {
         assert_eq!(account.session(), Some(("Steve", "0")));
     }
 
+    /// A signed-in account hands a launch its name, uuid and token; anything else hands it
+    /// nothing, which is what keeps the offline player for a reader who has not signed in.
+    #[test]
+    fn a_launch_identity_needs_both_the_state_and_the_token() {
+        let mut account = Account {
+            state: State::SignedIn {
+                name: "Steve".into(),
+                uuid: "abc".into(),
+            },
+            token: None,
+            receiver: None,
+        };
+        assert_eq!(account.launch_identity(), None, "no token, no launch identity");
+
+        account.token = Some("token-value".into());
+        assert_eq!(
+            account.launch_identity(),
+            Some(("Steve".into(), "abc".into(), "token-value".into()))
+        );
+
+        account.sign_out();
+        assert_eq!(account.launch_identity(), None, "signing out forgets both");
+    }
+
     #[test]
     fn a_failure_is_neither_busy_nor_signed_in() {
         let account = Account {
             state: State::Failed("no network".into()),
+            token: None,
             receiver: None,
         };
         assert!(!account.busy());
