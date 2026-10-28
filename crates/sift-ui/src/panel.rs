@@ -336,6 +336,14 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> Option<Step> {
         theme.CONTRAST,
     );
 
+    // The pointer, once, for every row: where it is and whether it just pressed. Nothing is
+    // registered with egui, so nothing drawn later in the frame can take the press away.
+    let (pointer, clicked) = ui.input(|input| {
+        (
+            input.pointer.interact_pos(),
+            input.pointer.primary_clicked(),
+        )
+    });
     let mut pressed = None;
     for (index, step) in STEPS.into_iter().enumerate() {
         let row = Rect::from_min_size(
@@ -345,15 +353,11 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme) -> Option<Step> {
         // A step brightens under the pointer the way the sheet's does
         // (`hover:brightness-110`, `ui/onboarding-checklist/index.vue:109`), by the
         // theme's own `--hover-brightness`, and a press is reported to the shell.
-        let response = ui.interact(
-            row,
-            egui::Id::new(("panel-step", index)),
-            Sense::click(),
-        );
-        if response.clicked() {
+        let over = pointer.is_some_and(|pointer| row.contains(pointer));
+        if over && clicked {
             pressed = Step::ALL.get(index).copied();
         }
-        let hovered = response.hovered();
+        let hovered = over;
         let fill = if hovered {
             theme.hovered(theme.RAISED_BG)
         } else {
