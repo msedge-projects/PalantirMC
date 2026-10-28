@@ -369,6 +369,16 @@ const HEADING: &str = "Skin selector";
 /// the title of the first section in the list (`VirtualSkinSectionList.vue:56-60`).
 const SECTION_TITLE: &str = "Saved skins";
 
+/// `app.skins.section.default-skins` — "Default skins" (`locales/en-US/index.json:3248-3250`),
+/// the second section of the reference's right-hand column.
+const DEFAULT_SECTION_TITLE: &str = "Default skins";
+
+/// The reference's own line for a section whose contents come from an account this launcher
+/// does not have (`app.skins.default-skins.empty`). Said plainly rather than drawing eight
+/// invented names under a heading that promises Mojang's.
+const DEFAULT_SECTION_BODY: &str =
+    "Sign in to your Minecraft account to use its default skins.";
+
 /// `app.skins.add-button` -- "Add skin" (`locales/en-US/index.json:3131-3133`). The reference
 /// prints it on the grid's add tile (`VirtualSkinSectionList.vue:61-64,441`); this page
 /// prints it on that tile and, as the brief's `Upload` control, on the toolbar button.
@@ -625,7 +635,7 @@ pub fn draw(
         return false;
     }
 
-    let grid_top = section_header(ui, rect, toolbar_bottom, theme);
+    let grid_top = section_header(ui, rect, toolbar_bottom, theme, SECTION_TITLE);
     let grid_rect = Rect::from_min_max(
         egui::pos2(rect.left() + PAGE_PADDING, grid_top),
         egui::pos2(rect.right() - PAGE_PADDING, rect.bottom() - PAGE_PADDING),
@@ -645,6 +655,9 @@ pub fn draw(
     let query = state.query();
     let visible = visible_skins(state.model, query);
 
+    // Where the next section starts: the saved grid, its rows, and the gap below it.
+    let mut below_grid = grid_rect.top();
+
     match empty_state(query, visible.len()) {
         // The source's own state for "nothing saved": the Saved-skins grid's first tile is
         // the add dropzone (`VirtualSkinSectionList.vue:426-443`), drawn where the first
@@ -654,18 +667,23 @@ pub fn draw(
             let tile =
                 Rect::from_min_size(grid_rect.min, egui::vec2(grid.card_width, grid.card_height));
             dropzone_tile(&painter, tile, theme);
+            below_grid = tile.bottom() + GRID_GAP;
         }
         // A filtered grid with no survivors: this state is this launcher's own, since the
         // reference has no search on this page.
         Some(EmptyState::NoMatches) => {
             let painter = ui.painter().clone();
             no_matches(&painter, grid_rect, theme);
+            below_grid = grid_rect.top() + GRID_MIN_HEIGHT;
         }
         None => {
             let columns = grid.columns.max(1);
             let rows = visible.len().div_ceil(columns);
             let content_height =
                 (rows as f32 * (grid.card_height + GRID_GAP) - GRID_GAP).max(GRID_MIN_HEIGHT);
+            // The grid scrolls inside `grid_rect`, so the section below starts at the rect's
+            // own bottom: nothing under a scroll area can know how tall its contents are.
+            below_grid = grid_rect.bottom() + SECTION_GAP;
 
             // The source scrolls the whole page; this page owns only the column below its
             // section header, so the scroll area starts at the grid.
@@ -696,6 +714,17 @@ pub fn draw(
                     }
                 });
         }
+    }
+
+    let defaults_top = section_header(ui, rect, below_grid, theme, DEFAULT_SECTION_TITLE);
+    if defaults_top + HEADING_LINE <= rect.bottom() - PAGE_PADDING {
+        ui.painter().text(
+            egui::pos2(rect.left() + PAGE_PADDING, defaults_top),
+            Align2::LEFT_TOP,
+            DEFAULT_SECTION_BODY,
+            fonts::body(13.0),
+            theme.SECONDARY,
+        );
     }
 
     false
@@ -922,7 +951,7 @@ fn text_width(painter: &egui::Painter, text: &str, font: egui::FontId) -> f32 {
 /// this page, so the glyph is drawn in its open orientation (`rotate-180` on the
 /// `DropdownIcon`, `VirtualSkinSectionList.vue:384-387`). Returns the y where the grid
 /// begins.
-fn section_header(ui: &Ui, rect: Rect, top: f32, theme: &Theme) -> f32 {
+fn section_header(ui: &Ui, rect: Rect, top: f32, theme: &Theme, title: &str) -> f32 {
     let painter = ui.painter();
     let glyph = Rect::from_min_size(
         egui::pos2(
@@ -938,7 +967,7 @@ fn section_header(ui: &Ui, rect: Rect, top: f32, theme: &Theme) -> f32 {
             top + SECTION_HEADER_LINE / 2.0,
         ),
         Align2::LEFT_CENTER,
-        SECTION_TITLE,
+        title,
         fonts::semibold(SECTION_HEADING_SIZE),
         theme.CONTRAST,
     );
