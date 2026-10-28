@@ -2109,7 +2109,11 @@ mod tests {
         )
         .unwrap();
         // What the pack's previous version wrote under the same name.
-        std::fs::write(root.join("config").join("cobblemon.json"), b"old").unwrap();
+        std::fs::write(
+            root.join("minecraft").join("config").join("cobblemon.json"),
+            b"old",
+        )
+        .unwrap();
 
         let mut script = Script::new();
         script.insert(
