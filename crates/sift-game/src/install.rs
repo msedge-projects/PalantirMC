@@ -1495,7 +1495,9 @@ pub fn reapply_pack(
         .map_err(|error| format!("that archive is not a readable pack: {error}"))?;
     let fetch = fetch_pack_files(
         wire,
-        instance.root(),
+        // A pack's `files[].path` is relative to the game directory (`mods/x.jar`), which is
+        // `minecraft/` in this layout -- not the instance root, where nothing reads it.
+        instance.game_root(),
         &plan.files,
         DEFAULT_THREADS,
         progress,
