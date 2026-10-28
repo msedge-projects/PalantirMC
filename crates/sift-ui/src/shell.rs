@@ -211,26 +211,6 @@ impl Shell {
         rail_animating |= self.rail_column(ui);
         rail_animating |= self.right_panel(ui);
 
-        // The toast: one line, bottom-centre over the content column. A message that reported
-        // an action and vanished at the frame's end would be invisible.
-        if let Some(message) = self.toast.clone() {
-            let painter = ui.painter();
-            let galley =
-                painter.layout_no_wrap(message, crate::fonts::body(13.0), self.theme.CONTRAST);
-            let plate = Rect::from_center_size(
-                egui::pos2((g::CONTENT_LEFT + g::PANEL_LEFT) / 2.0, g::WINDOW.1 - 56.0),
-                egui::vec2(galley.size().x + 32.0, 36.0),
-            );
-            painter.rect_filled(plate, 8, self.theme.SUPER_RAISED_BG);
-            painter.galley(
-                egui::pos2(
-                    plate.center().x - galley.size().x / 2.0,
-                    plate.center().y - galley.size().y / 2.0,
-                ),
-                galley,
-                self.theme.CONTRAST,
-            );
-        }
         let content = if let Some(instance) = self.open_instance.clone() {
             let rect = crate::pages::Page::Instance.rect();
             ui.painter().rect_filled(rect, 0, self.theme.BG);
@@ -338,6 +318,29 @@ impl Shell {
         crate::pages::settings::draw(ui, Self::window_rect(), &self.theme, &mut self.settings);
         if was_about != self.about_open || was_settings != self.settings.open {
             ui.ctx().request_repaint();
+        }
+
+        // Last, because the content column and every page paint their own background:
+        // a toast drawn before them is a toast covered up.
+        // The toast: one line, bottom-centre over the content column. A message that reported
+        // an action and vanished at the frame's end would be invisible.
+        if let Some(message) = self.toast.clone() {
+            let painter = ui.painter();
+            let galley =
+                painter.layout_no_wrap(message, crate::fonts::body(13.0), self.theme.CONTRAST);
+            let plate = Rect::from_center_size(
+                egui::pos2((g::CONTENT_LEFT + g::PANEL_LEFT) / 2.0, g::WINDOW.1 - 56.0),
+                egui::vec2(galley.size().x + 32.0, 36.0),
+            );
+            painter.rect_filled(plate, 8, self.theme.SUPER_RAISED_BG);
+            painter.galley(
+                egui::pos2(
+                    plate.center().x - galley.size().x / 2.0,
+                    plate.center().y - galley.size().y / 2.0,
+                ),
+                galley,
+                self.theme.CONTRAST,
+            );
         }
 
         // An icon in flight is a reason to draw the next frame, exactly like a hover.
