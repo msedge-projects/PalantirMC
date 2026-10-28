@@ -2088,15 +2088,20 @@ mod tests {
             Instance::create(&paths.instances_dir(), "Cobblemon", "1.21.4").expect("an instance");
         let root = instance.root().to_path_buf();
         std::fs::create_dir_all(root.join("mods")).unwrap();
-        std::fs::create_dir_all(root.join("saves").join("world")).unwrap();
+        std::fs::create_dir_all(root.join("minecraft").join("saves").join("world")).unwrap();
         std::fs::create_dir_all(root.join("config")).unwrap();
         std::fs::write(root.join("mods").join("manual.jar"), b"my mod").unwrap();
         std::fs::write(
-            root.join("saves").join("world").join("level.dat"),
+            root.join("minecraft").join("saves").join("world").join("level.dat"),
             b"my world",
         )
         .unwrap();
-        std::fs::write(root.join("config").join("left-behind.cfg"), b"mine").unwrap();
+        std::fs::create_dir_all(root.join("minecraft").join("config")).unwrap();
+        std::fs::write(
+            root.join("minecraft").join("config").join("left-behind.cfg"),
+            b"mine",
+        )
+        .unwrap();
         // What the pack's previous version wrote under the same name.
         std::fs::write(root.join("config").join("cobblemon.json"), b"old").unwrap();
 
@@ -2132,8 +2137,17 @@ mod tests {
             "an override of the same name is replaced"
         );
         assert!(root.join("minecraft").join("mods").join("manual.jar").is_file());
-        assert!(root.join("saves").join("world").join("level.dat").is_file());
-        assert!(root.join("config").join("left-behind.cfg").is_file());
+        assert!(root
+            .join("minecraft")
+            .join("saves")
+            .join("world")
+            .join("level.dat")
+            .is_file());
+        assert!(root
+            .join("minecraft")
+            .join("config")
+            .join("left-behind.cfg")
+            .is_file());
         let pack = sift_core::util::read_text(&root.join("mmc-pack.json")).unwrap_or_default();
         assert!(pack.contains("net.fabricmc.fabric-loader"), "pack: {pack}");
 
