@@ -518,6 +518,31 @@ shape this file's `Control` enum exists for; drawing them means a new block kind
 arithmetic. That is a real slice, not a rename, and forcing it through the existing enum would
 be the kind of stand-in this same entry is about removing.
 
+### Skins: two sections, and three bugs a capture found that tests did not — 2026-10-28
+
+The page drew one heading, and its add tile only when the list was empty. The reference has two
+headings — `Saved skins` and `Default skins` (`app.skins.section.default-skins`) — with the add
+dropzone as the Saved grid's **first** tile always.
+
+**What the tests passed and the screen did not:**
+
+| Bug | Why the tests missed it |
+| --- | --- |
+| the dashed tile sat in the grid's **last** slot | the loop matched a skin wherever one existed, so `None` only ever meant the spare slot at the end — the arithmetic was right and the order was wrong |
+| the `Default skins` heading was **drawn off-screen** | it was placed at the scroll area's bottom, which is the page's bottom: a position nothing can see, computed from the right rectangle |
+| a two-row grid left **200 points of emptiness** above that heading | the strip reserved for the heading was used as its position, so the heading followed the reservation rather than the content |
+
+Each is now fixed and each was visible in a single 1440x900 capture. This is the third pass in
+a week where a screenshot found what 138 green tests could not; the tests pin arithmetic and
+strings, and none of them can see where a thing was painted.
+
+**Still owed on this page (E-25):** the reference's left column — the 3D skin preview, its
+`Drag to rotate` line, the `Edit skin` button and the account bar at its foot. That preview is a
+WebGL renderer in the reference and this launcher has no renderer at all, so standing a plate
+there would be the same substitution the theme cards and the dropzone tile were, just larger.
+It needs a decision — draw the skin as a 2D front/side flat-map from the texture, or leave the
+column out until a renderer exists — and it should be decided before it is drawn.
+
 ### Open after this pass
 
 | # | Region | What differs |
