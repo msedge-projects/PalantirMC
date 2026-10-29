@@ -785,6 +785,25 @@ What is left on that screen, plainly: the selects draw their value and do not op
 promo art is not drawn, and the `owed:` notes still name rows whose data the reference has and
 this build does not.
 
+### Selects open — 0.1.21
+
+The last control kind. The language and cache-unit rows offer their lists, and the choice is
+written to `app-settings.json` with the sliders, text, chips and switches:
+
+```
+"selects": { "Standard languages": "Español" }
+```
+
+Two layout facts came out of it that no amount of reading would have produced: the language
+selector is a **Heading** with a control rather than a Row, so a handler in the row arm never ran
+for it; and its trigger sits ten points above the row's centre, so the row -- not the plate -- is
+the target that works. `中文` came out of the font as `??` and is not offered until the font
+carries CJK.
+
+**One thing seen in passing, worth a check later:** a run left a Minecraft window on the VM's
+display ("Welcome to Minecraft! … Narrator or Accessibility Settings?"), which is the game's own
+first-launch screen. That is evidence a launch reached the game on this VM, not just a plan.
+
 ### Open after this pass
 
 | # | Region | What differs |
