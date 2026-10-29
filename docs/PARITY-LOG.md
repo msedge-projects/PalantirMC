@@ -862,6 +862,18 @@ not a comment.
 **Verified on the VM:** About draws the Sift mark, reads `Sift Launcher 0.1.22` and
 `Copyright (c) 2026 Sift Studios`, with the panel behind it already saying `Sign in to Sift`.
 
+### Two of the instance page's four tabs — 0.1.25
+
+| Tab | Now | Evidence |
+| --- | --- | --- |
+| Files | the instance's folder, folders first, each file with its size | the VM listed `.minecraft`, `mmc-pack.json` 173 B, `instance.cfg` 118 B |
+| Logs | the last screenful of the game's own log | the pane showed this session's `Failed to read level folder-name-world data` and its `session.lock` warning |
+| Screenshots | still a stub | owed: a grid over the instance's screenshots |
+| Worlds | still a stub | owed: the world and server list |
+
+The two helpers behind them are pure and tested: `tail_lines` (bounded by the pane, not the file,
+so a megabyte log costs one screenful) and `format_size` (`842 B`, `1.5 KB`, `12.1 MB`, `2.0 GB`).
+
 ### Open after this pass
 
 | # | Region | What differs |
