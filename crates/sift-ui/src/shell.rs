@@ -128,6 +128,8 @@ pub struct Shell {
     instance_state: crate::pages::instance::State,
     /// The Microsoft account, and the worker that talks to it.
     account: crate::account::Account,
+    /// Whether the stored account has been read, which happens once.
+    restored_account: bool,
     /// Whether the About modal is showing.
     about_open: bool,
     /// The settings modal: open flag and selected tab.
@@ -163,6 +165,7 @@ impl Default for Shell {
             open_instance: None,
             instance_state: crate::pages::instance::State::default(),
             account: crate::account::Account::default(),
+            restored_account: false,
             about_open: false,
             settings: crate::pages::settings::State::default(),
         }
@@ -178,6 +181,12 @@ impl Shell {
         self.scrolling.apply(&ctx);
         // Take the launch worker's latest word before any of the window reads it.
         self.game.poll();
+        // The account a previous run left, once: the profile shows immediately and its token is
+        // renewed behind it.
+        if !self.restored_account {
+            self.restored_account = true;
+            self.account.restore();
+        }
         // The sign-in worker's, which announces the code the moment Microsoft prints one.
         let was = self.account.state().clone();
         self.account.poll();

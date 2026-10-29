@@ -39,6 +39,59 @@ pub enum State {
     Failed(String),
 }
 
+/// Where the account is kept, beside the instances folder.
+fn store_path() -> std::path::PathBuf {
+    crate::data::instances_dir()
+        .parent()
+        .map(|root| root.join("account.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from("account.json"))
+}
+
+/// What the file holds: who is signed in and what renews them.
+#[derive(Debug, Clone)]
+struct Stored {
+    name: String,
+    uuid: String,
+    refresh_token: String,
+}
+
+/// Read the stored account, if there is one. A file that will not parse is treated as none.
+fn read_stored() -> Option<Stored> {
+    read_at(&store_path())
+}
+
+fn read_at(path: &std::path::Path) -> Option<Stored> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    Some(Stored {
+        name: value.get("name")?.as_str()?.to_owned(),
+        uuid: value.get("uuid")?.as_str()?.to_owned(),
+        refresh_token: value.get("refresh_token")?.as_str()?.to_owned(),
+    })
+}
+
+fn write_stored(stored: &Stored) {
+    write_at(&store_path(), stored);
+}
+
+fn write_at(path: &std::path::Path, stored: &Stored) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let value = serde_json::json!({
+        "name": stored.name,
+        "uuid": stored.uuid,
+        "refresh_token": stored.refresh_token,
+    });
+    if let Ok(text) = serde_json::to_string_pretty(&value) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+fn clear_stored() {
+    let _ = std::fs::remove_file(store_path());
+}
+
 /// What the worker sends back to the window.
 #[derive(Debug)]
 enum Message {
@@ -87,6 +140,37 @@ impl Account {
         matches!(self.state, State::Starting | State::Waiting { .. })
     }
 
+    /// Pick up the account a previous run left, and renew its token.
+    ///
+    /// Returns whether there was one. The profile shows immediately -- a reader who signed in
+    /// yesterday should not see `Sign in to Minecraft` for the two seconds a refresh takes --
+    /// and the token arrives on the same channel a fresh sign-in uses.
+    pub fn restore(&mut self) -> bool {
+        let Some(stored) = read_stored() else {
+            return false;
+        };
+        self.state = State::SignedIn {
+            name: stored.name.clone(),
+            uuid: stored.uuid.clone(),
+        };
+        let (sender, receiver) = channel();
+        self.receiver = Some(receiver);
+        let for_thread = stored.clone();
+        let name = stored.name;
+        let spawned = std::thread::Builder::new()
+            .name("sift-refresh".to_owned())
+            .spawn(move || refresh(sender, for_thread));
+        if let Err(error) = spawned {
+            // The profile is still shown; only the game token is missing, and a launch without
+            // one is the engine's to refuse with its own sentence.
+            self.state = State::Failed(format!(
+                "signed in as {name} but the token could not be renewed: {error}"
+            ));
+            self.receiver = None;
+        }
+        true
+    }
+
     /// Begin a sign-in. A second press while one is running is refused rather than starting a
     /// second worker: two device codes at once would put two codes on screen and only one of
     /// them live.
@@ -125,11 +209,47 @@ impl Account {
         }
     }
 
-    /// Forget the session. Nothing is stored, so this is the whole of signing out.
+    /// Forget the session, and the file that would bring it back.
     pub fn sign_out(&mut self) {
         self.state = State::Idle;
         self.token = None;
         self.receiver = None;
+        clear_stored();
+    }
+}
+
+/// The refresh worker: one exchange, then the profile's own game token.
+fn refresh(sender: Sender<Message>, stored: Stored) {
+    let auth = MicrosoftAuth::with_public_client_id();
+    let token = match auth.refresh(&stored.refresh_token) {
+        Ok(token) => token,
+        Err(error) => {
+            // A refresh that fails is a session that cannot be renewed: the file goes, so the
+            // next start asks for a sign-in rather than pretending.
+            clear_stored();
+            let _ = sender.send(Message::Failed(format!(
+                "the saved sign-in expired ({error}); sign in again"
+            )));
+            return;
+        }
+    };
+    let refresh_token = token.refresh_token.clone();
+    match auth.finish(&token) {
+        Ok(session) => {
+            write_stored(&Stored {
+                name: session.name.clone(),
+                uuid: session.uuid.clone(),
+                refresh_token,
+            });
+            let _ = sender.send(Message::SignedIn {
+                name: session.name,
+                uuid: session.uuid,
+                token: session.access_token,
+            });
+        }
+        Err(error) => {
+            let _ = sender.send(Message::Failed(format!("{error}")));
+        }
     }
 }
 
@@ -183,8 +303,15 @@ fn run(sender: Sender<Message>) {
         }
     };
 
+    let refresh_token = token.refresh_token.clone();
     match auth.finish(&token) {
         Ok(session) => {
+            // The profile is worth keeping; the token it must be renewed with is kept with it.
+            write_stored(&Stored {
+                name: session.name.clone(),
+                uuid: session.uuid.clone(),
+                refresh_token,
+            });
             let _ = sender.send(Message::SignedIn {
                 name: session.name,
                 uuid: session.uuid,
@@ -200,6 +327,29 @@ fn run(sender: Sender<Message>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The file the next run reads: a round trip, and a file that is not one is no account.
+    #[test]
+    fn a_stored_account_round_trips_and_nonsense_is_ignored() {
+        let dir = std::env::temp_dir().join(format!("sift-account-{}", std::process::id()));
+        let path = dir.join("account.json");
+        let stored = Stored {
+            name: "Steve".into(),
+            uuid: "0123456789abcdef".into(),
+            refresh_token: "M.R3_BAY.token".into(),
+        };
+        write_at(&path, &stored);
+        let back = read_at(&path).expect("the file just written");
+        assert_eq!(back.name, "Steve");
+        assert_eq!(back.uuid, "0123456789abcdef");
+        assert_eq!(back.refresh_token, "M.R3_BAY.token");
+
+        std::fs::write(&path, "not json at all").expect("a broken file");
+        assert!(read_at(&path).is_none(), "a broken file is no account");
+        std::fs::write(&path, r#"{"name":"Steve"}"#).expect("a partial file");
+        assert!(read_at(&path).is_none(), "a file with no token is no account");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn a_fresh_account_is_idle_and_not_busy() {
