@@ -96,6 +96,9 @@ pub struct State {
     /// Whether the last frame drew the dialog. Used only to notice the open edge, which is
     /// when the scroll offsets go back to zero.
     pub was_open: bool,
+    /// Where each slider the reader has touched sits, keyed by its row's label. A row with no
+    /// entry draws the value its `Block` declares.
+    pub sliders: Vec<(&'static str, f32)>,
     /// The shell keeps drawing while this is true, and stops when it is false.
     pub open: bool,
     /// The selected tab. The source opens on the first one (`index.vue:88-96`).
@@ -682,6 +685,18 @@ enum Control {
         /// The value the trigger shows.
         value: &'static str,
     },
+    /// A slider (`Slider.vue`): a 4-point track with the filled part and the knob on it, and
+    /// the value it is at printed to the left.
+    Slider {
+        /// Where the knob sits when the reader has not touched it, as `0.0..=1.0`.
+        value: f32,
+        /// The smallest number the track's left end means.
+        low: u32,
+        /// The largest number its right end means.
+        high: u32,
+        /// What the number counts, appended without a space: `" MB"`, `""`.
+        unit: &'static str,
+    },
     /// A button (`ButtonFrame.vue:45`, the `base` colour): a plate and a label.
     Button {
         /// The button's label.
@@ -734,6 +749,14 @@ impl ThemeChoice {
         THEME_CARD_WIDTH * 3.0 + THEME_CARD_GAP * 2.0
     }
 }
+
+/// A slider's track and knob, from `Slider.vue`: a 4-point track in a 20-point row.
+const SLIDER_WIDTH: f32 = 160.0;
+const SLIDER_HEIGHT: f32 = 20.0;
+const SLIDER_TRACK: f32 = 4.0;
+const SLIDER_KNOB: f32 = 14.0;
+/// Room between a slider's printed value and its track.
+const SLIDER_LABEL_GAP: f32 = 12.0;
 
 /// One block of a tab's body, in the order the source lays it out.
 #[derive(Debug, Clone, Copy)]
@@ -882,8 +905,8 @@ const FEATURES_BLOCKS: &[Block] = &[
         label: QUICK_INSTANCES_LABEL,
         description: Some(QUICK_INSTANCES_DESCRIPTION),
         // The source's `Slider` (`:364`), drawn as the value it holds at its cap.
-        control: Control::Select {
-            value: QUICK_INSTANCES_VALUE,
+        control: Control::Slider {
+            value: 0.655, low: 1, high: 30, unit: "",
         },
     },
     Block::Rule,
@@ -1245,8 +1268,8 @@ const JAVA_AND_MEMORY_BLOCKS: &[Block] = &[
         big: false,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: MEMORY_MIN_VALUE,
+    Block::Standalone(Control::Slider {
+        value: 0.0, low: 512, high: 32768, unit: " MB",
     }),
     Block::Heading {
         text: JAVA_ARGS_TITLE,
@@ -1433,8 +1456,8 @@ const RESOURCES_BLOCKS: &[Block] = &[
         big: false,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: MAX_DOWNLOADS_VALUE,
+    Block::Standalone(Control::Slider {
+        value: 0.0, low: 1, high: 10, unit: "",
     }),
     Block::Heading {
         text: MAX_WRITES_LABEL,
@@ -1442,8 +1465,8 @@ const RESOURCES_BLOCKS: &[Block] = &[
         big: false,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: MAX_WRITES_VALUE,
+    Block::Standalone(Control::Slider {
+        value: 0.0, low: 1, high: 50, unit: "",
     }),
 ];
 
@@ -1562,7 +1585,22 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
         );
         draw_header(painter, dialog, theme);
         draw_rail(painter, dialog, theme, state.tab, state.rail_scroll);
-        let body_height = draw_body(painter, dialog, theme, state.tab, state.scroll);
+        let (pointer, held) = ui.input(|input| {
+        (
+            input.pointer.interact_pos(),
+            input.pointer.primary_down(),
+        )
+    });
+    let body_height = draw_body(
+        painter,
+        dialog,
+        theme,
+        state.tab,
+        state.scroll,
+        pointer,
+        held,
+        state,
+    );
     state.last_body_height = body_height;
 
     // The wheel, over the content pane, moves the body. Clamped both ways: above zero is the
@@ -1850,6 +1888,29 @@ fn draw_rail(
     }
 }
 
+/// The number a slider's fraction means, rounded to its nearest whole.
+fn slider_value(fraction: f32, low: u32, high: u32) -> u32 {
+    let span = high.saturating_sub(low) as f32;
+    let value = low as f32 + span * fraction.clamp(0.0, 1.0);
+    value.round().max(low as f32) as u32
+}
+
+/// What a slider prints: `512 MB`, `20`.
+fn slider_label(fraction: f32, low: u32, high: u32, unit: &str) -> String {
+    format!("{}{}", slider_value(fraction, low, high), unit)
+}
+
+/// Where a pointer sits on a slider's track, as a fraction, clamped to the track.
+///
+/// Pure because this is the part that can be wrong: a slider whose knob stops short of its ends,
+/// or reaches past them, is a control that cannot express its own range.
+fn fraction_at(pointer_x: f32, track_left: f32, track_width: f32) -> f32 {
+    if track_width <= 0.0 {
+        return 0.0;
+    }
+    ((pointer_x - track_left) / track_width).clamp(0.0, 1.0)
+}
+
 /// The selected tab's body: its pane, its heading, and its rows.
 /// Draw the tab's body, scrolled by `scroll`, and return its total height.
 ///
@@ -1861,6 +1922,9 @@ fn draw_body(
     theme: &theme::Theme,
     tab: Tab,
     scroll: f32,
+    pointer: Option<egui::Pos2>,
+    held: bool,
+    state: &mut State,
 ) -> f32 {
     let content = content_rect(dialog);
     painter.rect_filled(content, PANE_RADIUS, theme.SURFACE_2);
@@ -1932,17 +1996,64 @@ fn draw_body(
                 label,
                 description,
                 control,
-            } => draw_labelled(
-                &body,
-                theme,
-                left,
-                right,
-                y,
-                label,
-                description,
-                Some(control),
-                ROW_LABEL_SIZE,
-            ) + ROW_GAP,
+            } => {
+                // A slider is the only control that reads input, so it is the only one that
+                // needs the pointer and the state. Its rect is the plate `draw_labelled` will
+                // paint into: right-aligned, `SLIDER_WIDTH` wide, centred on the row.
+                let control = match control {
+                    Control::Slider {
+                        value,
+                        low,
+                        high,
+                        unit,
+                    } => {
+                        let track_left = right - SLIDER_WIDTH;
+                        let mut fraction = state
+                            .sliders
+                            .iter()
+                            .find(|(key, _)| *key == label)
+                            .map(|(_, stored)| *stored)
+                            .unwrap_or(value);
+                        if held {
+                            if let Some(pointer) = pointer {
+                                let row_top = y;
+                                let height = SLIDER_HEIGHT;
+                                let in_row = pointer.y >= row_top
+                                    && pointer.y <= row_top + height.max(ROW_LABEL_SIZE);
+                                if in_row && pointer.x >= track_left && pointer.x <= right {
+                                    fraction = fraction_at(pointer.x, track_left, SLIDER_WIDTH);
+                                    match state
+                                        .sliders
+                                        .iter_mut()
+                                        .find(|(key, _)| *key == label)
+                                    {
+                                        Some((_, stored)) => *stored = fraction,
+                                        None => state.sliders.push((label, fraction)),
+                                    }
+                                }
+                            }
+                        }
+                        Control::Slider {
+                            value: fraction,
+                            low,
+                            high,
+                            unit,
+                        }
+                    }
+                    other => other,
+                };
+                draw_labelled(
+                    &body,
+                    theme,
+                    left,
+                    right,
+                    y,
+                    label,
+                    description,
+                    Some(control),
+                    ROW_LABEL_SIZE,
+                ) + ROW_GAP
+            }
             Block::Standalone(control) => {
                 // Left-aligned: the control's right edge is its own width past the inset.
                 let width = control.width(&body);
@@ -2089,6 +2200,14 @@ impl Control {
     fn width(self, painter: &egui::Painter) -> f32 {
         match self {
             Control::Switch { .. } => SWITCH_WIDTH,
+            Control::Slider { value, low, high, unit } => {
+                let label = painter.layout_no_wrap(
+                    slider_label(value, low, high, unit),
+                    fonts::semibold(CONTROL_TEXT_SIZE),
+                    Color32::PLACEHOLDER,
+                );
+                label.size().x + SLIDER_LABEL_GAP + SLIDER_WIDTH
+            }
             Control::Select { value } => {
                 let value = painter.layout_no_wrap(
                     value.to_owned(),
@@ -2117,6 +2236,7 @@ impl Control {
     fn height(self) -> f32 {
         match self {
             Control::Switch { .. } => SWITCH_HEIGHT,
+            Control::Slider { .. } => SLIDER_HEIGHT,
             Control::Select { .. } | Control::Button { .. } => CONTROL_HEIGHT,
         }
     }
@@ -2126,6 +2246,40 @@ impl Control {
         let height = self.height();
         let width = self.width(painter);
         match self {
+            Control::Slider {
+                value,
+                low,
+                high,
+                unit,
+            } => {
+                let track_left = right - SLIDER_WIDTH;
+                painter.text(
+                    pos2(track_left - SLIDER_LABEL_GAP, centre_y),
+                    Align2::RIGHT_CENTER,
+                    slider_label(value, low, high, unit),
+                    fonts::semibold(CONTROL_TEXT_SIZE),
+                    theme.CONTRAST,
+                );
+                let track = Rect::from_min_size(
+                    pos2(track_left, centre_y - SLIDER_TRACK / 2.0),
+                    vec2(SLIDER_WIDTH, SLIDER_TRACK),
+                );
+                painter.rect_filled(track, SLIDER_TRACK / 2.0, theme.SUPER_RAISED_BG);
+                let fraction = value.clamp(0.0, 1.0);
+                painter.rect_filled(
+                    Rect::from_min_max(
+                        track.min,
+                        pos2(track.left() + track.width() * fraction, track.bottom()),
+                    ),
+                    SLIDER_TRACK / 2.0,
+                    theme.BRAND,
+                );
+                painter.circle_filled(
+                    pos2(track.left() + track.width() * fraction, centre_y),
+                    SLIDER_KNOB / 2.0,
+                    theme.BRAND,
+                );
+            }
             Control::Switch { on } => {
                 let track = Rect::from_min_size(
                     pos2(right - SWITCH_WIDTH, centre_y - SWITCH_HEIGHT / 2.0),
@@ -2300,6 +2454,17 @@ mod tests {
     /// The absolute numbers the earlier version of this test asserted were the *uncompressed*
     /// layout — which is exactly the layout that put three tabs past the dialog's edge and made
     /// them unselectable. What has to hold is the relationship, not the constant.
+    /// A drag is a fraction of the track, clamped at both ends.
+    #[test]
+    fn a_pointer_on_a_track_is_a_clamped_fraction() {
+        assert_eq!(fraction_at(100.0, 100.0, 160.0), 0.0, "the left end");
+        assert_eq!(fraction_at(180.0, 100.0, 160.0), 0.5, "the middle");
+        assert_eq!(fraction_at(260.0, 100.0, 160.0), 1.0, "the right end");
+        assert_eq!(fraction_at(20.0, 100.0, 160.0), 0.0, "left of the track");
+        assert_eq!(fraction_at(400.0, 100.0, 160.0), 1.0, "right of the track");
+        assert_eq!(fraction_at(150.0, 100.0, 0.0), 0.0, "no track, no fraction");
+    }
+
     #[test]
     fn the_rail_fits_its_pane_and_keeps_one_pitch_per_category() {
         for screen_size in [vec2(1440.0, 900.0), vec2(1600.0, 1200.0), vec2(1280.0, 800.0)] {
@@ -2562,6 +2727,8 @@ mod tests {
     fn assert_control_is_lettered(tab: Tab, control: Control) {
         let text = match control {
             Control::Switch { .. } => None,
+            // A slider's value is a number, not words: nothing to spell, nothing to misspell.
+            Control::Slider { .. } => None,
             Control::Select { value } => Some(value),
             Control::Button { label, .. } => Some(label),
         };
