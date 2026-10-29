@@ -196,7 +196,9 @@ jobs:
           # working directory: computed from `.` after the Push-Location, ROOT came out as
           # `.../installer/` and NSIS looked for the licence inside it.
           $payload = (Resolve-Path installer/dist/SiftUi.exe).Path
-          $root = ((Get-Item installer).Parent.FullName -replace '\\', '/') + '/'
+          # Backslashes: `File` packed the payload (a backslash path) and refused the same
+          # file named with forward slashes, which is what ROOT was in 0.1.12.
+          $root = (Get-Item installer).Parent.FullName + '\'
           Write-Host "root:     $root"
           Push-Location installer
           $out = & $makensis /V3 /DVERSION=$version "/DPAYLOAD=$payload" "/DROOT=$root" sift.nsi 2>&1

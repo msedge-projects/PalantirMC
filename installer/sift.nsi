@@ -58,7 +58,7 @@ SetCompressorDictSize 64
 ; the runner's NSIS 3.13 refuses (it aborted on the licence line after the payload line was
 ; fixed). Forward slashes because they need no escaping here and NSIS accepts them.
 !ifndef ROOT
-  !define ROOT "${__FILEDIR__}/../"
+  !define ROOT "${__FILEDIR__}\\..\\"
 !endif
 
 !define PRODUCT "Sift Launcher"
