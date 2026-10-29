@@ -42,9 +42,11 @@ pub struct Project {
     pub followers: &'static str,
     /// The icon's URL.
     pub icon: &'static str,
-    /// The project's links, as `(label, url)`. Labels are the catalogue's
-    /// `project.about.links.*` strings.
-    pub links: &'static [(&'static str, &'static str)],
+    /// The project's links, by the catalogue's `project.about.links.*` labels.
+    ///
+    /// Labels only: the URL is what a press would open, and nothing here opens one yet, so
+    /// storing it would be data no code reads.
+    pub links: &'static [&'static str],
     /// The team, as `(name, role)`.
     pub creators: &'static [(&'static str, &'static str)],
     /// When it was first published, in the reference's own long date spelling.
@@ -381,14 +383,29 @@ pub fn panel(ui: &mut Ui, rect: Rect, theme: &Theme, project: &Project) -> f32 {
 
     // The three sections the reference puts under compatibility. Their headings are the
     // catalogue's own, cited on each.
-    y += section(
-        painter,
-        rect,
-        y,
-        theme,
-        "Links", // project.about.links.title
-        project.links,
-    );
+    // Links are labels with no value, and drawn by hand rather than through `section` so the
+    // labels are not paired with empty strings.
+    {
+        painter.text(
+            egui::pos2(rect.left(), y),
+            Align2::LEFT_TOP,
+            "Links", // project.about.links.title
+            fonts::semibold(15.0),
+            theme.CONTRAST,
+        );
+        y += 24.0;
+        for link in project.links {
+            painter.text(
+                egui::pos2(rect.left(), y),
+                Align2::LEFT_TOP,
+                *link,
+                fonts::body(12.0),
+                theme.LINK,
+            );
+            y += 20.0;
+        }
+        y += 8.0;
+    }
     y += section(
         painter,
         rect,
@@ -482,12 +499,7 @@ pub fn sample() -> Project {
         followers: "5K followers",
         icon: "https://cdn.modrinth.com/data/1KVo5zza/d8152911f8fd5d7e9a8c499fe89045af81fe816e_96.webp",
         // project.about.links.{source,issues,wiki,discord}
-        links: &[
-            ("View source", "https://github.com/Fabulously-Optimized/fabulously-optimized"),
-            ("Report issues", "https://github.com/Fabulously-Optimized/fabulously-optimized/issues"),
-            ("Visit wiki", "https://fabulously-optimized.github.io/"),
-            ("Join Discord", "https://discord.gg/fabulously-optimized"),
-        ],
+        links: &["View source", "Report issues", "Visit wiki", "Join Discord"],
         creators: &[
             ("Robitobi01", "Owner"),
             ("unmojang", "Maintainer"),
