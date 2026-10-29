@@ -189,7 +189,7 @@ on the same VM, with a release build, and the method stated rather than implied.
 | Idle CPU | 0 ticks | 0 / 10 s | **0 / 10 s** | `utime+stime` over ten seconds after a 25-second warm-up |
 | Idle RSS | ≤ 120 MB | 114.6 MB | **114.7 MB** | `ps -o rss=` at the same moment |
 | Exe | ≤ 28.65 MB | 10.79 MB | **13.82 MB** | the release binary, unstripped, GNU target |
-| Scroll p95 | ≤ 20 ms | 18.53 ms | *not re-measured* | — |
+| Scroll p95 | ≤ 20 ms | 18.53 ms | **16.49 ms worst, ~13 ms typical** | `SIFT_FRAME_LOG`, 120 wheel steps over the settings body, per-window p95 taken from the log |
 
 **Two things this pass taught that the numbers alone do not say.**
 
@@ -203,6 +203,17 @@ on the same VM, with a release build, and the method stated rather than implied.
   startup: the 0.1.0 number was a single observation, this one polls `xdotool` in 10 ms steps
   from a cold cache. They are not the same measurement, which is why the method column exists.
 
-**Scroll p95 is not re-measured here** and is named rather than assumed: the page it was taken
-on (the instance list) still scrolls the same way, but the last figure predates the servers page
-gaining worker threads. That is the next measurement owed.
+**Scroll, measured 2026-10-29 with the app's own instrument.** `SIFT_FRAME_LOG` writes
+`mean/p50/p95/max` for the frame interval and for the paint half every thirty frames. One hundred
+and twenty wheel steps over the settings dialog — the longest scrolling body in the tree — gave:
+
+| Window | interval p95 | view (paint) p95 |
+| --- | --- | --- |
+| six consecutive windows while scrolling | 12.59, 12.74, 13.00, 13.16, 13.27, 14.18 ms | 0.09 - 0.20 ms |
+| worst p95 of any window in the run | **16.49 ms** | 0.36 ms |
+
+The budget is 20 ms, so the worst scrolling window clears it by 3.5 ms, and the paint half is a
+fifth of a millisecond — the interval is not spent drawing. The one **2073 ms** p95 in the log is
+the settings dialog opening (a first frame that builds the body), not a scroll, and it is named
+here so nobody mistakes it for one. Xvfb has no vsync, so the ~12 ms interval is the app's own
+pace rather than a 16.7 ms cap being held.
