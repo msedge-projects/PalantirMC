@@ -83,22 +83,22 @@ use crate::theme::{self, Theme, STROKE_WIDTH};
 ///
 /// The reference's `Server` is `Archon.Servers.v0.Server` off the network; this is the same row
 /// with the parts this page draws, and nothing that would need a request to fill in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Server {
     /// The server's name: `text-xl font-bold text-contrast` (`ServerListing.vue:39`).
-    pub name: &'static str,
+    pub name: String,
     /// The message of the day, drawn under the name in `text-secondary` (see [`MOTD_LINE`]).
     ///
     /// The reference's card shows a project line here (`Using {projectTitle}`,
     /// `ServerListing.vue:67-79`); a server's MOTD is what a player reads in its place, and it
     /// is the two-line box the brief asks for.
-    pub motd: &'static str,
+    pub motd: String,
     /// The game version, printed the way `ServerGameLabel.vue:13-14` prints it:
     /// `Minecraft` then this.
-    pub mc_version: &'static str,
+    pub mc_version: String,
     /// The loader and its version, printed the way `ServerLoaderLabel.vue:14-17` prints them,
     /// e.g. `Fabric 0.16.10`.
-    pub loader: &'static str,
+    pub loader: String,
     /// The ping's player payload as `(current, max)` -- `ServerListing.vue:92-94` passes
     /// `playerCount.current` and `.max` in exactly this order.
     ///
@@ -108,7 +108,7 @@ pub struct Server {
     /// this page draws as `Unknown`.
     pub players: Option<(u32, u32)>,
     /// The address the ping goes to, as a player would type it. `host` or `host:port`.
-    pub address: &'static str,
+    pub address: String,
     /// Whether the server belongs to someone else: the source's `owner_id` split
     /// (`index.vue:577-603`), which is what puts a row under `Shared servers`.
     pub shared: bool,
@@ -144,62 +144,64 @@ impl Server {
 ///
 /// The names, loaders and versions are plausible Modrinth Hosting rows, not a fixture from a
 /// live account: this page never asks the network who the reader is.
-pub const SERVERS: [Server; 6] = [
-    Server {
-        name: "Modrinth SMP",
-        motd: "The official Modrinth community server: survival, a shopping district at spawn, and an event every weekend.",
-        mc_version: "1.21.4",
-        loader: "Fabric 0.16.10",
+pub fn samples() -> Vec<Server> {
+    vec![
+        Server {
+        name: "Modrinth SMP".to_owned(),
+        motd: "The official Modrinth community server: survival, a shopping district at spawn, and an event every weekend.".to_owned(),
+        mc_version: "1.21.4".to_owned(),
+        loader: "Fabric 0.16.10".to_owned(),
         players: Some((12, 60)),
-        address: "mc.hypixel.net",
+        address: "mc.hypixel.net".to_owned(),
         shared: false,
     },
-    Server {
-        name: "All the Mods 10",
-        motd: "Kitchen-sink progression with ATM ore doubling, 400+ mods and a public market at spawn.",
-        mc_version: "1.21.1",
-        loader: "NeoForge 21.1.72",
+        Server {
+        name: "All the Mods 10".to_owned(),
+        motd: "Kitchen-sink progression with ATM ore doubling, 400+ mods and a public market at spawn.".to_owned(),
+        mc_version: "1.21.1".to_owned(),
+        loader: "NeoForge 21.1.72".to_owned(),
         players: Some((4, 40)),
-        address: "play.cubecraft.net",
+        address: "play.cubecraft.net".to_owned(),
         shared: false,
     },
-    Server {
-        name: "Create: Astral",
-        motd: "A hand-built Create skyblock with quest lines, sky villages and a shared factory district that never sleeps.",
-        mc_version: "1.20.1",
-        loader: "Forge 47.3.0",
+        Server {
+        name: "Create: Astral".to_owned(),
+        motd: "A hand-built Create skyblock with quest lines, sky villages and a shared factory district that never sleeps.".to_owned(),
+        mc_version: "1.20.1".to_owned(),
+        loader: "Forge 47.3.0".to_owned(),
         players: None,
-        address: "purpleprison.net",
+        address: "purpleprison.net".to_owned(),
         shared: false,
     },
-    Server {
-        name: "Vanilla+ Survival",
-        motd: "Vanilla with a light quality-of-life pack: no claims, no map resets, and a spawn town that grew out of one hut.",
-        mc_version: "1.21.4",
-        loader: "Fabric 0.16.10",
+        Server {
+        name: "Vanilla+ Survival".to_owned(),
+        motd: "Vanilla with a light quality-of-life pack: no claims, no map resets, and a spawn town that grew out of one hut.".to_owned(),
+        mc_version: "1.21.4".to_owned(),
+        loader: "Fabric 0.16.10".to_owned(),
         players: Some((0, 0)),
-        address: "play.manacube.com",
+        address: "play.manacube.com".to_owned(),
         shared: false,
     },
-    Server {
-        name: "Better MC [FABRIC]",
-        motd: "A curated kitchen-sink pack for builders: 250 mods, quests, and a creative plot world beside survival.",
-        mc_version: "1.20.1",
-        loader: "Fabric 0.15.11",
+        Server {
+        name: "Better MC [FABRIC]".to_owned(),
+        motd: "A curated kitchen-sink pack for builders: 250 mods, quests, and a creative plot world beside survival.".to_owned(),
+        mc_version: "1.20.1".to_owned(),
+        loader: "Fabric 0.15.11".to_owned(),
         players: Some((7, 30)),
-        address: "2b2t.org",
+        address: "2b2t.org".to_owned(),
         shared: true,
     },
-    Server {
-        name: "Cobblemon Islands",
-        motd: "Catch, train and trade across a hand-made archipelago; the world border opens a new island each season.",
-        mc_version: "1.21.1",
-        loader: "Fabric 0.16.10",
+        Server {
+        name: "Cobblemon Islands".to_owned(),
+        motd: "Catch, train and trade across a hand-made archipelago; the world border opens a new island each season.".to_owned(),
+        mc_version: "1.21.1".to_owned(),
+        loader: "Fabric 0.16.10".to_owned(),
         players: Some((0, 0)),
-        address: "play.wildprison.net",
+        address: "play.wildprison.net".to_owned(),
         shared: true,
     },
-];
+    ]
+}
 
 /// The order the page draws its rows in.
 ///
@@ -233,8 +235,8 @@ pub struct State {
     pub search: String,
     /// The order the rows are drawn in.
     pub sort: Sort,
-    /// The rows, defaulting to [`SERVERS`].
-    pub servers: &'static [Server],
+    /// The rows: the samples, or whatever the reader has added.
+    pub servers: Vec<Server>,
     /// What each address answered, by address. `None` is a ping that failed, which the card
     /// draws as `Offline`; an address missing from here has not been asked yet.
     live: Vec<(String, Option<sift_net::slp::Status>)>,
@@ -250,7 +252,7 @@ impl Default for State {
         State {
             search: String::new(),
             sort: Sort::default(),
-            servers: &SERVERS,
+            servers: samples(),
             live: Vec::new(),
             pinger: None,
             asked: false,
@@ -747,7 +749,7 @@ fn matches_query(server: &Server, needle: &str) -> bool {
     if needle.is_empty() {
         return true;
     }
-    [server.name, server.motd, server.mc_version, server.loader]
+    [&server.name, &server.motd, &server.mc_version, &server.loader]
         .iter()
         .any(|field| field.to_lowercase().contains(needle))
 }
@@ -769,13 +771,13 @@ fn listed<'a>(
         Sort::Status => rows.sort_by(|a, b| {
             a.status_rank()
                 .cmp(&b.status_rank())
-                .then_with(|| a.name.cmp(b.name))
+                .then_with(|| a.name.cmp(&b.name))
         }),
-        Sort::Name => rows.sort_by(|a, b| a.name.cmp(b.name)),
+        Sort::Name => rows.sort_by(|a, b| a.name.cmp(&b.name)),
         Sort::Players => rows.sort_by(|a, b| {
             b.players_now()
                 .cmp(&a.players_now())
-                .then_with(|| a.name.cmp(b.name))
+                .then_with(|| a.name.cmp(&b.name))
         }),
     }
     rows
@@ -898,22 +900,26 @@ impl State {
         self.asked = true;
         let (sender, receiver) = std::sync::mpsc::channel();
         self.pinger = Some(receiver);
-        // A local copy of the list, so the loop does not borrow `self` while it hands the
-        // sender out.
-        let servers: Vec<&'static Server> = self.servers.iter().collect();
-        for server in servers {
+        // The addresses, cloned out, so the loop does not borrow `self` while it hands the
+        // sender out. Six short strings once per page visit.
+        let addresses: Vec<String> = self
+            .servers
+            .iter()
+            .map(|server| server.address.clone())
+            .collect();
+        for address in addresses {
             let thread_sender = sender.clone();
-            let address = server.address.to_owned();
+            let asked = address.clone();
             let spawned = std::thread::Builder::new()
                 .name("sift-ping".to_owned())
                 .spawn(move || {
-                    let answer = sift_net::slp::ping(&address, 25565, PING_TIMEOUT).ok();
-                    let _ = thread_sender.send((address, answer));
+                    let answer = sift_net::slp::ping(&asked, 25565, PING_TIMEOUT).ok();
+                    let _ = thread_sender.send((asked, answer));
                 });
             if spawned.is_err() {
                 // A thread that cannot start is an answer that never comes; the card says
                 // `Offline`, which is true.
-                let _ = sender.send((server.address.to_owned(), None));
+                let _ = sender.send((address.clone(), None));
             }
         }
     }
@@ -935,7 +941,7 @@ fn shown_of(server: &Server, live: &[(String, Option<sift_net::slp::Status>)]) -
     {
         match live
             .iter()
-            .find(|(address, _)| address == server.address)
+            .find(|(address, _)| address == &server.address)
         {
             Some((_, Some(status))) => Shown {
                 motd: status.motd.clone(),
@@ -1008,13 +1014,13 @@ pub fn draw(
             heading: YOUR_SERVERS,
             empty: NO_OWNED_FOUND,
             total: state.servers.iter().filter(|server| !server.shared).count(),
-            cards: listed(state.servers, false, query, state.sort),
+            cards: listed(&state.servers, false, query, state.sort),
         },
         Section {
             heading: SHARED_SERVERS,
             empty: NO_SHARED_FOUND,
             total: state.servers.iter().filter(|server| server.shared).count(),
-            cards: listed(state.servers, true, query, state.sort),
+            cards: listed(&state.servers, true, query, state.sort),
         },
     ];
     let shown = sections[0].cards.len() + sections[1].cards.len();
@@ -1339,7 +1345,7 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, server: &Server
             egui::pos2(text_left, text_top),
             egui::vec2(text_width, NAME_LINE),
         ),
-        server.name,
+        &server.name,
         fonts::title(NAME_SIZE),
         theme.CONTRAST,
     );
@@ -1784,8 +1790,9 @@ mod tests {
     /// reachable first, unasked next, answered-with-nothing last, then by name.
     #[test]
     fn the_source_order_puts_reachable_servers_first() {
-        let rows = listed(&SERVERS, false, "", Sort::Status);
-        let names: Vec<&str> = rows.iter().map(|server| server.name).collect();
+        let samples = samples();
+        let rows = listed(&samples, false, "", Sort::Status);
+        let names: Vec<&str> = rows.iter().map(|server| server.name.as_str()).collect();
         assert_eq!(
             names,
             vec![
@@ -1800,9 +1807,10 @@ mod tests {
     /// Alphabetical, and most players first with the name breaking the tie.
     #[test]
     fn the_other_sorts_order_by_name_and_by_players() {
-        let by_name: Vec<&str> = listed(&SERVERS, false, "", Sort::Name)
+        let samples = samples();
+        let by_name: Vec<&str> = listed(&samples, false, "", Sort::Name)
             .iter()
-            .map(|server| server.name)
+            .map(|server| server.name.as_str())
             .collect();
         assert_eq!(
             by_name,
@@ -1814,9 +1822,9 @@ mod tests {
             ]
         );
 
-        let by_players: Vec<&str> = listed(&SERVERS, false, "", Sort::Players)
+        let by_players: Vec<&str> = listed(&samples, false, "", Sort::Players)
             .iter()
-            .map(|server| server.name)
+            .map(|server| server.name.as_str())
             .collect();
         assert_eq!(
             by_players,
@@ -1833,32 +1841,34 @@ mod tests {
     /// no data for, and it splits the two sections.
     #[test]
     fn the_query_filters_by_name_loader_and_version() {
-        let fabric: Vec<&str> = listed(&SERVERS, true, "fabric", Sort::Name)
+        let samples = samples();
+        let fabric: Vec<&str> = listed(&samples, true, "fabric", Sort::Name)
             .iter()
-            .map(|server| server.name)
+            .map(|server| server.name.as_str())
             .collect();
         assert_eq!(fabric, vec!["Better MC [FABRIC]", "Cobblemon Islands"]);
 
-        let owned_fabric: Vec<&str> = listed(&SERVERS, false, "fabric", Sort::Name)
+        let owned_fabric: Vec<&str> = listed(&samples, false, "fabric", Sort::Name)
             .iter()
-            .map(|server| server.name)
+            .map(|server| server.name.as_str())
             .collect();
         assert_eq!(owned_fabric, vec!["Modrinth SMP", "Vanilla+ Survival"]);
 
-        assert_eq!(listed(&SERVERS, false, "1.21.4", Sort::Name).len(), 2);
-        assert_eq!(listed(&SERVERS, false, "skyblock", Sort::Name).len(), 1);
-        assert!(listed(&SERVERS, false, "zzz", Sort::Name).is_empty());
-        assert_eq!(listed(&SERVERS, true, "  ", Sort::Name).len(), 2);
+        assert_eq!(listed(&samples, false, "1.21.4", Sort::Name).len(), 2);
+        assert_eq!(listed(&samples, false, "skyblock", Sort::Name).len(), 1);
+        assert!(listed(&samples, false, "zzz", Sort::Name).is_empty());
+        assert_eq!(listed(&samples, true, "  ", Sort::Name).len(), 2);
     }
 
     /// The sample rows exist so one capture shows every state: each of the three appears, and
     /// the six rows are split across both sections.
     #[test]
     fn the_sample_shows_all_three_states_and_both_sections() {
+        let samples = samples();
         let mut online: usize = 0;
         let mut offline: usize = 0;
         let mut unknown: usize = 0;
-        for server in SERVERS.iter() {
+        for server in samples.iter() {
             match status_dot(server.players).1 {
                 "Online" => online += 1,
                 "Offline" => offline += 1,
@@ -1868,10 +1878,10 @@ mod tests {
         assert!(online >= 1, "a capture needs an online row");
         assert!(offline >= 1, "a capture needs an offline row");
         assert!(unknown >= 1, "a capture needs an unknown row");
-        assert_eq!(online + offline + unknown, SERVERS.len());
+        assert_eq!(online + offline + unknown, samples.len());
 
-        assert!(!listed(&SERVERS, false, "", Sort::Status).is_empty());
-        assert!(!listed(&SERVERS, true, "", Sort::Status).is_empty());
+        assert!(!listed(&samples, false, "", Sort::Status).is_empty());
+        assert!(!listed(&samples, true, "", Sort::Status).is_empty());
     }
 
     /// One card is its padding plus the taller of the text column and the plate: 16 + 100 + 16
@@ -1895,18 +1905,19 @@ mod tests {
     /// the page scrolls rather than clipping the promo.
     #[test]
     fn the_sections_and_the_promo_add_up_and_overflow_the_column() {
+        let samples = samples();
         let sections = [
             Section {
                 heading: YOUR_SERVERS,
                 empty: NO_OWNED_FOUND,
                 total: 4,
-                cards: listed(&SERVERS, false, "", Sort::Status),
+                cards: listed(&samples, false, "", Sort::Status),
             },
             Section {
                 heading: SHARED_SERVERS,
                 empty: NO_SHARED_FOUND,
                 total: 2,
-                cards: listed(&SERVERS, true, "", Sort::Status),
+                cards: listed(&samples, true, "", Sort::Status),
             },
         ];
 
@@ -1950,18 +1961,19 @@ mod tests {
     /// only when both sections are empty -- the source's own two rules (`index.vue:195-229`).
     #[test]
     fn an_emptied_section_keeps_its_heading_and_one_line() {
+        let samples = samples();
         let sections = [
             Section {
                 heading: YOUR_SERVERS,
                 empty: NO_OWNED_FOUND,
                 total: 4,
-                cards: listed(&SERVERS, false, "zzz", Sort::Status),
+                cards: listed(&samples, false, "zzz", Sort::Status),
             },
             Section {
                 heading: SHARED_SERVERS,
                 empty: NO_SHARED_FOUND,
                 total: 2,
-                cards: listed(&SERVERS, true, "zzz", Sort::Status),
+                cards: listed(&samples, true, "zzz", Sort::Status),
             },
         ];
         assert_eq!(
@@ -1983,12 +1995,13 @@ mod tests {
     /// unfiltered list (`index.vue:168`).
     #[test]
     fn a_section_with_no_rows_of_its_own_is_not_drawn() {
+        let samples = samples();
         let sections = [
             Section {
                 heading: YOUR_SERVERS,
                 empty: NO_OWNED_FOUND,
                 total: 4,
-                cards: listed(&SERVERS, false, "", Sort::Status),
+                cards: listed(&samples, false, "", Sort::Status),
             },
             Section {
                 heading: SHARED_SERVERS,
@@ -2027,10 +2040,10 @@ mod tests {
         let state = State::default();
         assert_eq!(state.search, "");
         assert_eq!(state.sort, Sort::Status);
-        assert_eq!(state.servers.len(), SERVERS.len());
+        assert_eq!(state.servers.len(), samples().len());
 
         let empty = State {
-            servers: &[],
+            servers: Vec::new(),
             ..State::default()
         };
         assert!(empty.servers.is_empty());
