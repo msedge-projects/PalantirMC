@@ -593,6 +593,34 @@ fault.
 `Sign in to Modrinth` row says plainly that its service needs a flow this launcher has no client
 for; and a finished sign-in does not yet change what a launch sends as the player.
 
+### E-38 closed: the Servers page asks its servers — 2026-10-28
+
+The page had drawn invented MOTDs and player counts since it was written, because nothing in the
+tree could ask a server anything. `sift_net::slp` is the Server List Ping; each row carries an
+address, one worker per address answers on the page's first frame, and every frame drains what
+came back.
+
+**The capture is the proof, and it is unambiguous:** Hypixel's card reads
+`Minecraft Requires MC 1.8 / 1.21`, which is the literal string Hypixel's own status returns —
+not a value any code here could have invented — and CubeCraft's MOTD comes back with its
+Halloween event banner. The sample's numbers are gone from those two cards.
+
+| Card | Before | After |
+| --- | --- | --- |
+| Hypixel-labelled row | `12/60` invented | the server's own count, version `Requires MC 1.8 / 1.21` |
+| CubeCraft-labelled row | `4/40` invented | the server's own MOTD and count |
+| one that does not answer | invented count | `Offline`, which the card already had |
+| one still in flight | invented count | its sample, so nothing is ever blank |
+
+**What is still wrong, and it is visible in the same capture:** the *label* is still the sample's
+(`…rth SMP`, `Mods 10`) while the MOTD beneath it is the server's. A reader's own list would carry
+their own names; the samples carry ours. The honest fix is the `New server` button's dialog —
+name plus address, stored — which is the next slice, not a rename of the sample data.
+
+**Also owed:** the icon column (the reference fetches `/server-icon.png`), the promo's
+hand-written copy standing in for Modrinth's own, and a ping that is only ever asked once per
+page visit — re-pinging on demand is a later pass.
+
 ### Open after this pass
 
 | # | Region | What differs |
