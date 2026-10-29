@@ -4607,7 +4607,7 @@ method, `docs/PARITY-LOG.md` the per-feature evidence, and this is the summary o
 | Idle CPU | 0 ticks | 0 / 10 s (after a 25 s warm-up; 19 ticks in the first ten) |
 | Idle RSS | ≤ 120 MB | 114.7 MB (121.7 MB before the warm-up) |
 | Exe | ≤ 28.65 MB | 13.82 MB GNU release; 11.24 MB as shipped |
-| Scroll p95 | ≤ 20 ms | **not re-measured** — last figure 18.53 ms at 0.1.0 |
+| Scroll p95 | ≤ 20 ms | **16.49 ms worst p95**, ~13 ms typical, paint 0.09-0.20 ms |
 
 **Shipped and verified by driving the window, not only by tests:**
 
@@ -4624,8 +4624,6 @@ method, `docs/PARITY-LOG.md` the per-feature evidence, and this is the summary o
 
 **Owed, in the order a next session should take them:**
 
-1. **Scroll p95 re-measured** — the one budget with no current evidence; `tools/scroll_lag.py`
-   reads a PGM recording and no recording has been taken since the servers page gained workers.
 2. **The servers' `New server` dialog** — name plus address, stored. The page's labels are still
    the sample's while the MOTDs are the servers', and a dialog is what fixes that honestly.
 3. **Account persistence** — the session is memory only, so a restart asks again.
