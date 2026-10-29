@@ -185,12 +185,18 @@ jobs:
           New-Item -ItemType Directory -Force -Path installer/dist | Out-Null
           Copy-Item dist/SiftUi.exe installer/dist/SiftUi.exe
 
+          Write-Host "makensis: $makensis"
+          Write-Host "version:  $version"
+          Write-Host "payload:  $((Get-Item installer/dist/SiftUi.exe).FullName) ($((Get-Item installer/dist/SiftUi.exe).Length) bytes)"
+
           # makensis resolves `!define HERE` and its output against the directory it is run
-          # from, which is why this pushes into `installer/`.
+          # from, which is why this pushes into `installer/`. Its output is captured so a
+          # failure carries NSIS's own sentence into the log instead of only the line number.
           Push-Location installer
-          & $makensis /V2 /DVERSION=$version /DAPP_EXE=dist/SiftUi.exe sift.nsi
+          $out = & $makensis /V3 /DVERSION=$version /DAPP_EXE=dist/SiftUi.exe sift.nsi 2>&1
           $code = $LASTEXITCODE
           Pop-Location
+          $out | ForEach-Object { Write-Host $_ }
           if ($code -ne 0) { throw "makensis exited $code" }
 
           $setup = Get-ChildItem dist -Filter *-setup.exe
