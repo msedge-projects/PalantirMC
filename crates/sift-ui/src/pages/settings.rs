@@ -99,6 +99,9 @@ pub struct State {
     /// Where each slider the reader has touched sits, keyed by its row's label. A row with no
     /// entry draws the value its `Block` declares.
     pub sliders: Vec<(&'static str, f32)>,
+    /// What a reader has typed into each field, keyed the same way. A row with no entry is empty,
+    /// which is what a field with a placeholder looks like.
+    pub texts: Vec<(&'static str, String)>,
     /// The shell keeps drawing while this is true, and stops when it is false.
     pub open: bool,
     /// The selected tab. The source opens on the first one (`index.vue:88-96`).
@@ -685,6 +688,12 @@ enum Control {
         /// The value the trigger shows.
         value: &'static str,
     },
+    /// A text field (`TextInput.vue`): a plate that takes typing, with the placeholder it
+    /// shows while empty.
+    Text {
+        /// The placeholder, from the catalogue key the row's comment names.
+        placeholder: &'static str,
+    },
     /// A slider (`Slider.vue`): a 4-point track with the filled part and the knob on it, and
     /// the value it is at printed to the left.
     Slider {
@@ -749,6 +758,11 @@ impl ThemeChoice {
         THEME_CARD_WIDTH * 3.0 + THEME_CARD_GAP * 2.0
     }
 }
+
+/// A field's plate: `TextInput.vue` is a 28-point box, wider than a select because it holds a
+/// path.
+const FIELD_WIDTH: f32 = 200.0;
+const FIELD_HEIGHT: f32 = 28.0;
 
 /// A slider's track and knob, from `Slider.vue`: a 4-point track in a 20-point row.
 const SLIDER_WIDTH: f32 = 160.0;
@@ -1238,29 +1252,29 @@ const JAVA_AND_MEMORY_BLOCKS: &[Block] = &[
     Block::Row {
         label: JAVA_LOCATION_25,
         description: None,
-        control: Control::Select {
-            value: JAVA_PATH_PLACEHOLDER,
+        control: Control::Text {
+            placeholder: JAVA_PATH_PLACEHOLDER,
         },
     },
     Block::Row {
         label: JAVA_LOCATION_21,
         description: None,
-        control: Control::Select {
-            value: JAVA_PATH_PLACEHOLDER,
+        control: Control::Text {
+            placeholder: JAVA_PATH_PLACEHOLDER,
         },
     },
     Block::Row {
         label: JAVA_LOCATION_17,
         description: None,
-        control: Control::Select {
-            value: JAVA_PATH_PLACEHOLDER,
+        control: Control::Text {
+            placeholder: JAVA_PATH_PLACEHOLDER,
         },
     },
     Block::Row {
         label: JAVA_LOCATION_8,
         description: None,
-        control: Control::Select {
-            value: JAVA_PATH_PLACEHOLDER,
+        control: Control::Text {
+            placeholder: JAVA_PATH_PLACEHOLDER,
         },
     },
     Block::Rule,
@@ -1279,8 +1293,8 @@ const JAVA_AND_MEMORY_BLOCKS: &[Block] = &[
         big: false,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: JAVA_ARGS_PLACEHOLDER,
+    Block::Standalone(Control::Text {
+        placeholder: JAVA_ARGS_PLACEHOLDER,
     }),
     Block::Heading {
         text: ENV_VARS_TITLE,
@@ -1310,8 +1324,8 @@ const WINDOW_BLOCKS: &[Block] = &[
     Block::Row {
         label: WINDOW_WIDTH_LABEL,
         description: Some(WINDOW_WIDTH_DESCRIPTION),
-        control: Control::Select {
-            value: WINDOW_WIDTH_PLACEHOLDER,
+        control: Control::Text {
+            placeholder: WINDOW_WIDTH_PLACEHOLDER,
         },
     },
     Block::Row {
@@ -1576,7 +1590,8 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
 
     let dialog = dialog_rect(screen);
     {
-        let painter = ui.painter();
+        // A clone, so the body may hold it while also taking `ui` for the fields inside it.
+    let painter = ui.painter().clone();
         painter.rect_filled(screen, 0, Color32::from_black_alpha(SCRIM_ALPHA));
         painter.rect_filled(dialog, PLATE_RADIUS, theme.RAISED_BG);
         painter.rect_stroke(
@@ -1585,8 +1600,8 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
             Stroke::new(RULE_STROKE, theme.DIVIDER),
             egui::StrokeKind::Inside,
         );
-        draw_header(painter, dialog, theme);
-        draw_rail(painter, dialog, theme, state.tab, state.rail_scroll);
+        draw_header(&painter, dialog, theme);
+        draw_rail(&painter, dialog, theme, state.tab, state.rail_scroll);
         let (pointer, held) = ui.input(|input| {
         (
             input.pointer.interact_pos(),
@@ -1594,7 +1609,8 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
         )
     });
     let body_height = draw_body(
-        painter,
+        &painter,
+        ui,
         dialog,
         theme,
         state.tab,
@@ -1920,6 +1936,7 @@ fn fraction_at(pointer_x: f32, track_left: f32, track_width: f32) -> f32 {
 /// that let a reader go past the last row by a screenful is as wrong as no scrolling at all.
 fn draw_body(
     painter: &egui::Painter,
+    ui: &mut Ui,
     dialog: Rect,
     theme: &theme::Theme,
     tab: Tab,
@@ -2046,7 +2063,7 @@ fn draw_body(
                     }
                     other => other,
                 };
-                draw_labelled(
+                let height = draw_labelled(
                     &body,
                     theme,
                     left,
@@ -2056,7 +2073,34 @@ fn draw_body(
                     description,
                     Some(control),
                     ROW_LABEL_SIZE,
-                ) + ROW_GAP
+                );
+                // A field is a `Ui` child, so it goes on top of the plate the row just painted.
+                // Centred on the label's first line, where the plate sits.
+                if let Control::Text { placeholder } = control {
+                    let rect = Rect::from_center_size(
+                        egui::pos2(right - FIELD_WIDTH / 2.0, y + ROW_LABEL_SIZE / 2.0),
+                        egui::vec2(FIELD_WIDTH, FIELD_HEIGHT),
+                    );
+                    let mut text = state
+                        .texts
+                        .iter()
+                        .find(|(key, _)| *key == label)
+                        .map(|(_, typed)| typed.clone())
+                        .unwrap_or_default();
+                    let output = ui.put(
+                        rect,
+                        egui::TextEdit::singleline(&mut text)
+                            .hint_text(placeholder)
+                            .desired_width(FIELD_WIDTH),
+                    );
+                    if output.changed() {
+                        match state.texts.iter_mut().find(|(key, _)| *key == label) {
+                            Some((_, typed)) => *typed = text,
+                            None => state.texts.push((label, text)),
+                        }
+                    }
+                }
+                height + ROW_GAP
             }
             Block::Standalone(control) => {
                 // Left-aligned: the control's right edge is its own width past the inset.
@@ -2204,6 +2248,7 @@ impl Control {
     fn width(self, painter: &egui::Painter) -> f32 {
         match self {
             Control::Switch { .. } => SWITCH_WIDTH,
+            Control::Text { .. } => FIELD_WIDTH,
             Control::Slider { value, low, high, unit } => {
                 let label = painter.layout_no_wrap(
                     slider_label(value, low, high, unit),
@@ -2241,6 +2286,7 @@ impl Control {
         match self {
             Control::Switch { .. } => SWITCH_HEIGHT,
             Control::Slider { .. } => SLIDER_HEIGHT,
+            Control::Text { .. } => FIELD_HEIGHT,
             Control::Select { .. } | Control::Button { .. } => CONTROL_HEIGHT,
         }
     }
@@ -2250,6 +2296,20 @@ impl Control {
         let height = self.height();
         let width = self.width(painter);
         match self {
+            Control::Text { placeholder } => {
+                let rect = Rect::from_min_size(
+                    pos2(right - FIELD_WIDTH, centre_y - FIELD_HEIGHT / 2.0),
+                    vec2(FIELD_WIDTH, FIELD_HEIGHT),
+                );
+                painter.rect_filled(rect, CONTROL_RADIUS, theme.BUTTON_BG);
+                painter.text(
+                    pos2(rect.left() + CONTROL_PADDING, centre_y),
+                    Align2::LEFT_CENTER,
+                    placeholder,
+                    fonts::body(CONTROL_TEXT_SIZE),
+                    theme.SECONDARY,
+                );
+            }
             Control::Slider {
                 value,
                 low,
@@ -2733,6 +2793,7 @@ mod tests {
             Control::Switch { .. } => None,
             // A slider's value is a number, not words: nothing to spell, nothing to misspell.
             Control::Slider { .. } => None,
+            Control::Text { placeholder } => Some(placeholder),
             Control::Select { value } => Some(value),
             Control::Button { label, .. } => Some(label),
         };
