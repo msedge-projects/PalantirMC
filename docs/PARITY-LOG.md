@@ -874,6 +874,22 @@ not a comment.
 The two helpers behind them are pure and tested: `tail_lines` (bounded by the pane, not the file,
 so a megabyte log costs one screenful) and `format_size` (`842 B`, `1.5 KB`, `12.1 MB`, `2.0 GB`).
 
+### The instance page's five tabs are all real — 0.1.26
+
+| Tab | What it draws | Evidence on the VM |
+| --- | --- | --- |
+| Content | the instance's loader, version, last played and path | `Vanilla`, `1.21.4`, the path |
+| Files | the instance's folder, folders first, sizes in words | `.minecraft`, `mmc-pack.json 173 B`, `instance.cfg 118 B` |
+| Screenshots | a 3-across grid of the instance's own images | three 16:9 tiles from the PNGs in `screenshots/` |
+| Worlds | the saves, by the name in `level.dat`, folder dim | `Harbour Build` / `folder-name-world` |
+| Logs | the last screenful of the game's own log | this session's `Failed to read level folder-name-world data` |
+
+One owed item remains on this page and it is not a tab: the instance's description and notes, which
+the reference keeps in `instance.cfg` keys this launcher does not yet read.
+
+`Images::get_file` was added for the grid: a local file is decoded inline and cached under its path,
+through the cache's existing eviction, so the screenshots cost one decode each and no worker.
+
 ### Open after this pass
 
 | # | Region | What differs |
