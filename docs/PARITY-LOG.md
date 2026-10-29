@@ -769,6 +769,22 @@ cut off: the news button read `Upgrade to Modrinth+` and the servers heading `Mo
 Both are the catalogue's `{product}` templates, so this build now says `Upgrade to Sift+` and
 `Sift Hosting`.
 
+### Four kinds of control that work — 0.1.20
+
+Sliders drag, fields take typing, chips choose, switches flip, and all four come back after a
+restart from `app-settings.json`. Each was verified by driving it on the VM and reading the file
+it wrote:
+
+```
+"chips":    { "Shared instance invites": 1 }
+"sliders":  { "Quick instances in sidebar": 0.21875 }
+"switches": { "Sync with system": true }
+```
+
+What is left on that screen, plainly: the selects draw their value and do not open a list, the
+promo art is not drawn, and the `owed:` notes still name rows whose data the reference has and
+this build does not.
+
 ### Open after this pass
 
 | # | Region | What differs |
