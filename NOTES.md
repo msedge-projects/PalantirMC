@@ -4657,3 +4657,11 @@ method, `docs/PARITY-LOG.md` the per-feature evidence, and this is the summary o
 - Tests: 819 workspace, 152 in `sift-ui`.
 - Every capture that mattered this session was taken **after** killing the reference app on the VM;
   two earlier ones were of its window and one claim in the previous state block came from them.
+
+### The launch works end to end (0.1.21)
+
+`instances/Instance 1/minecraft/logs/latest.log` on the VM records `Setting user: Player`,
+LWJGL 3.3.3 and fourteen texture atlases: the game reached its title screen, started by this
+launcher out of its own bundled runtime. The only error in that log is the VM's missing audio
+device. So a press on Play is verified as far as the game's own main menu, not just as far as a
+`java` command line.

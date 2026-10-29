@@ -804,6 +804,25 @@ carries CJK.
 display ("Welcome to Minecraft! … Narrator or Accessibility Settings?"), which is the game's own
 first-launch screen. That is evidence a launch reached the game on this VM, not just a plan.
 
+### A launch, all the way into the game — 2026-10-29
+
+This is the one that matters: not a plan, a process, or a window — Minecraft's own log.
+
+```
+[16:51:59] [Render thread/INFO]: Setting user: Player
+[16:51:59] [Render thread/INFO]: Backend library: LWJGL version 3.3.3+5
+[16:52:05] ... Created: 1024x512x4 minecraft:textures/atlas/gui.png-atlas
+```
+
+Two `java` processes were running from `SiftLauncher/instances/Instance 1`, out of the launcher's
+own bundled runtime (`java/java-runtime-delta/bin/java`) with `-Xms128m -Xmx4096m`, and the game
+reached its title screen — 14 texture atlases and the `Environment[sessionHost=…]` line say so.
+The only error is `Error starting SoundSystem`, which is the VM having no audio device.
+
+So the whole chain works on the Linux VM: instance → metadata → assets → Java → game. The
+launcher's own parity work has meant little without this, and it is now checked rather than
+assumed.
+
 ### Open after this pass
 
 | # | Region | What differs |
