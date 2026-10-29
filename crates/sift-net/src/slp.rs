@@ -31,6 +31,9 @@ pub struct Status {
     pub online: u32,
     /// The server's player cap.
     pub capacity: u32,
+    /// The server's icon, as the `data:image/png;base64,` URI the status carries. Not every
+    /// server sends one.
+    pub favicon: Option<String>,
 }
 
 /// A varint: seven bits per byte, little-endian, the high bit meaning "another byte follows".
@@ -105,6 +108,53 @@ pub fn plain_motd(raw: &str) -> String {
     out.trim().to_string()
 }
 
+/// Decode the base64 in a `data:` URI, or nothing when it is malformed.
+///
+/// One alphabet of 64 characters and `=` padding: a launcher needs no more, and a dependency for
+/// this much would be the wrong trade. Bytes that are not in the alphabet are skipped, which is
+/// what makes a URI with a line break in it still decode.
+pub fn base64(input: &str) -> Option<Vec<u8>> {
+    fn value_of(byte: u8) -> Option<u32> {
+        match byte {
+            b'A'..=b'Z' => Some((byte - b'A') as u32),
+            b'a'..=b'z' => Some((byte - b'a') as u32 + 26),
+            b'0'..=b'9' => Some((byte - b'0') as u32 + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut buffer: u32 = 0;
+    let mut bits = 0;
+    for byte in input.bytes() {
+        if byte == b'=' {
+            break;
+        }
+        let Some(value) = value_of(byte) else {
+            continue;
+        };
+        buffer = (buffer << 6) | value;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// The bytes of a `data:` URI's payload, with the header removed.
+pub fn data_uri_bytes(uri: &str) -> Option<Vec<u8>> {
+    let (_, payload) = uri.split_once("base64,")?;
+    base64(payload)
+}
+
 /// Parse the JSON a server answers with.
 pub fn parse_status(json: &str) -> Option<Status> {
     let value: Value = serde_json::from_str(json).ok()?;
@@ -134,6 +184,11 @@ pub fn parse_status(json: &str) -> Option<Status> {
         version,
         online,
         capacity,
+        favicon: value
+            .get("favicon")
+            .and_then(Value::as_str)
+            .filter(|uri| uri.starts_with("data:image/"))
+            .map(str::to_owned),
     })
 }
 
@@ -280,6 +335,21 @@ mod tests {
             "description":{"text":"Hi ","extra":[{"text":"there"}]}}"#;
         let parsed = parse_status(component).expect("a status");
         assert_eq!(parsed.motd, "Hi there");
+    }
+
+    /// The decoder the icon travels through: standard alphabet, padding, and junk skipped.
+    #[test]
+    fn base64_decodes_the_shapes_a_data_uri_has() {
+        assert_eq!(base64("aGVsbG8=").as_deref(), Some(&b"hello"[..]));
+        assert_eq!(base64("aGVsbG8gd29ybGQ=").as_deref(), Some(&b"hello world"[..]));
+        // A line break inside the payload is skipped rather than refused.
+        assert_eq!(base64("aGVsbG8g\nd29ybGQ=").as_deref(), Some(&b"hello world"[..]));
+        assert_eq!(base64(""), None, "no payload");
+        assert_eq!(
+            data_uri_bytes("data:image/png;base64,aGVsbG8=").as_deref(),
+            Some(&b"hello"[..])
+        );
+        assert_eq!(data_uri_bytes("data:image/png,"), None, "no base64 marker");
     }
 
     #[test]

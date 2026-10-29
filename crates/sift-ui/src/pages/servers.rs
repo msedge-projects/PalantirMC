@@ -240,6 +240,9 @@ pub struct State {
     /// What each address answered, by address. `None` is a ping that failed, which the card
     /// draws as `Offline`; an address missing from here has not been asked yet.
     live: Vec<(String, Option<sift_net::slp::Status>)>,
+    /// The icons the servers sent, by address. A server without a `favicon` has no entry and
+    /// keeps its initial.
+    icons: Icons,
     /// The pings still out. Drained once per frame.
     pinger: Option<std::sync::mpsc::Receiver<(String, Option<sift_net::slp::Status>)>>,
     /// Whether the pings have been started, so a page that is left and returned to does not
@@ -258,6 +261,7 @@ impl Default for State {
             sort: Sort::default(),
             servers: samples(),
             live: Vec::new(),
+            icons: Icons::default(),
             pinger: None,
             asked: false,
             loaded: false,
@@ -1031,15 +1035,54 @@ impl State {
     }
 
     /// Take every answer that has arrived.
-    fn poll_servers(&mut self) {
+    /// Take every answer the pinger has, and decode any icon that came with one.
+    ///
+    /// The cache is checked before the decode so a re-poll cannot upload the same PNG twice.
+    fn poll_servers(&mut self, ctx: &egui::Context) {
         let Some(receiver) = &self.pinger else {
             return;
         };
         while let Ok((address, answer)) = receiver.try_recv() {
+            if let Some(status) = &answer {
+                if let Some(uri) = &status.favicon {
+                    if !self.icons.0.iter().any(|(known, _)| known == &address) {
+                        if let Some(texture) = decode_icon(ctx, &address, uri) {
+                            self.icons.0.push((address.clone(), texture));
+                        }
+                    }
+                }
+            }
             self.live.push((address, answer));
         }
     }
 
+}
+
+/// The decoded icons, in a newtype so the page's `Debug` does not try to print a GPU handle.
+#[derive(Default)]
+struct Icons(Vec<(String, egui::TextureHandle)>);
+
+impl std::fmt::Debug for Icons {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} decoded", self.0.len())
+    }
+}
+
+/// Turn a `data:` URI into a texture, or nothing when its bytes are not an image this build can
+/// read.
+///
+/// PNG, because that is what a status carries and `image`'s png feature is already on for the
+/// project icons; no mipmaps, because a 64-point icon never needs them.
+fn decode_icon(ctx: &egui::Context, address: &str, uri: &str) -> Option<egui::TextureHandle> {
+    let bytes = sift_net::slp::data_uri_bytes(uri)?;
+    let image = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    let size = [image.width() as usize, image.height() as usize];
+    let pixels = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+    Some(ctx.load_texture(
+        format!("server-icon-{address}"),
+        pixels,
+        egui::TextureOptions::LINEAR,
+    ))
 }
 
 /// What a card should draw: the live answer when there is one, the sample when not.
@@ -1109,7 +1152,7 @@ pub fn draw(
         state.servers.extend(read_store());
     }
     state.ask_servers();
-    state.poll_servers();
+    state.poll_servers(ui.ctx());
 
     // The reference fetches `/server-icon.png` through the filesystem API for each available
     // server (`ServerListing.vue:552-610`). `Server` carries no icon URL, so there is nothing to
@@ -1197,7 +1240,16 @@ pub fn draw(
                 if blocks > 0 {
                     top += BLOCK_GAP;
                 }
-                draw_section(ui.painter(), area.left(), width, top, theme, section, &state.live);
+                draw_section(
+        ui.painter(),
+        area.left(),
+        width,
+        top,
+        theme,
+        section,
+        &state.live,
+        &state.icons.0,
+    );
                 top += section_height(section);
                 blocks += 1;
             }
@@ -1548,6 +1600,7 @@ fn draw_section(
     theme: &Theme,
     section: &Section<'_>,
     live: &[(String, Option<sift_net::slp::Status>)],
+    icons: &[(String, egui::TextureHandle)],
 ) {
     // `h2.m-0.text-xl.font-semibold.text-primary` (`index.vue:169`).
     painter.text(
@@ -1577,7 +1630,11 @@ fn draw_section(
             egui::vec2(width, card_height()),
         );
         let shown = shown_of(server, live);
-        draw_card(painter, card, theme, server, &shown);
+        let icon = icons
+        .iter()
+        .find(|(address, _)| address == &server.address)
+        .map(|(_, texture)| texture);
+    draw_card(painter, card, theme, server, &shown, icon);
     }
 }
 
@@ -1587,7 +1644,14 @@ fn draw_section(
 
 /// One server, drawn as `ServerListing.vue` lays it out: a 64-point plate, the name, the MOTD
 /// and the labels row in a column `ml-4` to the right of it (lines 15-105).
-fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, server: &Server, shown: &Shown) {
+fn draw_card(
+    painter: &egui::Painter,
+    rect: Rect,
+    theme: &Theme,
+    server: &Server,
+    shown: &Shown,
+    icon: Option<&egui::TextureHandle>,
+) {
     painter.rect_filled(rect, CARD_RADIUS, theme.RAISED_BG);
     painter.rect_stroke(
         rect,
@@ -1605,7 +1669,19 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, server: &Server
         egui::pos2(rect.left() + CARD_PADDING, icon_top),
         Vec2::splat(ICON_SIDE),
     );
-    painter.rect_filled(plate, ICON_RADIUS, theme.BUTTON_BG);
+    if let Some(icon) = icon {
+        // The server's uploaded icon (`ServerListing.vue:36`), rounded by the plate's own
+        // radius. The plate's border still goes on top, so an icon with transparent corners
+        // keeps the card's edge.
+        painter.image(
+            icon.id(),
+            plate,
+            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    } else {
+        painter.rect_filled(plate, ICON_RADIUS, theme.BUTTON_BG);
+    }
     painter.rect_stroke(
         plate,
         ICON_RADIUS,
