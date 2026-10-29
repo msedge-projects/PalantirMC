@@ -39,8 +39,12 @@ SetCompressorDictSize 64
 ; cargo writes there rather than to the root `target/`; the file inside is `SiftUi.exe` and the
 ; installer renames it to `SiftLauncher.exe` on install, which is the name the Start menu, the
 ; uninstall entry and the shortcut all use.
-!ifndef APP_EXE
-  !define APP_EXE "../crates/sift-ui/target/release/SiftUi.exe"
+; The exe to install, as one whole path. Absolute when the caller can make it absolute:
+; composing it from `${HERE}` and a relative name is what failed twice on the runner's NSIS 3.13
+; (`...\installer\dist/SiftUi.exe`), and a path that needs no joining cannot fail that way. The
+; default is for a local build from the repository root.
+!ifndef PAYLOAD
+  !define PAYLOAD "${__FILEDIR__}/../crates/sift-ui/target/release/SiftUi.exe"
 !endif
 
 ; The script's own directory, with the trailing separator every path below assumes.
@@ -175,7 +179,7 @@ Section "${PRODUCT} (required)" SEC_APP
   ; token, so a destination filename containing a space cannot be written on the
   ; `File` line itself, and the installed name is the one the shortcuts and the
   ; uninstaller both depend on.
-  File /oname=SiftLauncher.exe "${HERE}${APP_EXE}"
+  File /oname=SiftLauncher.exe "${PAYLOAD}"
   Rename "$INSTDIR\SiftLauncher.exe" "$INSTDIR\Sift Launcher.exe"
   File "${HERE}sift.ico"
   File "${HERE}../LICENSE"

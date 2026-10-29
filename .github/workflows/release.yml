@@ -193,7 +193,8 @@ jobs:
           # from, which is why this pushes into `installer/`. Its output is captured so a
           # failure carries NSIS's own sentence into the log instead of only the line number.
           Push-Location installer
-          $out = & $makensis /V3 /DVERSION=$version /DAPP_EXE=dist/SiftUi.exe sift.nsi 2>&1
+          $payload = (Resolve-Path dist/SiftUi.exe).Path
+          $out = & $makensis /V3 /DVERSION=$version "/DPAYLOAD=$payload" sift.nsi 2>&1
           $code = $LASTEXITCODE
           Pop-Location
           $out | ForEach-Object { Write-Host $_ }
