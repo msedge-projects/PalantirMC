@@ -297,7 +297,7 @@ pub struct State {
     pub menu: Menu,
     /// Every drawn instance's `saves/` folder names, read when the set of instances last
     /// changed. Held here rather than re-read per frame: see `State::refresh_worlds`.
-    worlds: Vec<(String, Vec<String>)>,
+    worlds: Vec<(String, Vec<(String, String)>)>,
     /// The instance ids `worlds` was read for. A create or a delete changes this list, and
     /// that change is what triggers the re-read.
     scanned: Vec<String>,
@@ -639,7 +639,7 @@ fn list(
         );
         y += WORLD_HEADING_LINE;
         for (id, names) in worlds.iter() {
-            for name in names.iter().take(WORLDS_PER_INSTANCE) {
+            for (folder, name) in names.iter().take(WORLDS_PER_INSTANCE) {
                 let row = Rect::from_min_size(
                     egui::pos2(rect.left(), y),
                     egui::vec2(width, WORLD_ROW_HEIGHT),
@@ -656,10 +656,8 @@ fn list(
                     ),
                     theme.SECONDARY,
                 );
-                // The world's folder name with its copy timestamp cut off. **Not the world's
-                // name**: that is the `LevelName` string inside `saves/<folder>/level.dat`,
-                // an NBT document this page does not parse. Reading it is owed, and until it
-                // exists a row says the folder, which is the closest true thing on disk.
+                // The world's own name from `level.dat`, and the folder when it has none --
+                // which is the same fallback the game uses.
                 let label = clean_world_name(name);
                 painter.text(
                     egui::pos2(row.left() + WORLD_TEXT_INSET, row.center().y),
@@ -669,18 +667,19 @@ fn list(
                     theme.BASE,
                 );
                 if ui
-                    .interact(row, egui::Id::new(("world", id, name)), Sense::click())
+                    .interact(row, egui::Id::new(("world", id, folder)), Sense::click())
                     .clicked()
                     && matches!(action, Action::None)
                 {
-                    // A world row's press reports back to the shell, which answers with a
-                    // toast: launching one world is quick-play, an argv this launcher does
-                    // not build yet, and a row that quietly did nothing would read as broken.
-                    // Any press on the page closes the popover, this one included.
+                    // A world row's press reports back to the shell, which launches that one
+                    // world. Any press on the page closes the popover, this one included.
                     menu.open_for = None;
                     action = Action::OpenWorld {
                         instance: id.clone(),
-                        world: label,
+                        // The folder, not the label: quick-play names a world by the folder
+                        // it lives in, and a label the game cannot resolve reads as a launch
+                        // that did nothing.
+                        world: folder.clone(),
                     };
                 }
                 y += WORLD_ROW_HEIGHT + WORLD_ROW_GAP;
@@ -811,7 +810,7 @@ fn menu_popover(ui: &mut Ui, theme: &Theme, id: &str, anchor: Rect, bounds: Rect
 /// copied world carries cut off by [`clean_world_name`]. A folder that will not open, or a
 /// name that is not UTF-8, is skipped rather than reported: a Home page has no way to act on
 /// either, and a row that cannot be named is worse than no row.
-fn read_worlds(instances: &[Entry]) -> Vec<(String, Vec<String>)> {
+fn read_worlds(instances: &[Entry]) -> Vec<(String, Vec<(String, String)>)> {
     let root = crate::data::instances_dir();
     instances
         .iter()
@@ -822,7 +821,7 @@ fn read_worlds(instances: &[Entry]) -> Vec<(String, Vec<String>)> {
                 .iter()
                 .map(|dir| root.join(&instance.id).join(dir))
                 .find(|path| path.is_dir());
-            let mut names: Vec<String> = Vec::new();
+            let mut names: Vec<(String, String)> = Vec::new();
             if let Some(entries) = saves.map(std::fs::read_dir).and_then(Result::ok) {
                 for entry in entries.flatten() {
                     // Only folders are worlds: `saves/` also holds `level.dat` caches and
@@ -836,9 +835,12 @@ fn read_worlds(instances: &[Entry]) -> Vec<(String, Vec<String>)> {
                             // The world's own name when `level.dat` has one, and the folder
                             // when it does not: the folder is what the game would show as a
                             // fallback too, so a reader still sees something they recognise.
+                            // The folder is what the game launches; the name is what the
+                            // row says. Both, because they differ: a world called "Harbour
+                            // Build" lives in a folder of any name at all.
                             let named = crate::nbt::world_name(&entry.path())
                                 .unwrap_or_else(|| clean_world_name(folder).to_owned());
-                            names.push(named);
+                            names.push((folder.to_owned(), named));
                         }
                     }
                 }
