@@ -178,11 +178,17 @@ jobs:
           # The tag is `v0.1.8`; the installer prints the version, so it is the bare one.
           $version = $env:REQUESTED.TrimStart('v')
 
-          # makensis resolves `!define HERE` and the `../dist` output against the directory
-          # it is run from, which is why this pushes into `installer/` rather than passing
-          # absolute paths the script does not expect.
+          # The script writes `${HERE}${APP_EXE}`, and `${HERE}` already ends in a
+          # backslash: a `../` in APP_EXE gives a path POSIX makensis normalises and the
+          # runner's NSIS 3.13 does not (it aborted on the `File` line with 0.1.8). The exe
+          # is copied beside the script and handed over as a plain relative name.
+          New-Item -ItemType Directory -Force -Path installer/dist | Out-Null
+          Copy-Item dist/SiftUi.exe installer/dist/SiftUi.exe
+
+          # makensis resolves `!define HERE` and its output against the directory it is run
+          # from, which is why this pushes into `installer/`.
           Push-Location installer
-          & $makensis /V2 /DVERSION=$version /DAPP_EXE=../dist/SiftUi.exe sift.nsi
+          & $makensis /V2 /DVERSION=$version /DAPP_EXE=dist/SiftUi.exe sift.nsi
           $code = $LASTEXITCODE
           Pop-Location
           if ($code -ne 0) { throw "makensis exited $code" }
