@@ -107,6 +107,8 @@ pub struct Server {
     /// nothing has asked about yet, which is the state the reference draws as still loading and
     /// this page draws as `Unknown`.
     pub players: Option<(u32, u32)>,
+    /// The address the ping goes to, as a player would type it. `host` or `host:port`.
+    pub address: &'static str,
     /// Whether the server belongs to someone else: the source's `owner_id` split
     /// (`index.vue:577-603`), which is what puts a row under `Shared servers`.
     pub shared: bool,
@@ -149,6 +151,7 @@ pub const SERVERS: [Server; 6] = [
         mc_version: "1.21.4",
         loader: "Fabric 0.16.10",
         players: Some((12, 60)),
+        address: "mc.hypixel.net",
         shared: false,
     },
     Server {
@@ -157,6 +160,7 @@ pub const SERVERS: [Server; 6] = [
         mc_version: "1.21.1",
         loader: "NeoForge 21.1.72",
         players: Some((4, 40)),
+        address: "play.cubecraft.net",
         shared: false,
     },
     Server {
@@ -165,6 +169,7 @@ pub const SERVERS: [Server; 6] = [
         mc_version: "1.20.1",
         loader: "Forge 47.3.0",
         players: None,
+        address: "purpleprison.net",
         shared: false,
     },
     Server {
@@ -173,6 +178,7 @@ pub const SERVERS: [Server; 6] = [
         mc_version: "1.21.4",
         loader: "Fabric 0.16.10",
         players: Some((0, 0)),
+        address: "play.manacube.com",
         shared: false,
     },
     Server {
@@ -181,6 +187,7 @@ pub const SERVERS: [Server; 6] = [
         mc_version: "1.20.1",
         loader: "Fabric 0.15.11",
         players: Some((7, 30)),
+        address: "2b2t.org",
         shared: true,
     },
     Server {
@@ -189,6 +196,7 @@ pub const SERVERS: [Server; 6] = [
         mc_version: "1.21.1",
         loader: "Fabric 0.16.10",
         players: Some((0, 0)),
+        address: "play.wildprison.net",
         shared: true,
     },
 ];
@@ -227,6 +235,14 @@ pub struct State {
     pub sort: Sort,
     /// The rows, defaulting to [`SERVERS`].
     pub servers: &'static [Server],
+    /// What each address answered, by address. `None` is a ping that failed, which the card
+    /// draws as `Offline`; an address missing from here has not been asked yet.
+    live: Vec<(String, Option<sift_net::slp::Status>)>,
+    /// The pings still out. Drained once per frame.
+    pinger: Option<std::sync::mpsc::Receiver<(String, Option<sift_net::slp::Status>)>>,
+    /// Whether the pings have been started, so a page that is left and returned to does not
+    /// ask every server again.
+    asked: bool,
 }
 
 impl Default for State {
@@ -235,6 +251,9 @@ impl Default for State {
             search: String::new(),
             sort: Sort::default(),
             servers: &SERVERS,
+            live: Vec::new(),
+            pinger: None,
+            asked: false,
         }
     }
 }
@@ -864,6 +883,92 @@ fn empty_height() -> f32 {
 // The page
 // ---------------------------------------------------------------------------
 
+/// How long a single server has to answer before it is `Offline`.
+///
+/// Twenty seconds is generous for a handshake on a home connection and short enough that a card
+/// stops saying `Unknown` in the time a reader is still looking at it.
+const PING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+impl State {
+    /// Start one worker per address, the first time the page is drawn.
+    fn ask_servers(&mut self) {
+        if self.asked {
+            return;
+        }
+        self.asked = true;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.pinger = Some(receiver);
+        // A local copy of the list, so the loop does not borrow `self` while it hands the
+        // sender out.
+        let servers: Vec<&'static Server> = self.servers.iter().collect();
+        for server in servers {
+            let thread_sender = sender.clone();
+            let address = server.address.to_owned();
+            let spawned = std::thread::Builder::new()
+                .name("sift-ping".to_owned())
+                .spawn(move || {
+                    let answer = sift_net::slp::ping(&address, 25565, PING_TIMEOUT).ok();
+                    let _ = thread_sender.send((address, answer));
+                });
+            if spawned.is_err() {
+                // A thread that cannot start is an answer that never comes; the card says
+                // `Offline`, which is true.
+                let _ = sender.send((server.address.to_owned(), None));
+            }
+        }
+    }
+
+    /// Take every answer that has arrived.
+    fn poll_servers(&mut self) {
+        let Some(receiver) = &self.pinger else {
+            return;
+        };
+        while let Ok((address, answer)) = receiver.try_recv() {
+            self.live.push((address, answer));
+        }
+    }
+
+}
+
+/// What a card should draw: the live answer when there is one, the sample when not.
+fn shown_of(server: &Server, live: &[(String, Option<sift_net::slp::Status>)]) -> Shown {
+    {
+        match live
+            .iter()
+            .find(|(address, _)| address == server.address)
+        {
+            Some((_, Some(status))) => Shown {
+                motd: status.motd.clone(),
+                version: status.version.clone(),
+                players: Some((status.online, status.capacity)),
+                loader: server.loader.to_owned(),
+            },
+            // Asked and unanswered: the reference's `Offline`, which is a ping with nothing to
+            // report rather than a card full of invented numbers.
+            Some((_, None)) => Shown {
+                motd: server.motd.to_owned(),
+                version: server.mc_version.to_owned(),
+                players: Some((0, 0)),
+                loader: server.loader.to_owned(),
+            },
+            None => Shown {
+                motd: server.motd.to_owned(),
+                version: server.mc_version.to_owned(),
+                players: server.players,
+                loader: server.loader.to_owned(),
+            },
+        }
+    }
+}
+
+/// One card's worth of text: where it came from is `State::shown`'s business.
+struct Shown {
+    motd: String,
+    version: String,
+    players: Option<(u32, u32)>,
+    loader: String,
+}
+
 /// Draw the servers page into `rect`. Returns whether another frame is owed: nothing here
 /// animates, so it is always `false`.
 pub fn draw(
@@ -876,6 +981,8 @@ pub fn draw(
     // The page owns its rect (`pages/mod.rs`'s seam); paint the page colour first so the cards
     // sit on `--color-bg` even if the caller did not clear the column.
     ui.painter().rect_filled(rect, 0, theme.BG);
+    state.ask_servers();
+    state.poll_servers();
 
     // The reference fetches `/server-icon.png` through the filesystem API for each available
     // server (`ServerListing.vue:552-610`). `Server` carries no icon URL, so there is nothing to
@@ -949,7 +1056,7 @@ pub fn draw(
                 if blocks > 0 {
                     top += BLOCK_GAP;
                 }
-                draw_section(ui.painter(), area.left(), width, top, theme, section);
+                draw_section(ui.painter(), area.left(), width, top, theme, section, &state.live);
                 top += section_height(section);
                 blocks += 1;
             }
@@ -1140,6 +1247,7 @@ fn draw_section(
     top: f32,
     theme: &Theme,
     section: &Section<'_>,
+    live: &[(String, Option<sift_net::slp::Status>)],
 ) {
     // `h2.m-0.text-xl.font-semibold.text-primary` (`index.vue:169`).
     painter.text(
@@ -1168,7 +1276,8 @@ fn draw_section(
             egui::pos2(left, list_top + index as f32 * (card_height() + LIST_GAP)),
             egui::vec2(width, card_height()),
         );
-        draw_card(painter, card, theme, server);
+        let shown = shown_of(server, live);
+        draw_card(painter, card, theme, server, &shown);
     }
 }
 
@@ -1178,7 +1287,7 @@ fn draw_section(
 
 /// One server, drawn as `ServerListing.vue` lays it out: a 64-point plate, the name, the MOTD
 /// and the labels row in a column `ml-4` to the right of it (lines 15-105).
-fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, server: &Server) {
+fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, server: &Server, shown: &Shown) {
     painter.rect_filled(rect, CARD_RADIUS, theme.RAISED_BG);
     painter.rect_stroke(
         rect,
@@ -1243,7 +1352,7 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, server: &Server
         egui::vec2(text_width, MOTD_LINE * MOTD_LINES as f32),
     );
     let mut job = egui::text::LayoutJob::simple(
-        server.motd.to_owned(),
+        shown.motd.clone(),
         fonts::body(LABEL_SIZE),
         theme.SECONDARY,
         motd_box.width(),
@@ -1257,7 +1366,7 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, server: &Server
     // separated by the reference's 6-point bullets (`Separator.vue:2`, `ServerListing.vue:103`).
     let meta_top = motd_box.bottom() + CARD_TEXT_GAP;
     let meta_centre = meta_top + META_LINE / 2.0;
-    let (ink, _) = status_dot(server.players);
+    let (ink, _) = status_dot(shown.players);
     let dot_centre = egui::pos2(text_left + DOT_RADIUS, meta_centre);
     painter.circle_filled(dot_centre, DOT_RADIUS, ink);
 
@@ -1265,12 +1374,12 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, server: &Server
     // (`ServerListing.vue:103`, `servers-modal.vue:393-398`), so the state is carried by the dot
     // alone and the words stay in the page's body ink.
     let mut x = dot_centre.x + DOT_RADIUS + DOT_GAP;
-    x = label(painter, x, meta_top, &status_label(server.players), theme.TEXT_PRIMARY);
+    x = label(painter, x, meta_top, &status_label(shown.players), theme.TEXT_PRIMARY);
     x = bullet(painter, x, meta_centre, theme);
-    let game = format!("Minecraft {}", server.mc_version);
+    let game = format!("Minecraft {}", shown.version);
     x = label(painter, x, meta_top, &game, theme.TEXT_PRIMARY);
     x = bullet(painter, x, meta_centre, theme);
-    label(painter, x, meta_top, server.loader, theme.TEXT_PRIMARY);
+    label(painter, x, meta_top, &shown.loader, theme.TEXT_PRIMARY);
 }
 
 /// Draw one label of the card's bottom row and answer the x after it.
