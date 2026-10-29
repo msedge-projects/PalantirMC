@@ -120,6 +120,15 @@ fn load_at(state: &mut State, path: &std::path::Path) {
             }
         }
     }
+    if let Some(switches) = value.get("switches").and_then(|entry| entry.as_object()) {
+        for (key, entry) in switches {
+            if let (Some(on), Some(label)) =
+                (entry.as_bool(), known.iter().find(|label| **label == key))
+            {
+                state.switches.push((label, on));
+            }
+        }
+    }
     if let Some(chips) = value.get("chips").and_then(|entry| entry.as_object()) {
         for (key, entry) in chips {
             if let (Some(index), Some(label)) = (
@@ -157,12 +166,18 @@ fn save_at(state: &State, path: &std::path::Path) {
         .iter()
         .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
         .collect::<serde_json::Map<_, _>>();
+    let switches = state
+        .switches
+        .iter()
+        .map(|(key, on)| (key.to_string(), serde_json::json!(on)))
+        .collect::<serde_json::Map<_, _>>();
     let chips = state
         .chips
         .iter()
         .map(|(key, index)| (key.to_string(), serde_json::json!(index)))
         .collect::<serde_json::Map<_, _>>();
-    let value = serde_json::json!({ "sliders": sliders, "texts": texts, "chips": chips });
+    let value =
+        serde_json::json!({ "sliders": sliders, "texts": texts, "chips": chips, "switches": switches });
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -198,6 +213,8 @@ pub struct State {
     pub texts: Vec<(&'static str, String)>,
     /// Whether the store has been read, which happens once.
     pub loaded: bool,
+    /// Which way each switch the reader has flipped points, keyed by its row's label.
+    pub switches: Vec<(&'static str, bool)>,
     /// Which chip each group has chosen, keyed by its row's label.
     pub chips: Vec<(&'static str, usize)>,
     /// Whether anything has changed since the file was last written.
@@ -2196,6 +2213,32 @@ fn draw_body(
                             high,
                             unit,
                         }
+                    }
+                    Control::Switch { on } => {
+                        let mut lit = state
+                            .switches
+                            .iter()
+                            .find(|(key, _)| *key == label)
+                            .map(|(_, on)| *on)
+                            .unwrap_or(on);
+                        // A click anywhere on the row flips it: the track is 40 points wide and
+                        // the row is the target, which is what the reference's hit area is.
+                        if ui.input(|input| input.pointer.any_click()) {
+                            if let Some(pointer) = pointer {
+                                if pointer.y >= y - 2.0
+                                    && pointer.y <= y + ROW_HIT_BAND
+                                    && pointer.x >= right - SWITCH_WIDTH
+                                {
+                                    lit = !lit;
+                                    match state.switches.iter_mut().find(|(key, _)| *key == label) {
+                                        Some((_, on)) => *on = lit,
+                                        None => state.switches.push((label, lit)),
+                                    }
+                                    state.dirty = true;
+                                }
+                            }
+                        }
+                        Control::Switch { on: lit }
                     }
                     Control::Chips { options, selected } => {
                         let mut chosen = state
