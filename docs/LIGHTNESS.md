@@ -108,6 +108,44 @@ The measurement itself is worth keeping as a habit rather than a number: startup
 for the window rather than assumed from a sleep, RSS comes from `/proc/<pid>/status`, and idle
 CPU is a `utime+stime` delta over a ten-second window with the app untouched.
 
+## Measured: the release build, 2026-10-29 (0.1.23)
+
+Same VM, same method, `target/release/SiftUi` built in 2m19s from `master` at `v0.1.23`.
+
+| Budget | Limit | Release | Verdict |
+| --- | --- | --- | --- |
+| Startup to first window | <= 400 ms | **55 ms** | passes, 7x of room |
+| Idle CPU | 0 ticks | **0 / 10 s** | passes exactly |
+| Idle RSS | <= 120 MB | **124.2 MB** | **over by 4.2 MB** |
+| Exe (Linux release) | — | 14,029,440 B | for reference; the Windows comparison is CI's |
+| Scroll p95 (view) | <= 20 ms | **0.06–0.08 ms** | passes; interval p95 7.2–8.2 ms |
+
+RSS is stable rather than leaking: three runs read 124,292 / 124,224 / 124,264 kB, and each was
+identical at 25 s and 45 s. Allocator tuning changes nothing (`MALLOC_ARENA_MAX=1` 124,352 kB,
+`=2` 123,996 kB, mmap thresholds 124,236 kB).
+
+**Where the 124 MB is.** `/proc/<pid>/smaps` says most of it is file-backed library code, and the
+largest single mapping is the VM's software rasteriser:
+
+```
+Rss 124,148 kB   Pss_Anon 42,256 kB   Pss_File 70,422 kB
+46,604 kB  /usr/lib/x86_64-linux-gnu/libLLVM.so.19.1
+26,268 kB  [heap]
+ 5,888 kB  .../target/release/SiftUi
+ 5,624 kB  libgallium-25.0.7
+ 5,176 kB  /SYSV00000000   (X shared memory)
+```
+
+So this VM has no GPU: Mesa's llvmpipe JIT compiles shaders through LLVM, and that library is 46 MB
+of the resident set. The launcher's own anonymous heap is **42 MB**, its code 5.9 MB, the X server's
+shared buffer 5.2 MB. On a machine with a working GL driver `libLLVM` is not loaded at all.
+
+**What that means for the budget.** The 120 MB figure was set against the iced build and is passed
+here at 119.8 MB on 2026-10-25 on this same VM — the same software GL was in play then, so the
+~4 MB delta is ours, not the driver's. It is small, it is not a leak, and finding it needs a heap
+profile rather than more measuring; `docs/LIGHTNESS.md`'s own next steps (bound the texture cache,
+load the icon table once) are the place to start.
+
 ## Measured: the release build, 2026-10-25
 
 Same script, same VM, against `target/release/SiftUi` (2m01s to build):
