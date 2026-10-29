@@ -859,7 +859,7 @@ impl Shell {
             // can start it, so the row says so rather than doing nothing.
             crate::panel::Step::Modrinth => {
                 self.toast = Some(
-                    "Signing in to Modrinth needs its own OAuth flow, which this launcher has no                      client for yet."
+                    "Signing in to Sift needs its own OAuth flow, which this launcher has no                      client for yet."
                         .to_owned(),
                 );
             }

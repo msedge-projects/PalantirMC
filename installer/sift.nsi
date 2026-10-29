@@ -62,7 +62,7 @@ SetCompressorDictSize 64
 !endif
 
 !define PRODUCT "Sift Launcher"
-!define PUBLISHER "Palantir Studios"
+!define PUBLISHER "Sift Studios"
 ; The launcher's own data folder, which is a product decision the launcher
 ; already made: `sift-core`'s data root is %APPDATA%\<name>. It is *not*
 ; under $INSTDIR, so an uninstall that removed it would delete worlds.

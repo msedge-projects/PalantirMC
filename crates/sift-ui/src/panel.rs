@@ -231,7 +231,7 @@ pub enum Step {
     CreateInstance,
     /// `Sign in to Minecraft`.
     Minecraft,
-    /// `Sign in to Modrinth`.
+    /// `Sign in to Sift`.
     Modrinth,
 }
 
@@ -269,7 +269,7 @@ const GETTING_STARTED: &str = "Getting started";
 const STEPS: [&str; 3] = [
     "Create first instance",
     "Sign in to Minecraft",
-    "Sign in to Modrinth",
+    "Sign in to Sift",
 ];
 
 /// The second section's heading: the reference's `app.news.title`.

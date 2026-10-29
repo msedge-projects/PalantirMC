@@ -430,7 +430,7 @@ const CATEGORY_SYSTEM: &str = "System"; // app.settings.sidebar.label.system (:2
 
 // --- Appearance (settings/display/appearance-settings.vue -> ui appearance-settings layout)
 const COLOR_THEME_TITLE: &str = "Color theme"; // settings.display.theme.title (ui :6314)
-const COLOR_THEME_DESCRIPTION: &str = "Select your preferred color theme across Modrinth."; // settings.display.theme.description (ui :6284)
+const COLOR_THEME_DESCRIPTION: &str = "Select your preferred color theme across Sift."; // settings.display.theme.description (ui :6284)
 const COLOR_THEME_VALUE: &str = "Dark"; // settings.display.theme.dark (ui :6281), the default from use-theme.ts:38
 /// `settings.display.theme.system` — "Sync with system" (`packages/ui` en-US:6311-6313).
 ///
@@ -488,9 +488,9 @@ const BEHAVIOR_SYNC_LABEL: &str = "Sync behavior across devices"; // app.behavio
 const BEHAVIOR_SYNC_DESCRIPTION: &str = "Use these behavior settings everywhere you're signed in. Turn this off to keep separate settings on this device."; // app.behavior-settings.sync-across-devices.description (:218)
 const BEHAVIOR_STARTUP_HEADING: &str = "Startup and navigation"; // app.behavior-settings.startup-and-navigation.title (:215)
 const MINIMIZE_APP_LABEL: &str = "Minimize app"; // app.appearance-settings.minimize-launcher.title (:170)
-const MINIMIZE_APP_DESCRIPTION: &str = "Minimize Modrinth App when Minecraft starts."; // app.appearance-settings.minimize-launcher.description (:167)
+const MINIMIZE_APP_DESCRIPTION: &str = "Minimize Sift Launcher when Minecraft starts."; // app.appearance-settings.minimize-launcher.description (:167)
 const REFOCUS_LABEL: &str = "Refocus app when Minecraft closes"; // app.behavior-settings.refocus-on-game-close.title (:212)
-const REFOCUS_DESCRIPTION: &str = "Bring Modrinth App to the foreground when Minecraft exits."; // app.behavior-settings.refocus-on-game-close.description (:209)
+const REFOCUS_DESCRIPTION: &str = "Bring Sift Launcher to the foreground when Minecraft exits."; // app.behavior-settings.refocus-on-game-close.description (:209)
 const HIDE_SIDEBAR_LABEL: &str = "Hide right sidebar"; // app.appearance-settings.toggle-sidebar.title (:188)
 const HIDE_SIDEBAR_DESCRIPTION: &str = "Hide the right sidebar by default and add a button to show or hide it."; // app.appearance-settings.toggle-sidebar.description (:185)
 const BEHAVIOR_CONTENT_HEADING: &str = "Home and content"; // app.behavior-settings.content.title (:206)
@@ -536,7 +536,7 @@ const FLAG_LOCALHOST_SIGN_IN: &str = "Localhost Sign In"; // `localhost_sign_in`
 
 // --- Profile (packages/ui/src/layouts/wrapped/settings/AccountProfileSettings.vue) ---
 const PROFILE_PICTURE_LABEL: &str = "Profile picture"; // settings.profile.profile-picture.title (ui :6380)
-const PROFILE_DESCRIPTION: &str = "Your profile information is publicly <profile-link>viewable on Modrinth</profile-link> and through the <docs-link>Modrinth API</docs-link>."; // settings.profile.public-information.description (ui :6383); both spans are links (AccountProfileSettings.vue:27-40)
+const PROFILE_DESCRIPTION: &str = "Your profile information is publicly <profile-link>viewable on Sift</profile-link> and through the <docs-link>Modrinth API</docs-link>."; // settings.profile.public-information.description (ui :6383); both spans are links (AccountProfileSettings.vue:27-40)
 const PROFILE_UPLOAD_LABEL: &str = "Upload image"; // button.upload-image (ui :338), the avatar `FileButton`'s prompt (AccountProfileSettings.vue:59)
 const PROFILE_REMOVE_LABEL: &str = "Remove image"; // button.remove-image (ui :272), drawn while an avatar is set (AccountProfileSettings.vue:66-74)
 const PROFILE_USERNAME_LABEL: &str = "Username"; // label.username (ui :2789), the field's heading (AccountProfileSettings.vue:89-91)
@@ -546,23 +546,23 @@ const PROFILE_BIO_DESCRIPTION: &str = "A short description to tell everyone a li
 
 // --- Social (packages/ui/src/layouts/wrapped/settings/AccountSocialSettings.vue) ---
 const SOCIAL_FRIEND_REQUESTS_LABEL: &str = "Friend requests"; // settings.social.friend-requests.title (ui :6452)
-const SOCIAL_FRIEND_REQUESTS_DESCRIPTION: &str = "Control who can send you friend requests on Modrinth."; // settings.social.friend-requests.description (ui :6449)
+const SOCIAL_FRIEND_REQUESTS_DESCRIPTION: &str = "Control who can send you friend requests on Sift."; // settings.social.friend-requests.description (ui :6449)
 const SOCIAL_SHARED_INSTANCES_LABEL: &str = "Shared instance invites"; // settings.social.shared-instance-invites.title (ui :6485)
 const SOCIAL_SHARED_INSTANCES_DESCRIPTION: &str = "Control who can send you invites to shared instances."; // settings.social.shared-instance-invites.description (ui :6482)
 const SOCIAL_HOSTING_LABEL: &str = "Hosting access invites"; // settings.social.hosting-access.title (ui :6458)
-const SOCIAL_HOSTING_DESCRIPTION: &str = "Control who can invite you to manage a Modrinth Hosting server."; // settings.social.hosting-access.description (ui :6455)
+const SOCIAL_HOSTING_DESCRIPTION: &str = "Control who can invite you to manage a Sift Hosting server."; // settings.social.hosting-access.description (ui :6455)
 const SOCIAL_BLOCKED_LABEL: &str = "Blocked users"; // settings.social.blocked-users.title (ui :6431)
-const SOCIAL_BLOCKED_DESCRIPTION: &str = "These are the users you have blocked on Modrinth. They cannot:"; // settings.social.blocked-users.description (ui :6410)
+const SOCIAL_BLOCKED_DESCRIPTION: &str = "These are the users you have blocked on Sift. They cannot:"; // settings.social.blocked-users.description (ui :6410)
 const SOCIAL_EVERYONE: &str = "Everyone"; // settings.social.interaction-source.everyone (ui :6461), the start for all three settings (AccountSocialSettings.vue:254-256)
 
 // --- Privacy (settings/account/privacy-settings.vue) ---
-const PRIVACY_ADS_HEADING: &str = "Your privacy and how ads support Modrinth"; // app.ads-consent.title (:146)
-const PRIVACY_ADS_INTRO: &str = "Ads make Modrinth possible and fund creator payouts. Our partners may store or access cookies in the app to personalize ads and measure performance. You can opt out or manage your preferences below."; // app.settings.privacy.ads-consent.intro (:2756)
+const PRIVACY_ADS_HEADING: &str = "Your privacy and how ads support Sift"; // app.ads-consent.title (:146)
+const PRIVACY_ADS_INTRO: &str = "Ads make Sift possible and fund creator payouts. Our partners may store or access cookies in the app to personalize ads and measure performance. You can opt out or manage your preferences below."; // app.settings.privacy.ads-consent.intro (:2756)
 const PRIVACY_MANAGE_LABEL: &str = "Manage preferences"; // app.ads-consent.manage (:140)
 const TELEMETRY_LABEL: &str = "Telemetry"; // app.settings.privacy.telemetry.title (:2768)
-const TELEMETRY_DESCRIPTION: &str = "Modrinth collects anonymized analytics and usage data to improve our user experience and customize your experience. By disabling this option, you opt out and your data will no longer be collected."; // app.settings.privacy.telemetry.description (:2765)
+const TELEMETRY_DESCRIPTION: &str = "Sift collects anonymized analytics and usage data to improve our user experience and customize your experience. By disabling this option, you opt out and your data will no longer be collected."; // app.settings.privacy.telemetry.description (:2765)
 const DISCORD_LABEL: &str = "Discord Rich Presence"; // app.settings.privacy.discord-rich-presence.title (:2762)
-const DISCORD_DESCRIPTION: &str = "Show Modrinth App as your current activity on Discord. This does not affect Rich Presence added to instances by mods. Requires an app restart."; // app.settings.privacy.discord-rich-presence.description (:2759)
+const DISCORD_DESCRIPTION: &str = "Show Sift Launcher as your current activity on Discord. This does not affect Rich Presence added to instances by mods. Requires an app restart."; // app.settings.privacy.discord-rich-presence.description (:2759)
 
 // --- Java and memory (settings/instance-defaults/java-and-memory-settings/index.vue) ---
 const JAVA_INSTALLATIONS_HEADING: &str = "Java installations"; // app.settings.tabs.java-installations (:3137), the section's own `text-xl` heading (:69-71)
@@ -629,7 +629,7 @@ const STORE_CACHE_LIMIT_LABEL: &str = "Keep unused downloads"; // app.settings.r
 const STORE_CACHE_LIMIT_DESCRIPTION: &str = "Keep up to this much unused content for future installs. Keeping more can save download time."; // app.settings.resource-management.store.cache-limit.description (:2831)
 const STORE_CACHE_LIMIT_UNIT: &str = "GiB"; // app.settings.resource-management.store.cache-limit.unit (:2837); the number before it defaults to 5 (`content-storage.vue:60`)
 const APP_DIRECTORY_LABEL: &str = "App directory"; // app.settings.resource-management.app-directory.title (:2804)
-const APP_DIRECTORY_DESCRIPTION: &str = "Where Modrinth App stores instances and other files. Changes take effect after restarting the app."; // app.settings.resource-management.app-directory.description (:2798)
+const APP_DIRECTORY_DESCRIPTION: &str = "Where Sift Launcher stores instances and other files. Changes take effect after restarting the app."; // app.settings.resource-management.app-directory.description (:2798)
 const APP_DIRECTORY_BROWSE: &str = "Browse for an app directory"; // app.settings.resource-management.app-directory.browse (:2795), the folder picker's label and tooltip
 const MAX_DOWNLOADS_LABEL: &str = "Maximum concurrent downloads"; // app.settings.resource-management.maximum-concurrent-downloads.title (:2819)
 const MAX_DOWNLOADS_DESCRIPTION: &str = "Number of files the app can download at once. Lower this if downloads are unreliable on your connection. Requires an app restart."; // app.settings.resource-management.maximum-concurrent-downloads.description (:2816)
@@ -640,16 +640,16 @@ const MAX_WRITES_VALUE: &str = "1"; // its slider's `:min="1"` (resource-managem
 
 // --- Troubleshooting (settings/system/troubleshooting-settings.vue) ---
 const APP_CACHE_TITLE: &str = "App cache"; // app.settings.resource-management.app-cache.title (:2783)
-const APP_CACHE_DESCRIPTION: &str = "Clear cached data and download it again from Modrinth. The app may load more slowly until the cache is rebuilt."; // app.settings.resource-management.app-cache.description (:2780)
+const APP_CACHE_DESCRIPTION: &str = "Clear cached data and download it again from Sift. The app may load more slowly until the cache is rebuilt."; // app.settings.resource-management.app-cache.description (:2780)
 const CLEAR_CACHE_LABEL: &str = "Clear cache"; // app.settings.troubleshooting.clear-cache (:3161)
 const BACKUPS_TITLE: &str = "App database backups"; // app.settings.resource-management.app-database-backups.title (:2792)
 const BACKUPS_DESCRIPTION: &str = "Backups of important app data are stored here in case you need to recover them later."; // app.settings.resource-management.app-database-backups.description (:2786)
 const BACKUPS_OPEN_LABEL: &str = "Open backups folder"; // app.settings.resource-management.app-database-backups.open-folder (:2789)
 const DEBUG_INFO_TITLE: &str = "Debug info"; // app.settings.resource-management.debug-info.title (:2813)
-const DEBUG_INFO_DESCRIPTION: &str = "Export app logs and diagnostic data to a ZIP file to share with Modrinth support."; // app.settings.resource-management.debug-info.description (:2807)
+const DEBUG_INFO_DESCRIPTION: &str = "Export app logs and diagnostic data to a ZIP file to share with Sift support."; // app.settings.resource-management.debug-info.description (:2807)
 const DEBUG_INFO_EXPORT_LABEL: &str = "Export debug info"; // app.settings.resource-management.debug-info.export (:2810)
 const REPORT_AD_TITLE: &str = "Report an ad"; // app.settings.troubleshooting.report-ad.title (:3182)
-const REPORT_AD_DESCRIPTION: &str = "Seen an inappropriate or offensive ad? Copy its details while it's showing and send them to <support>Modrinth Support</support>. We'll review it and remove it."; // app.settings.troubleshooting.report-ad.description (:3173); the `<support>` span is a link to support.modrinth.com (troubleshooting-settings.vue:299-309)
+const REPORT_AD_DESCRIPTION: &str = "Seen an inappropriate or offensive ad? Copy its details while it's showing and send them to <support>Sift Support</support>. We'll review it and remove it."; // app.settings.troubleshooting.report-ad.description (:3173); the `<support>` span is a link to support.modrinth.com (troubleshooting-settings.vue:299-309)
 const REPORT_AD_COPY_LABEL: &str = "Copy ad details"; // app.settings.troubleshooting.report-ad.copy (:3170)
 const COPY_DETAILS_LABEL: &str = "Always show copy details"; // app.settings.resource-management.always-show-copy-details.title (:2774)
 const COPY_DETAILS_DESCRIPTION: &str = "Show the Copy details action while an install is queued or running. It is always available for failed or interrupted installs."; // app.settings.resource-management.always-show-copy-details.description (:2771)

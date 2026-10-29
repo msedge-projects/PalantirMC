@@ -208,10 +208,10 @@ const SORT_LABEL: &str = "Last played";
 /// the reference's default group-by value (`use-library.ts:250`).
 const GROUP_LABEL: &str = "Custom group";
 
-/// `app.welcome-screen.title` — "Welcome to Modrinth" (`locales/en-US/index.json:3488`).
+/// `app.welcome-screen.title` — "Welcome to Sift" (`locales/en-US/index.json:3488`).
 /// The empty state is the source's own no-instances screen (`pages/Index.vue:92`), so the
 /// string is copied rather than rebranded.
-const EMPTY_HEADING: &str = "Welcome to Modrinth";
+const EMPTY_HEADING: &str = "Welcome to Sift";
 
 /// `app.welcome-screen.description` — "Ready to start playing?"
 /// (`locales/en-US/index.json:3476`).

@@ -351,7 +351,7 @@ const EMPTY_HEADING: &str = "Sift Hosting";
 
 /// `servers.list-empty.no-servers-description` — "Install mods, invite friends, and play
 /// together all from the Modrinth App." (`ui/src/locales/en-US/index.json:5330`).
-const EMPTY_BODY: &str = "Install mods, invite friends, and play together all from the Modrinth App.";
+const EMPTY_BODY: &str = "Install mods, invite friends, and play together all from Sift Launcher.";
 
 /// `servers.list-empty.one-click-mod-installs-title` — "One-click mod installs"
 /// (`ui/src/locales/en-US/index.json:5336`).
@@ -374,9 +374,9 @@ const EMPTY_FEATURE_TWO_BODY: &str = "Set up your server just like a single play
 const EMPTY_FEATURE_THREE_TITLE: &str = "Play with friends";
 
 /// `servers.list-empty.play-with-friends-description` — "Invite friends to play your server with
-/// one-click play from the Modrinth App." (`ui/src/locales/en-US/index.json:5339`).
+/// one-click play from Sift Launcher." (`ui/src/locales/en-US/index.json:5339`).
 const EMPTY_FEATURE_THREE_BODY: &str =
-    "Invite friends to play your server with one-click play from the Modrinth App.";
+    "Invite friends to play your server with one-click play from Sift Launcher.";
 
 /// `servers.list-empty.new-server-button` — "New server"
 /// (`ui/src/locales/en-US/index.json:5327`).
@@ -399,8 +399,8 @@ const PROMO_LINE_ONE: &str = "Want to play with";
 /// The second line of the same heading, `text-brand` (`ServersPromo.vue:33`).
 const PROMO_LINE_TWO: &str = "your friends?";
 
-/// `ServersPromo.vue:35` — "Create a server with Modrinth in just a few clicks."
-const PROMO_BODY: &str = "Create a server with Modrinth in just a few clicks.";
+/// `ServersPromo.vue:35` — "Create a server with Sift in just a few clicks."
+const PROMO_BODY: &str = "Create a server with Sift in just a few clicks.";
 
 /// `ServersPromo.vue:38-40` — the brand button's label, followed by a right arrow.
 const PROMO_ACTION: &str = "View plans";

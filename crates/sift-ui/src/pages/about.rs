@@ -56,7 +56,7 @@ const PRODUCT: &str = sift_core::PRODUCT_NAME;
 /// line for them. The full text travels with the exe (`LICENSE` is attached to the release)
 /// and every third-party licence is in `THIRD_PARTY_NOTICES.md`, which the footer names.
 const LICENCE: &str =
-    "Proprietary software. Copyright (c) 2026 Palantir Studios. All rights reserved.";
+    "Proprietary software. Copyright (c) 2026 Sift Studios. All rights reserved.";
 
 /// What this product ships that is somebody else's work, and under which licence.
 ///
@@ -69,7 +69,7 @@ const LICENCE: &str =
 /// a reader holding the binary can find the terms.
 const ATTRIBUTION: [(&str, &str); 5] = [
     (
-        "Modrinth App",
+        "Sift Launcher",
         "GPL-3.0 · the window this launcher is ported from · vendor/modrinth-app/ · \
          LICENSE-GPL-3.0.txt",
     ),
@@ -352,7 +352,7 @@ mod tests {
     /// that it is not open source. `LICENSE` at the root is the long version of this.
     #[test]
     fn the_licence_line_names_the_owner_and_the_terms() {
-        assert!(LICENCE.contains("Palantir Studios"));
+        assert!(LICENCE.contains("Sift Studios"));
         assert!(LICENCE.contains("Proprietary"));
         assert!(LICENCE.contains("All rights reserved"));
     }
