@@ -194,7 +194,8 @@ jobs:
           # failure carries NSIS's own sentence into the log instead of only the line number.
           Push-Location installer
           $payload = (Resolve-Path dist/SiftUi.exe).Path
-          $out = & $makensis /V3 /DVERSION=$version "/DPAYLOAD=$payload" sift.nsi 2>&1
+          $root = ((Resolve-Path .).Path -replace '\\', '/') + '/'
+          $out = & $makensis /V3 /DVERSION=$version "/DPAYLOAD=$payload" "/DROOT=$root" sift.nsi 2>&1
           $code = $LASTEXITCODE
           Pop-Location
           $out | ForEach-Object { Write-Host $_ }

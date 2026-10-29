@@ -52,6 +52,15 @@ SetCompressorDictSize 64
 ; `installersift.ico` and makensis aborted on the icon line.
 !define HERE "${__FILEDIR__}\"
 
+; Everything the installer takes from outside its own folder: the payload, the licence, the
+; notices and where the setup exe is written. One define, absolute when the caller can make it
+; absolute -- `${HERE}../x` expands to `...\\installer\\../x`, which POSIX makensis normalises and
+; the runner's NSIS 3.13 refuses (it aborted on the licence line after the payload line was
+; fixed). Forward slashes because they need no escaping here and NSIS accepts them.
+!ifndef ROOT
+  !define ROOT "${__FILEDIR__}/../"
+!endif
+
 !define PRODUCT "Sift Launcher"
 !define PUBLISHER "Palantir Studios"
 ; The launcher's own data folder, which is a product decision the launcher
@@ -70,7 +79,7 @@ SetCompressorDictSize 64
 
 Name "${PRODUCT} ${VERSION}"
 BrandingText "${PRODUCT} ${VERSION}"
-OutFile "${HERE}../dist/SiftLauncher-${VERSION}-x64-setup.exe"
+OutFile "${ROOT}dist/SiftLauncher-${VERSION}-x64-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\Sift Launcher"
 InstallDirRegKey HKCU "${APP_KEY}" "InstallDir"
 Icon "${HERE}sift.ico"
@@ -96,7 +105,7 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 ${PUBLISHER}"
 ; installer is, and the licence and folder choices come after it.
 Page custom ShowMark
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${HERE}../LICENSE"
+!insertmacro MUI_PAGE_LICENSE "${ROOT}LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -182,8 +191,8 @@ Section "${PRODUCT} (required)" SEC_APP
   File /oname=SiftLauncher.exe "${PAYLOAD}"
   Rename "$INSTDIR\SiftLauncher.exe" "$INSTDIR\Sift Launcher.exe"
   File "${HERE}sift.ico"
-  File "${HERE}../LICENSE"
-  File "${HERE}../THIRD_PARTY_NOTICES.md"
+  File "${ROOT}LICENSE"
+  File "${ROOT}THIRD_PARTY_NOTICES.md"
 
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
   CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\Sift Launcher.exe" "" "$INSTDIR\sift.ico" 0
