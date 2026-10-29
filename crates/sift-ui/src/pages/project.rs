@@ -57,6 +57,8 @@ pub struct Project {
     pub license: &'static str,
     /// The gallery, as `(thumbnail url, title)`, in the order the reference shows it.
     pub gallery: &'static [(&'static str, &'static str)],
+    /// The releases, as `(version, game versions, channel, published)`.
+    pub versions: &'static [(&'static str, &'static str, &'static str, &'static str)],
 }
 
 /// The three tabs the page's own strip has. `Description` is the default.
@@ -242,10 +244,45 @@ pub fn draw(
     painter.rect_filled(card, 12, theme.RAISED_BG);
     match state.current() {
         Tab::Description => description(ui, card, theme, project),
-        Tab::Versions => empty_tab(ui, card, theme, "No versions yet."),
+        Tab::Versions => versions(ui, card, theme, project),
         Tab::Gallery => gallery(ui, card, theme, project, images),
     }
     false
+}
+
+/// The versions tab: one row per release, newest first, each with its channel and date.
+fn versions(ui: &mut Ui, card: Rect, theme: &Theme, project: &Project) {
+    if project.versions.is_empty() {
+        empty_tab(ui, card, theme, "No versions yet.");
+        return;
+    }
+    let painter = ui.painter();
+    let inner = card.shrink(16.0);
+    let mut y = inner.top();
+    for (number, game_versions, channel, published) in project.versions {
+        if y + 52.0 > inner.bottom() {
+            break;
+        }
+        let row = Rect::from_min_size(egui::pos2(inner.left(), y), egui::vec2(inner.width(), 48.0));
+        painter.rect_filled(row, 8, theme.SURFACE_1);
+        painter.text(
+            egui::pos2(row.left() + 12.0, row.top() + 8.0),
+            Align2::LEFT_TOP,
+            *number,
+            fonts::semibold(13.0),
+            theme.CONTRAST,
+        );
+        // The secondary line: the loader every version of this project uses, the game versions,
+        // the channel and the date, which is the order the reference reads in.
+        painter.text(
+            egui::pos2(row.left() + 12.0, row.top() + 26.0),
+            Align2::LEFT_TOP,
+            format!("Fabric · {game_versions} · {channel} · {published}"),
+            fonts::body(11.0),
+            theme.SECONDARY,
+        );
+        y += 56.0;
+    }
 }
 
 /// The gallery tab: the project's images, two to a row, each with its title beneath.
@@ -549,6 +586,13 @@ pub fn sample() -> Project {
         // project.about.links.{source,issues,wiki,discord}
         links: &["View source", "Report issues", "Visit wiki", "Join Discord"],
         // `gallery`, `license`, `published` and `updated` are `GET /v2/project/1KVo5zza`.
+        // `GET /v2/project/1KVo5zza/version?limit=4`, newest first.
+        versions: &[
+            ("15.0.0-beta.2", "26.3", "beta", "October 20, 2026"),
+            ("15.0.0-beta.1", "26.3", "beta", "October 11, 2026"),
+            ("14.1.1", "26.2", "release", "October 11, 2026"),
+            ("13.6.0", "26.1.2", "release", "October 11, 2026"),
+        ],
         gallery: &[
             (
                 "https://cdn.modrinth.com/data/1KVo5zza/images/ce41746dbf8f3d2a9661875c18b5667778233ccf_350.webp",
