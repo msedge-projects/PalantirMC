@@ -715,6 +715,23 @@ the strings in it exist in this tree (`grep 0.22.0` would have caught both).
 from the API, since the page's project is sample data), and the settings' text fields and chip
 groups, which are still plates.
 
+### The last four gaps closed — 2026-10-29
+
+| Item | Evidence |
+| --- | --- |
+| gallery | the tab draws the project's own screenshots from `GET /v2/project/1KVo5zza` — title screen, mod menu, a high-distance render and a sunrise, two to a row with their titles |
+| hosting banner | "…your next server / **on Sift.**" with a green `View plans` pill, captured on Home |
+| sliders | dragged `Quick instances in sidebar` from 20 to 6 |
+| server icons | each card draws the icon its server sends |
+
+The API corrected three sample facts that had been written from memory: licence BSD-3-Clause (not
+LGPL-3.0-only), published 2022-02-10, updated 2026-10-20.
+
+**What is still not parity, plainly:** the settings' text fields and chip groups are still plates;
+the project page's Versions tab still says "No versions yet"; the promo art is not drawn (named
+shortcut in `panel.rs`); and the `owed:` notes in `settings.rs` list rows whose controls are drawn
+but not interactive. Everything else on the five-page brief has a capture.
+
 ### Open after this pass
 
 | # | Region | What differs |
