@@ -55,6 +55,8 @@ pub struct Project {
     pub updated: &'static str,
     /// The licence it ships under.
     pub license: &'static str,
+    /// The gallery, as `(thumbnail url, title)`, in the order the reference shows it.
+    pub gallery: &'static [(&'static str, &'static str)],
 }
 
 /// The three tabs the page's own strip has. `Description` is the default.
@@ -241,9 +243,55 @@ pub fn draw(
     match state.current() {
         Tab::Description => description(ui, card, theme, project),
         Tab::Versions => empty_tab(ui, card, theme, "No versions yet."),
-        Tab::Gallery => empty_tab(ui, card, theme, "No images yet."),
+        Tab::Gallery => gallery(ui, card, theme, project, images),
     }
     false
+}
+
+/// The gallery tab: the project's images, two to a row, each with its title beneath.
+///
+/// The reference's gallery is a grid of `aspect-video` cards; these are the API's own 350-pixel
+/// thumbnails, which is the size it serves for exactly this.
+fn gallery(ui: &mut Ui, card: Rect, theme: &Theme, project: &Project, images: &mut Images) {
+    if project.gallery.is_empty() {
+        empty_tab(ui, card, theme, "No images yet.");
+        return;
+    }
+    let painter = ui.painter();
+    let inner = card.shrink(16.0);
+    let gap = 12.0;
+    let tile_width = (inner.width() - gap) / 2.0;
+    let tile_height = tile_width * 9.0 / 16.0;
+    for (index, (url, title)) in project.gallery.iter().enumerate() {
+        let column = (index % 2) as f32;
+        let row = (index / 2) as f32;
+        let tile = Rect::from_min_size(
+            egui::pos2(
+                inner.left() + column * (tile_width + gap),
+                inner.top() + row * (tile_height + 28.0),
+            ),
+            egui::vec2(tile_width, tile_height),
+        );
+        if tile.bottom() > inner.bottom() {
+            break;
+        }
+        painter.rect_filled(tile, 8, theme.RAISED_BG);
+        if let Some(texture) = images.get(ui.ctx(), url) {
+            painter.image(
+                texture.id(),
+                tile,
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+        painter.text(
+            egui::pos2(tile.left(), tile.bottom() + 6.0),
+            Align2::LEFT_TOP,
+            *title,
+            fonts::body(12.0),
+            theme.BASE,
+        );
+    }
 }
 
 /// The description tab: the action row above the body, then the body itself.
@@ -495,19 +543,38 @@ pub fn sample() -> Project {
             ("Client-side", Glyph::Monitor),
         ],
         game_versions: &["26.3", "26.2", "26.1.x", "1.21.x", "1.20.x", "1.19.x", "1.18.1-1.18.2", "1.17.1", "1.16.5"],
-        downloads: "19.4M downloads",
-        followers: "5K followers",
+        downloads: "19.6M downloads",
+        followers: "5.0K followers",
         icon: "https://cdn.modrinth.com/data/1KVo5zza/d8152911f8fd5d7e9a8c499fe89045af81fe816e_96.webp",
         // project.about.links.{source,issues,wiki,discord}
         links: &["View source", "Report issues", "Visit wiki", "Join Discord"],
+        // `gallery`, `license`, `published` and `updated` are `GET /v2/project/1KVo5zza`.
+        gallery: &[
+            (
+                "https://cdn.modrinth.com/data/1KVo5zza/images/ce41746dbf8f3d2a9661875c18b5667778233ccf_350.webp",
+                "Title screen",
+            ),
+            (
+                "https://cdn.modrinth.com/data/1KVo5zza/images/044a5b9cb85394be95656a1ebcfe135466420da9.png",
+                "Mod menu",
+            ),
+            (
+                "https://cdn.modrinth.com/data/1KVo5zza/images/9d5ddd3392ce89295caa1030ca930f71f5c6b49a_350.webp",
+                "FPS in high render distance",
+            ),
+            (
+                "https://cdn.modrinth.com/data/1KVo5zza/images/38f70f307f1a0b17d8ed4526d1636317e8c12d1d_350.webp",
+                "Sunrise behind a hill",
+            ),
+        ],
         creators: &[
             ("Robitobi01", "Owner"),
             ("unmojang", "Maintainer"),
             ("trimbe", "Maintainer"),
         ],
-        published: "September 7, 2021",
-        updated: "September 7, 2026",
-        license: "LGPL-3.0-only",
+        published: "February 10, 2022",
+        updated: "October 20, 2026",
+        license: "BSD-3-Clause",
     }
 }
 
