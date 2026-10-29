@@ -1274,7 +1274,7 @@ fn card(
     let summary_text = ellipsise(&result.summary, 150);
     let summary = painter.layout(
         summary_text,
-        crate::fonts::body(13.5),
+        crate::fonts::body(13.0),
         theme.SECONDARY,
         summary_width,
     );

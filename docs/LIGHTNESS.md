@@ -146,6 +146,20 @@ here at 119.8 MB on 2026-10-25 on this same VM — the same software GL was in p
 profile rather than more measuring; `docs/LIGHTNESS.md`'s own next steps (bound the texture cache,
 load the icon table once) are the place to start.
 
+**The font atlas is the other big resident block.** Opening the settings dialog and visiting all
+fourteen of its tabs costs 15.9 MB of atlas (Home 124.0 MB -> 139.9 MB), because every tab's glyphs
+are rasterised at five weights and twelve sizes. Two of those sizes were used exactly once at a
+half point (13.5 and 12.5); folding them into 13 and 12 removed two whole passes:
+
+| | Home | Settings, all tabs |
+| --- | --- | --- |
+| before | 124,044 kB | 139,916 kB |
+| after | 124,412 kB | **135,784 kB** |
+
+So the fold saves 4.1 MB where it counts and costs nothing on Home -- which also tells us the idle
+figure is not this: 4 MB of the difference from the 119.8 MB run is something else, and a heap
+profile is the next step rather than another guess.
+
 ## Measured: the release build, 2026-10-25
 
 Same script, same VM, against `target/release/SiftUi` (2m01s to build):

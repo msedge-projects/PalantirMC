@@ -269,7 +269,7 @@ pub fn draw(ui: &mut Ui, screen: Rect, theme: &Theme, open: &mut bool) -> bool {
             painter,
             egui::pos2(left, y),
             name,
-            fonts::label(12.5),
+            fonts::label(12.0),
             theme.CONTRAST,
             NAME_COL - 12.0,
         );
