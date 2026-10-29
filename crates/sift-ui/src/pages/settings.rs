@@ -120,6 +120,16 @@ fn load_at(state: &mut State, path: &std::path::Path) {
             }
         }
     }
+    if let Some(chips) = value.get("chips").and_then(|entry| entry.as_object()) {
+        for (key, entry) in chips {
+            if let (Some(index), Some(label)) = (
+                entry.as_u64(),
+                known.iter().find(|label| **label == key),
+            ) {
+                state.chips.push((label, index as usize));
+            }
+        }
+    }
     if let Some(texts) = value.get("texts").and_then(|entry| entry.as_object()) {
         for (key, entry) in texts {
             if let (Some(typed), Some(label)) =
@@ -147,7 +157,12 @@ fn save_at(state: &State, path: &std::path::Path) {
         .iter()
         .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
         .collect::<serde_json::Map<_, _>>();
-    let value = serde_json::json!({ "sliders": sliders, "texts": texts });
+    let chips = state
+        .chips
+        .iter()
+        .map(|(key, index)| (key.to_string(), serde_json::json!(index)))
+        .collect::<serde_json::Map<_, _>>();
+    let value = serde_json::json!({ "sliders": sliders, "texts": texts, "chips": chips });
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -183,6 +198,8 @@ pub struct State {
     pub texts: Vec<(&'static str, String)>,
     /// Whether the store has been read, which happens once.
     pub loaded: bool,
+    /// Which chip each group has chosen, keyed by its row's label.
+    pub chips: Vec<(&'static str, usize)>,
     /// Whether anything has changed since the file was last written.
     pub dirty: bool,
     /// The shell keeps drawing while this is true, and stops when it is false.
@@ -771,6 +788,13 @@ enum Control {
         /// The value the trigger shows.
         value: &'static str,
     },
+    /// A chip group (`Chips.vue`): one pill per choice, the chosen one filled.
+    Chips {
+        /// The choices, in the reference's order.
+        options: &'static [&'static str],
+        /// Which one is lit.
+        selected: usize,
+    },
     /// A text field (`TextInput.vue`): a plate that takes typing, with the placeholder it
     /// shows while empty.
     Text {
@@ -841,6 +865,11 @@ impl ThemeChoice {
         THEME_CARD_WIDTH * 3.0 + THEME_CARD_GAP * 2.0
     }
 }
+
+/// A chip's box, gap and padding, from `Chips.vue`: `px-3 py-1` around 12-point text.
+const CHIP_HEIGHT: f32 = 26.0;
+const CHIP_GAP: f32 = 6.0;
+const CHIP_PAD: f32 = 12.0;
 
 /// A field's plate: `TextInput.vue` is a 28-point box, wider than a select because it holds a
 /// path.
@@ -1252,31 +1281,43 @@ const PROFILE_BLOCKS: &[Block] = &[
 /// (`:26-44`), shared instance invites (`:46-63`) and hosting access invites (`:65-82`) --
 /// each a heading, its description and a group of chips -- then blocked users (`:85-102`).
 ///
-/// `// owed:` the three settings are `Chips` groups, a choice of `everyone`, `mutual` and
-/// `none` or `everyone`, `friends` and `none` (`:31-40`, `:257-258`), drawn here as a select
-/// showing the start, `everyone` (`:254-256`). The blocked-users table (`:100-201`) is a row
+/// The three settings are `Chips` groups, a choice of `everyone`, `mutual` and `none` or
+/// `everyone`, `friends` and `none` (`:31-40`, `:257-258`), drawn as chips and kept in the
+/// page's state. The blocked-users table (`:100-201`) is a row
 /// per blocked user with an `Unblock` action (`settings.social.blocked-users.unblock`,
 /// ui :6434), and the three restriction bullets (`:93-97`) are list items; the first is owed
 /// for its data and the second for want of a list block. The signed-out state
 /// (`settings.social.sign-in-required.title` / `.description`, ui :6491, :6488) is owed too.
+/// The friend-request and shared-instance choices, `everyone` / `mutual` / `none`
+/// (`AccountSocialSettings.vue:31-40`).
+const SOCIAL_CHOICES: &[&str] = &["Everyone", "Mutual", "No one"];
+/// The hosting-access choices, `everyone` / `friends` / `none` (`:257-258`).
+const HOSTING_CHOICES: &[&str] = &["Everyone", "Friends", "No one"];
+
 const SOCIAL_BLOCKS: &[Block] = &[
-    Block::Heading {
-        text: SOCIAL_FRIEND_REQUESTS_LABEL,
+    Block::Row {
+        label: SOCIAL_FRIEND_REQUESTS_LABEL,
         description: Some(SOCIAL_FRIEND_REQUESTS_DESCRIPTION),
-        big: false,
-        control: Some(Control::Select { value: SOCIAL_EVERYONE }),
+        control: Control::Chips {
+            options: SOCIAL_CHOICES,
+            selected: 0,
+        },
     },
-    Block::Heading {
-        text: SOCIAL_SHARED_INSTANCES_LABEL,
+    Block::Row {
+        label: SOCIAL_SHARED_INSTANCES_LABEL,
         description: Some(SOCIAL_SHARED_INSTANCES_DESCRIPTION),
-        big: false,
-        control: Some(Control::Select { value: SOCIAL_EVERYONE }),
+        control: Control::Chips {
+            options: SOCIAL_CHOICES,
+            selected: 0,
+        },
     },
-    Block::Heading {
-        text: SOCIAL_HOSTING_LABEL,
+    Block::Row {
+        label: SOCIAL_HOSTING_LABEL,
         description: Some(SOCIAL_HOSTING_DESCRIPTION),
-        big: false,
-        control: Some(Control::Select { value: SOCIAL_EVERYONE }),
+        control: Control::Chips {
+            options: HOSTING_CHOICES,
+            selected: 0,
+        },
     },
     Block::Heading {
         text: SOCIAL_BLOCKED_LABEL,
@@ -2156,6 +2197,43 @@ fn draw_body(
                             unit,
                         }
                     }
+                    Control::Chips { options, selected } => {
+                        let mut chosen = state
+                            .chips
+                            .iter()
+                            .find(|(key, _)| *key == label)
+                            .map(|(_, index)| *index)
+                            .unwrap_or(selected);
+                        // A click, not a hold: press and release both land between two frames,
+                        // so `held` is already false when the row is drawn.
+                        if ui.input(|input| input.pointer.any_click()) {
+                            if let Some(pointer) = pointer {
+                                if pointer.y >= y - 2.0 && pointer.y <= y + ROW_HIT_BAND {
+                                    let mut x = right
+                                        - Control::Chips { options, selected }.width(&body);
+                                    for (index, option) in options.iter().enumerate() {
+                                        let text = body.layout_no_wrap(
+                                            (*option).to_owned(),
+                                            fonts::semibold(CONTROL_TEXT_SIZE),
+                                            Color32::PLACEHOLDER,
+                                        );
+                                        let width = text.size().x + 2.0 * CHIP_PAD;
+                                        if pointer.x >= x && pointer.x <= x + width {
+                                            chosen = index;
+                                            break;
+                                        }
+                                        x += width + CHIP_GAP;
+                                    }
+                                    match state.chips.iter_mut().find(|(key, _)| *key == label) {
+                                        Some((_, index)) => *index = chosen,
+                                        None => state.chips.push((label, chosen)),
+                                    }
+                                    state.dirty = true;
+                                }
+                            }
+                        }
+                        Control::Chips { options, selected: chosen }
+                    }
                     other => other,
                 };
                 let height = draw_labelled(
@@ -2345,6 +2423,18 @@ impl Control {
         match self {
             Control::Switch { .. } => SWITCH_WIDTH,
             Control::Text { .. } => FIELD_WIDTH,
+            Control::Chips { options, .. } => options
+                .iter()
+                .map(|option| {
+                    let label = painter.layout_no_wrap(
+                        (*option).to_owned(),
+                        fonts::semibold(CONTROL_TEXT_SIZE),
+                        Color32::PLACEHOLDER,
+                    );
+                    label.size().x + 2.0 * CHIP_PAD
+                })
+                .sum::<f32>()
+                + CHIP_GAP * (options.len().saturating_sub(1)) as f32,
             Control::Slider { value, low, high, unit } => {
                 let label = painter.layout_no_wrap(
                     slider_label(value, low, high, unit),
@@ -2383,6 +2473,7 @@ impl Control {
             Control::Switch { .. } => SWITCH_HEIGHT,
             Control::Slider { .. } => SLIDER_HEIGHT,
             Control::Text { .. } => FIELD_HEIGHT,
+            Control::Chips { .. } => CHIP_HEIGHT,
             Control::Select { .. } | Control::Button { .. } => CONTROL_HEIGHT,
         }
     }
@@ -2392,6 +2483,40 @@ impl Control {
         let height = self.height();
         let width = self.width(painter);
         match self {
+            Control::Chips { options, selected } => {
+                // Measured first, then laid from the right edge leftwards, so a group of any
+                // width ends where every other control on the panel ends.
+                let mut widths = Vec::with_capacity(options.len());
+                for option in options {
+                    let label = painter.layout_no_wrap(
+                        (*option).to_owned(),
+                        fonts::semibold(CONTROL_TEXT_SIZE),
+                        Color32::PLACEHOLDER,
+                    );
+                    widths.push((label.clone(), label.size().x + 2.0 * CHIP_PAD));
+                }
+                let total: f32 = widths.iter().map(|(_, width)| *width).sum::<f32>()
+                    + CHIP_GAP * (widths.len().saturating_sub(1)) as f32;
+                let mut x = right - total;
+                for (index, (label, width)) in widths.into_iter().enumerate() {
+                    let pill = Rect::from_min_size(
+                        pos2(x, centre_y - CHIP_HEIGHT / 2.0),
+                        vec2(width, CHIP_HEIGHT),
+                    );
+                    let lit = index == selected.min(options.len().saturating_sub(1));
+                    painter.rect_filled(
+                        pill,
+                        CHIP_HEIGHT / 2.0,
+                        if lit { theme.BRAND } else { theme.BUTTON_BG },
+                    );
+                    painter.galley(
+                        pos2(pill.left() + CHIP_PAD, pill.center().y - label.size().y / 2.0),
+                        label,
+                        if lit { theme.ACCENT_CONTRAST } else { theme.BASE },
+                    );
+                    x = pill.right() + CHIP_GAP;
+                }
+            }
             Control::Text { placeholder } => {
                 let rect = Rect::from_min_size(
                     pos2(right - FIELD_WIDTH, centre_y - FIELD_HEIGHT / 2.0),
@@ -2920,6 +3045,8 @@ mod tests {
             // A slider's value is a number, not words: nothing to spell, nothing to misspell.
             Control::Slider { .. } => None,
             Control::Text { placeholder } => Some(placeholder),
+            // A chip group's words are its options; the row's label names the group.
+            Control::Chips { options, .. } => options.first().copied(),
             Control::Select { value } => Some(value),
             Control::Button { label, .. } => Some(label),
         };
