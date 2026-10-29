@@ -62,12 +62,7 @@ SetCompressorDictSize 64
 ; defined by the headers MUI2 pulls in); the two `ACM_*` messages do not, and an
 ; undefined constant is a compile error rather than a wrong value, so they are
 ; written here as the numbers Windows documents.
-!ifndef ACM_OPEN
-  !define ACM_OPEN 0x464
-!endif
-!ifndef ACM_PLAY
-  !define ACM_PLAY 0x465
-!endif
+
 
 Name "${PRODUCT} ${VERSION}"
 BrandingText "${PRODUCT} ${VERSION}"
@@ -129,19 +124,14 @@ Function ShowMark
     Abort
   ${EndIf}
 
-  File /oname=$PLUGINSDIR\sift.avi "${HERE}anim/sift.avi"
-  nsDialogs::CreateControl "SysAnimate32" \
-    "${WS_CHILD}|${WS_VISIBLE}|${ACS_CENTER}|${ACS_TRANSPARENT}|${ACS_AUTOPLAY}" \
-    "0" "0" "0" "96u" "96u" ""
-  Pop $1
-  ${If} $1 != error
-    ; ACM_OPEN takes the path as a wide string pointer; ACM_PLAY then repeats
-    ; every frame (-1) from the first to the last. Opening is what a failure to
-    ; find the AVI would show as: the control simply stays empty, and the page's
-    ; text is still readable, so a missing animation is not a failed install.
-    System::Call 'user32::SendMessageW(p r1, i ${ACM_OPEN}, i 0, w "$PLUGINSDIR\sift.avi")'
-    System::Call 'user32::SendMessageW(p r1, i ${ACM_PLAY}, i -1, i 0xFFFF0000)'
-  ${EndIf}
+  ; shortcut: no animation on the welcome page, upgrade if the banner is wanted back.
+  ;
+  ; This page used to open `anim/sift.avi` in a `SysAnimate32` control. POSIX makensis compiles
+  ; that happily and the GitHub runner's NSIS 3.13 aborts on it, which cost three releases
+  ; (0.1.1, 0.1.2, 0.1.4) before the line was blamed. A decoration is not worth another one: the
+  ; page's text is what a reader reads, and the installer now compiles wherever makensis runs.
+  ; If the banner is ever wanted back, draw it as a bitmap with `NSD_CreateBitmap`, which no
+  ; version of NSIS has ever refused.
 
   ${NSD_CreateLabel} 0 104u 100% 60u "Sift browses Modrinth and CurseForge, installs modpacks, and launches both editions of Minecraft.$\r$\n$\r$\nThis installs the launcher for your Windows account only — no administrator password, no files outside your user folder.$\r$\n$\r$\nNot affiliated with Mojang, Microsoft, Modrinth or Overwolf."
   Pop $2
