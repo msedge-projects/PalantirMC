@@ -77,6 +77,25 @@ use crate::theme;
 // State
 // ---------------------------------------------------------------------------
 
+/// The options a row's select offers, or an empty slice when it has no list.
+fn select_options(label: &str) -> &'static [&'static str] {
+    for tab in Tab::ALL {
+        for block in blocks(tab) {
+            let control = match block {
+                Block::Row { label: row, control, .. } if *row == label => Some(*control),
+                Block::Heading { text, control: Some(control), .. } if *text == label => {
+                    Some(*control)
+                }
+                _ => None,
+            };
+            if let Some(Control::Select { options, .. }) = control {
+                return options;
+            }
+        }
+    }
+    &[]
+}
+
 /// Every row label this build knows, taken from the tabs rather than copied.
 fn known_labels() -> Vec<&'static str> {
     let mut labels = Vec::new();
@@ -117,6 +136,20 @@ fn load_at(state: &mut State, path: &std::path::Path) {
                 (entry.as_f64(), known.iter().find(|label| **label == key))
             {
                 state.sliders.push((label, fraction as f32));
+            }
+        }
+    }
+    if let Some(selects) = value.get("selects").and_then(|entry| entry.as_object()) {
+        for (key, entry) in selects {
+            // A chosen value is one of the row's own options: anything else would leave the
+            // trigger showing a word the list cannot offer.
+            if let (Some(chosen), Some(label)) =
+                (entry.as_str(), known.iter().find(|label| **label == key))
+            {
+                if let Some(option) = select_options(label).iter().find(|option| **option == chosen)
+                {
+                    state.selects.push((label, option));
+                }
             }
         }
     }
@@ -166,6 +199,11 @@ fn save_at(state: &State, path: &std::path::Path) {
         .iter()
         .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
         .collect::<serde_json::Map<_, _>>();
+    let selects = state
+        .selects
+        .iter()
+        .map(|(key, chosen)| (key.to_string(), serde_json::json!(chosen)))
+        .collect::<serde_json::Map<_, _>>();
     let switches = state
         .switches
         .iter()
@@ -176,8 +214,13 @@ fn save_at(state: &State, path: &std::path::Path) {
         .iter()
         .map(|(key, index)| (key.to_string(), serde_json::json!(index)))
         .collect::<serde_json::Map<_, _>>();
-    let value =
-        serde_json::json!({ "sliders": sliders, "texts": texts, "chips": chips, "switches": switches });
+    let value = serde_json::json!({
+        "sliders": sliders,
+        "texts": texts,
+        "chips": chips,
+        "switches": switches,
+        "selects": selects,
+    });
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -213,6 +256,16 @@ pub struct State {
     pub texts: Vec<(&'static str, String)>,
     /// Whether the store has been read, which happens once.
     pub loaded: bool,
+    /// What each select shows, keyed by its row's label.
+    pub selects: Vec<(&'static str, &'static str)>,
+    /// Which select is open, if any.
+    pub open_select: Option<&'static str>,
+    /// Whether this frame's press was spent on an open list, so the rows ignore it.
+    pub consumed: bool,
+    /// Option rects painted this frame, and the ones painted last frame: a press is
+    /// tested against the second before the body sees it, so an option beats the row.
+    pub open_lists: Vec<(Rect, &'static [&'static str], &'static str)>,
+    pub last_lists: Vec<(Rect, &'static [&'static str], &'static str)>,
     /// Which way each switch the reader has flipped points, keyed by its row's label.
     pub switches: Vec<(&'static str, bool)>,
     /// Which chip each group has chosen, keyed by its row's label.
@@ -804,6 +857,9 @@ enum Control {
     Select {
         /// The value the trigger shows.
         value: &'static str,
+        /// What it offers when opened. Empty means this build has no list for the row, and
+        /// the control draws as it always did.
+        options: &'static [&'static str],
     },
     /// A chip group (`Chips.vue`): one pill per choice, the chosen one filled.
     Chips {
@@ -882,6 +938,9 @@ impl ThemeChoice {
         THEME_CARD_WIDTH * 3.0 + THEME_CARD_GAP * 2.0
     }
 }
+
+/// One row of an open select: `Option.vue`'s 28-point line.
+const OPTION_HEIGHT: f32 = 28.0;
 
 /// A chip's box, gap and padding, from `Chips.vue`: `px-3 py-1` around 12-point text.
 const CHIP_HEIGHT: f32 = 26.0;
@@ -1180,11 +1239,16 @@ const LANGUAGE_BLOCKS: &[Block] = &[
         big: false,
         control: Some(Control::Select {
             value: LANGUAGE_CURRENT,
+            options: &[
+                "English (United States)",
+                "Deutsch",
+                "Español",
+                "Français",
+                "Português (Brasil)",
+            ],
         }),
     },
-    Block::Standalone(Control::Select {
-        value: LANGUAGE_SEARCH_PLACEHOLDER,
-    }),
+    Block::Standalone(Control::Text { placeholder: LANGUAGE_SEARCH_PLACEHOLDER }),
 ];
 
 /// The Feature flags tab: the search field (`feature-flag-settings.vue:49-55`), then one row
@@ -1196,9 +1260,7 @@ const LANGUAGE_BLOCKS: &[Block] = &[
 /// (`:77-79`, a template literal). A row holds one control here, and the search plate is
 /// drawn rather than searched: both are owed.
 const FEATURE_FLAG_BLOCKS: &[Block] = &[
-    Block::Standalone(Control::Select {
-        value: FLAGS_SEARCH_PLACEHOLDER,
-    }),
+    Block::Standalone(Control::Text { placeholder: FLAGS_SEARCH_PLACEHOLDER }),
     Block::Row {
         label: FLAG_PROJECT_BACKGROUND,
         description: None,
@@ -1285,12 +1347,13 @@ const PROFILE_BLOCKS: &[Block] = &[
         description: Some(PROFILE_USERNAME_DESCRIPTION),
         control: Control::Select {
             value: PROFILE_USERNAME_LABEL,
+            options: &[],
         },
     },
     Block::Row {
         label: PROFILE_BIO_LABEL,
         description: Some(PROFILE_BIO_DESCRIPTION),
-        control: Control::Select { value: PROFILE_BIO_LABEL },
+        control: Control::Select { value: PROFILE_BIO_LABEL, options: &[] },
     },
 ];
 
@@ -1443,9 +1506,7 @@ const JAVA_AND_MEMORY_BLOCKS: &[Block] = &[
         big: false,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: ENV_VARS_PLACEHOLDER,
-    }),
+    Block::Standalone(Control::Text { placeholder: ENV_VARS_PLACEHOLDER }),
 ];
 
 /// The Window tab (`window-settings.vue:60-125`): fullscreen (`:63-77`), then the width
@@ -1472,9 +1533,7 @@ const WINDOW_BLOCKS: &[Block] = &[
     Block::Row {
         label: WINDOW_HEIGHT_LABEL,
         description: Some(WINDOW_HEIGHT_DESCRIPTION),
-        control: Control::Select {
-            value: WINDOW_HEIGHT_PLACEHOLDER,
-        },
+        control: Control::Text { placeholder: WINDOW_HEIGHT_PLACEHOLDER },
     },
 ];
 
@@ -1492,27 +1551,21 @@ const LAUNCH_HOOKS_BLOCKS: &[Block] = &[
         big: false,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: PRE_LAUNCH_PLACEHOLDER,
-    }),
+    Block::Standalone(Control::Text { placeholder: PRE_LAUNCH_PLACEHOLDER }),
     Block::Heading {
         text: WRAPPER_LABEL,
         description: Some(WRAPPER_DESCRIPTION),
         big: false,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: WRAPPER_PLACEHOLDER,
-    }),
+    Block::Standalone(Control::Text { placeholder: WRAPPER_PLACEHOLDER }),
     Block::Heading {
         text: POST_EXIT_LABEL,
         description: Some(POST_EXIT_DESCRIPTION),
         big: false,
         control: None,
     },
-    Block::Standalone(Control::Select {
-        value: POST_EXIT_PLACEHOLDER,
-    }),
+    Block::Standalone(Control::Text { placeholder: POST_EXIT_PLACEHOLDER }),
     Block::Heading {
         text: HOOK_VARIABLES_INTRO,
         description: None,
@@ -1596,6 +1649,7 @@ const RESOURCES_BLOCKS: &[Block] = &[
         description: Some(STORE_CACHE_LIMIT_DESCRIPTION),
         control: Control::Select {
             value: STORE_CACHE_LIMIT_UNIT,
+            options: &["KiB", "MiB", "GiB"],
         },
     },
     Block::Rule,
@@ -1754,6 +1808,33 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
             input.pointer.primary_down(),
         )
     });
+    // An open list is painted over the rows, so its press has to be settled first: an option
+    // beats the row it covers, and the body is told the press is spent.
+    state.consumed = false;
+    if ui.input(|input| input.pointer.any_click()) {
+        if let Some(pointer) = pointer {
+            let hit = state.last_lists.iter().find_map(|(list, options, label)| {
+                if pointer.x < list.left() || pointer.x > list.right() || pointer.y < list.top() {
+                    return None;
+                }
+                let index = ((pointer.y - list.top()) / OPTION_HEIGHT) as usize;
+                if pointer.y > list.top() + options.len() as f32 * OPTION_HEIGHT {
+                    return None;
+                }
+                options.get(index).map(|option| (*label, *option))
+            });
+            if let Some((label, option)) = hit {
+                match state.selects.iter_mut().find(|(key, _)| *key == label) {
+                    Some((_, chosen)) => *chosen = option,
+                    None => state.selects.push((label, option)),
+                }
+                state.open_select = None;
+                state.dirty = true;
+                state.consumed = true;
+            }
+        }
+    }
+
     let body_height = draw_body(
         &painter,
         ui,
@@ -1777,6 +1858,36 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
         state.scroll = (state.scroll - wheel).clamp(0.0, limit);
     }
     state.scroll = state.scroll.min(limit);
+
+    // The open list goes on top of the rows, which is why it is painted here and not in the
+    // body: the body has already drawn every row it will draw this frame.
+    state.last_lists = std::mem::take(&mut state.open_lists);
+    for (list, options, _) in state.last_lists.clone() {
+        painter.rect_filled(list, 8, theme.RAISED_BG);
+        painter.rect_stroke(
+            list,
+            8,
+            Stroke::new(RULE_STROKE, theme.DIVIDER),
+            egui::StrokeKind::Inside,
+        );
+        for (index, option) in options.iter().enumerate() {
+            let row = Rect::from_min_size(
+                egui::pos2(list.left(), list.top() + index as f32 * OPTION_HEIGHT),
+                egui::vec2(list.width(), OPTION_HEIGHT),
+            );
+            let hovered = pointer.is_some_and(|pointer| row.contains(pointer));
+            if hovered {
+                painter.rect_filled(row, 6, theme.BUTTON_BG);
+            }
+            painter.text(
+                egui::pos2(row.left() + CONTROL_PADDING, row.center().y),
+                Align2::LEFT_CENTER,
+                *option,
+                fonts::body(CONTROL_TEXT_SIZE),
+                theme.BASE,
+            );
+        }
+    }
     }
 
     // The rail's rows are the only navigation. A row clipped away by the rail's overflow is
@@ -2081,6 +2192,84 @@ fn fraction_at(pointer_x: f32, track_left: f32, track_width: f32) -> f32 {
     ((pointer_x - track_left) / track_width).clamp(0.0, 1.0)
 }
 
+/// Resolve a select that has options: what it shows, whether it is open, and where its list is.
+///
+/// Both arms of the body call this -- a row and a heading can each carry a control, and the
+/// language selector is a heading, which is how its list came to be missing.
+#[allow(clippy::too_many_arguments)]
+fn resolve_select(
+    body: &egui::Painter,
+    ui: &egui::Ui,
+    state: &mut State,
+    label: &'static str,
+    control: Control,
+    right: f32,
+    y: f32,
+    pointer: Option<egui::Pos2>,
+) -> Control {
+    let Control::Select { value, options } = control else {
+        return control;
+    };
+    if options.is_empty() {
+        return control;
+    }
+    let chosen = state
+        .selects
+        .iter()
+        .find(|(key, _)| *key == label)
+        .map(|(_, chosen)| *chosen)
+        .unwrap_or(value);
+    let resolved = Control::Select {
+        value: chosen,
+        options,
+    };
+    let width = resolved.width(body);
+    let rect = Rect::from_min_size(
+        egui::pos2(right - width, y + (ROW_LABEL_SIZE - CONTROL_HEIGHT) / 2.0),
+        egui::vec2(width, CONTROL_HEIGHT),
+    );
+    // The row is the target, not just the plate: the trigger sits on the row's first line and a
+    // press anywhere on the row opens it, which is what every other control here does.
+    let row_band = Rect::from_min_max(
+        egui::pos2(rect.left(), y - 2.0),
+        egui::pos2(rect.right(), y + ROW_HIT_BAND),
+    );
+    if !state.consumed
+        && ui.input(|input| input.pointer.any_click())
+        && pointer.is_some_and(|pointer| row_band.contains(pointer))
+    {
+        state.open_select = if state.open_select == Some(label) {
+            None
+        } else {
+            Some(label)
+        };
+    }
+    if state.open_select == Some(label) {
+        // Wide enough for the longest option and never narrower than what opened it.
+        let widest = options
+            .iter()
+            .map(|option| {
+                body.layout_no_wrap(
+                    (*option).to_owned(),
+                    fonts::body(CONTROL_TEXT_SIZE),
+                    Color32::PLACEHOLDER,
+                )
+                .size()
+                .x
+            })
+            .fold(0.0_f32, f32::max);
+        let list = Rect::from_min_size(
+            egui::pos2(rect.left(), rect.bottom() + 4.0),
+            egui::vec2(
+                (widest + 2.0 * CONTROL_PADDING + 8.0).max(rect.width()),
+                options.len() as f32 * OPTION_HEIGHT + 8.0,
+            ),
+        );
+        state.open_lists.push((list, options, label));
+    }
+    resolved
+}
+
 /// The selected tab's body: its pane, its heading, and its rows.
 /// Draw the tab's body, scrolled by `scroll`, and return its total height.
 ///
@@ -2151,6 +2340,11 @@ fn draw_body(
                 } else {
                     SECTION_HEADING_SIZE
                 };
+                let control = control.map_or(control, |control| {
+                    Some(resolve_select(
+                        &body, ui, state, text, control, right, y, pointer,
+                    ))
+                });
                 draw_labelled(
                     &body,
                     theme,
@@ -2171,6 +2365,7 @@ fn draw_body(
                 // A slider is the only control that reads input, so it is the only one that
                 // needs the pointer and the state. Its rect is the plate `draw_labelled` will
                 // paint into: right-aligned, `SLIDER_WIDTH` wide, centred on the row.
+                let control = resolve_select(&body, ui, state, label, control, right, y, pointer);
                 let control = match control {
                     Control::Slider {
                         value,
@@ -2486,7 +2681,7 @@ impl Control {
                 );
                 label.size().x + SLIDER_LABEL_GAP + SLIDER_WIDTH
             }
-            Control::Select { value } => {
+            Control::Select { value, .. } => {
                 let value = painter.layout_no_wrap(
                     value.to_owned(),
                     fonts::semibold(CONTROL_TEXT_SIZE),
@@ -2615,7 +2810,7 @@ impl Control {
                 );
                 switch(painter, track, theme, on);
             }
-            Control::Select { value } => {
+            Control::Select { value, .. } => {
                 let rect = Rect::from_min_size(
                     pos2(right - width, centre_y - height / 2.0),
                     vec2(width, height),
@@ -3090,7 +3285,7 @@ mod tests {
             Control::Text { placeholder } => Some(placeholder),
             // A chip group's words are its options; the row's label names the group.
             Control::Chips { options, .. } => options.first().copied(),
-            Control::Select { value } => Some(value),
+            Control::Select { value, .. } => Some(value),
             Control::Button { label, .. } => Some(label),
         };
         if let Some(text) = text {
