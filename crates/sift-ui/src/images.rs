@@ -94,6 +94,38 @@ impl Images {
         }
     }
 
+    /// The texture for a file on disk, decoded the first time and cached under its path.
+    ///
+    /// Synchronous, unlike [`Images::get`]: the file is on the disk the caller has just read, and a
+    /// screenshot decodes in a few milliseconds -- a worker would cost a frame of latency for it.
+    pub fn get_file(&mut self, ctx: &egui::Context, path: &std::path::Path) -> Option<TextureHandle> {
+        let key = path.display().to_string();
+        self.tick += 1;
+        let tick = self.tick;
+        match self.entries.get_mut(&key) {
+            Some(Entry::Ready(texture, last)) => {
+                *last = tick;
+                return Some(texture.clone());
+            }
+            Some(Entry::Failed) => return None,
+            _ => {}
+        }
+        let decoded = std::fs::read(path)
+            .ok()
+            .and_then(|bytes| image::load_from_memory(&bytes).ok())
+            .map(|image| image.to_rgba8());
+        let Some(image) = decoded else {
+            self.entries.insert(key, Entry::Failed);
+            return None;
+        };
+        let size = [image.width() as usize, image.height() as usize];
+        let pixels = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+        let texture = ctx.load_texture(key.clone(), pixels, egui::TextureOptions::LINEAR);
+        self.entries.insert(key, Entry::Ready(texture.clone(), tick));
+        self.evict();
+        Some(texture)
+    }
+
     /// The icon for `url`, if it is ready. Starts the fetch the first time it is asked.
     ///
     /// `None` while loading and after a failure, deliberately: a card does not care *why*

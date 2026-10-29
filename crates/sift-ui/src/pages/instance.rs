@@ -310,27 +310,9 @@ pub fn draw(
     painter.rect_filled(card, RADIUS_MD, theme.RAISED_BG);
     match state.tab {
         Tab::Content => overview(ui, card, theme, instance),
-        // owed: the reference's Files tab, a file browser over `plugin:files|file_list`
-        // (`files/index.vue:46-67`).
         Tab::Files => files_tab(ui, card, theme, instance),
-        // owed: the reference's Screenshots tab, a grid over the instance's screenshots
-        // (`screenshots/index.vue`).
-        Tab::Screenshots => stub(
-            ui,
-            card,
-            theme,
-            Tab::Screenshots,
-            "Screenshots taken in this instance will appear here.",
-        ),
-        // owed: the reference's Worlds tab, its world and server list (`worlds/index.vue`).
-        Tab::Worlds => stub(
-            ui,
-            card,
-            theme,
-            Tab::Worlds,
-            "This instance's worlds and servers will be listed here.",
-        ),
-        // owed: the reference's Logs tab, the console (`logs/index.vue:1-5`).
+        Tab::Screenshots => screenshots_tab(ui, card, theme, images, instance),
+        Tab::Worlds => worlds_tab(ui, card, theme, instance),
         Tab::Logs => logs_tab(ui, card, theme, instance),
     }
     // Nothing on this page animates, so the shell has no frame to schedule.
@@ -388,6 +370,102 @@ fn overview(ui: &mut Ui, card: Rect, theme: &Theme, instance: &Instance) {
 
 /// A tab whose reference screen is not built yet: its own name as the heading, and one sentence
 /// naming what will be there.
+/// The Screenshots tab: the instance's screenshots, three to a row, newest first.
+fn screenshots_tab(
+    ui: &mut Ui,
+    card: Rect,
+    theme: &Theme,
+    images: &mut Images,
+    instance: &Instance,
+) {
+    let shots = screenshot_files(&instance.path);
+    if shots.is_empty() {
+        stub(
+            ui,
+            card,
+            theme,
+            Tab::Screenshots,
+            "Screenshots taken in this instance will appear here.",
+        );
+        return;
+    }
+    let painter = ui.painter();
+    let inner = card.shrink(PAD);
+    let gap = 8.0;
+    let tile_width = (inner.width() - 2.0 * gap) / 3.0;
+    let tile_height = tile_width * 9.0 / 16.0;
+    for (index, shot) in shots.iter().take(9).enumerate() {
+        let column = (index % 3) as f32;
+        let row = (index / 3) as f32;
+        let tile = Rect::from_min_size(
+            egui::pos2(
+                inner.left() + column * (tile_width + gap),
+                inner.top() + row * (tile_height + gap),
+            ),
+            egui::vec2(tile_width, tile_height),
+        );
+        if tile.bottom() > inner.bottom() {
+            break;
+        }
+        painter.rect_filled(tile, 6, theme.SURFACE_2);
+        if let Some(texture) = images.get_file(ui.ctx(), shot) {
+            painter.image(
+                texture.id(),
+                tile,
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+}
+
+/// The Worlds tab: one row per save, the world's own name with its folder dim on the right.
+fn worlds_tab(ui: &mut Ui, card: Rect, theme: &Theme, instance: &Instance) {
+    let worlds = saves(&instance.path);
+    if worlds.is_empty() {
+        stub(
+            ui,
+            card,
+            theme,
+            Tab::Worlds,
+            "This instance has no worlds yet. Create one in the game and it appears here.",
+        );
+        return;
+    }
+    let painter = ui.painter();
+    let inner = card.shrink(PAD);
+    let mut y = inner.top();
+    for (folder, name) in worlds.iter().take(24) {
+        if y + ROW_H > inner.bottom() {
+            break;
+        }
+        icons::draw(
+            painter,
+            Glyph::World,
+            Rect::from_center_size(
+                egui::pos2(inner.left() + 8.0, y + ROW_H / 2.0),
+                egui::vec2(14.0, 14.0),
+            ),
+            theme.SECONDARY,
+        );
+        painter.text(
+            egui::pos2(inner.left() + 26.0, y + ROW_H / 2.0),
+            Align2::LEFT_CENTER,
+            name,
+            fonts::body(12.0),
+            theme.BASE,
+        );
+        painter.text(
+            egui::pos2(inner.right(), y + ROW_H / 2.0),
+            Align2::RIGHT_CENTER,
+            folder,
+            fonts::body(11.0),
+            theme.SECONDARY,
+        );
+        y += ROW_H;
+    }
+}
+
 /// The Files tab: the instance's folder, one row per entry.
 fn files_tab(ui: &mut Ui, card: Rect, theme: &Theme, instance: &Instance) {
     let entries = folder_entries(&instance.path);
@@ -457,6 +535,59 @@ fn logs_tab(ui: &mut Ui, card: Rect, theme: &Theme, instance: &Instance) {
         );
         y += ROW_H;
     }
+}
+
+/// The instance's screenshots, newest first: the game names them by date.
+fn screenshot_files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    for candidate in ["minecraft/screenshots", "screenshots"] {
+        let folder = path.join(candidate);
+        if !folder.is_dir() {
+            continue;
+        }
+        let Ok(read) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        let mut shots: Vec<std::path::PathBuf> = read
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("png" | "jpg" | "jpeg")
+                )
+            })
+            .collect();
+        shots.sort();
+        shots.reverse();
+        return shots;
+    }
+    Vec::new()
+}
+
+/// The instance's worlds: `(folder, name)`, the name from `level.dat` and the folder when it has
+/// none -- the same fallback the game uses.
+fn saves(path: &std::path::Path) -> Vec<(String, String)> {
+    for candidate in ["minecraft/saves", "saves"] {
+        let saves = path.join(candidate);
+        if !saves.is_dir() {
+            continue;
+        }
+        let Ok(read) = std::fs::read_dir(&saves) else {
+            continue;
+        };
+        let mut worlds: Vec<(String, String)> = read
+            .flatten()
+            .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+            .filter_map(|entry| {
+                let folder = entry.file_name().to_str()?.to_owned();
+                let name = crate::nbt::world_name(&entry.path()).unwrap_or_else(|| folder.clone());
+                Some((folder, name))
+            })
+            .collect();
+        worlds.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        return worlds;
+    }
+    Vec::new()
 }
 
 /// The last `count` lines of a log, which is what a log pane shows.
