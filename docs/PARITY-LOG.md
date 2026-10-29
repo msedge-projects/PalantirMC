@@ -689,6 +689,32 @@ the slice. Doing it as a new control kind and calling it done would have been th
 ping's `favicon` carries it as a data URI), the Gallery tab (needs image URLs), and the promo
 card's hand-written copy.
 
+### Sliders, server icons, and two corrections to my own notes — 2026-10-29
+
+**Shipped in 0.1.15.**
+
+| Feature | Evidence |
+| --- | --- |
+| settings sliders | `Quick instances in sidebar` reads **20** with a brand track and a knob; a drag from the right end to x=1030 moved it to **6**, which is 0.1875 of a 1..=30 range — the arithmetic `slider_value` gives |
+| server icons | All the Mods 10 and Modrinth SMP draw their own icons beside live MOTDs, taken from the ping's `favicon` |
+
+The slider needed the body to learn about input, as the last entry predicted: `draw_body` takes the
+pointer and the page's state now, and the four rows the notes name as sliders use it. Two bugs
+were found by driving it and not by reading it — the hit band was the control's 20 points rather
+than the row's ~46, so a press on the lower half of a row did nothing; and the first capture of the
+"slider" was of the reference application, still running on the VM.
+
+**Two corrections.** My notes listed "the promo card's copy is hand-written" and carried an
+'E-46 theme cards' capture. Both were read off the reference's window, which sat on the display
+above this tree for several hours. Nothing in this crate draws an upgrade row — `panel.rs` plans a
+banner's geometry and paints none of it — so the item is "the hosting banner is planned but not
+drawn", not "its copy is wrong". The lesson is mechanical: before trusting a capture, check that
+the strings in it exist in this tree (`grep 0.22.0` would have caught both).
+
+**Still owed:** the hosting banner (planned, undrawn), the Gallery tab (needs project image URLs
+from the API, since the page's project is sample data), and the settings' text fields and chip
+groups, which are still plates.
+
 ### Open after this pass
 
 | # | Region | What differs |

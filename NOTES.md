@@ -4633,3 +4633,17 @@ method, `docs/PARITY-LOG.md` the per-feature evidence, and this is the summary o
 6. **Quick-play** — a world's name shows and its Play launches nothing.
 7. **Installer** — `installer/sift.nsi` compiles under POSIX `makensis` and aborts on the
    runner's NSIS 3.13 at its animated welcome banner (E-45).
+
+### State at 0.1.15
+
+- **Settings sliders work**: `Control::Slider` draws a track, a fill, a knob and the value it is
+  at; `draw_body` receives the pointer and the state, which is what a control that reads input
+  needs. Verified by dragging `Quick instances in sidebar` from 20 to 6 on the VM.
+- **Server icons are real**: the ping's `favicon` (a base64 PNG data URI) is decoded by
+  `slp::data_uri_bytes` and painted into the card's plate; a server without one keeps its initial.
+- **Pressing play on a world launches it** (`--quickPlaySingleplayer`).
+- **The account survives a restart** (`account.json`, refreshed on a worker).
+- **The project page's sidebar** has Links, Creators and Details.
+- Tests: 819 across the workspace, 152 in `sift-ui`.
+- **A capture is only evidence of this app if its strings exist in this tree.** Two items in the
+  previous state block were read off the reference's window and were wrong.
