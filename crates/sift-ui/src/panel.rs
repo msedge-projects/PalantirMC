@@ -191,6 +191,12 @@ const BANNER_LINE: f32 = 20.0;
 /// space yet, and the reservation is what keeps the two lines where the capture puts them.
 const BANNER_ART: f32 = 64.0; // guess: re-measure
 
+/// The banner's call to action: `ButtonLink` with `View plans` and an arrow
+/// (`ui/components/servers/ServersPromo.vue:41`).
+const BANNER_CTA: &str = "View plans";
+const BANNER_CTA_HEIGHT: f32 = 32.0;
+const BANNER_CTA_PAD: f32 = 14.0;
+
 /// The banner's height: its padding, its two lines, and the art's room.
 const BANNER_H: f32 = BANNER_PAD * 2.0 + BANNER_LINE * 2.0 + BANNER_ART;
 
@@ -286,7 +292,7 @@ const UPGRADE: &str = "Upgrade to Modrinth+";
 const HOSTING: &str = "Get your next server";
 
 /// The hosting banner's second line, which the reference highlights in the accent.
-const HOSTING_ACCENT: &str = "on Modrinth.";
+const HOSTING_ACCENT: &str = "on Sift.";
 
 /// Draw the panel into `rect`: its ground and left rule, `Getting started`, the `News`
 /// card, then the hosting banner.
@@ -524,8 +530,30 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme, account: Option<&str>) -> Op
         fonts::semibold(BANNER_SIZE),
         theme.BRAND,
     );
-    // Everything below the two lines is the art's room, and stays empty until the promo's
-    // mark is loaded as a texture: `BANNER_H` already counts it.
+    // The call to action, where the reference puts it: at the banner's foot, past the copy.
+    // The art's room above it stays empty -- the promo's own mark is a texture this build does
+    // not carry yet (`// shortcut: no promo art, upgrade when an asset pipeline for it exists`).
+    let cta_label = painter.layout_no_wrap(
+        BANNER_CTA.to_owned(),
+        fonts::semibold(13.0),
+        theme.ACCENT_CONTRAST,
+    );
+    let cta = Rect::from_min_size(
+        egui::pos2(
+            banner.right() - BANNER_PAD - (cta_label.size().x + 2.0 * BANNER_CTA_PAD),
+            banner.bottom() - BANNER_PAD - BANNER_CTA_HEIGHT,
+        ),
+        egui::vec2(cta_label.size().x + 2.0 * BANNER_CTA_PAD, BANNER_CTA_HEIGHT),
+    );
+    painter.rect_filled(cta, cta.height() / 2.0, theme.BRAND);
+    painter.galley(
+        egui::pos2(
+            cta.left() + BANNER_CTA_PAD,
+            cta.center().y - cta_label.size().y / 2.0,
+        ),
+        cta_label,
+        theme.ACCENT_CONTRAST,
+    );
 
     pressed
 }
