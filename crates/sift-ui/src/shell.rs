@@ -649,12 +649,9 @@ impl Shell {
             Action::OpenFolder(id) => self.open_instance_folder(&id),
             Action::Delete(id) => self.delete_instance(&id),
             Action::OpenWorld { instance, world } => {
-                // Quick-play is one world's launch: the game's `--quickPlaySingleplayer`
-                // argument, which this launcher's launch plan does not build yet.
-                self.toast = Some(format!(
-                    "Launching {world} in {} is not wired yet: a world launch needs quick-play.",
-                    self.instance_name(&instance)
-                ));
+                // One world's launch: the engine turns the world into
+                // `--quickPlaySingleplayer`, which the game has understood since 1.7.
+                self.game.start_world(&instance, &world);
             }
         }
     }

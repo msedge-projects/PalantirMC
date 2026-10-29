@@ -1178,8 +1178,20 @@ fn heap_for_launch(
     }
 }
 
-/// Build the join-server target from instance settings, logging problems.
+/// Build the join target from instance settings, logging problems.
+///
+/// A world wins over a server: `QuickPlayWorld` is written by the shell for exactly one launch,
+/// after a reader pressed play on a world rather than on an instance.
 fn join_target(settings: &Settings, log: &mut dyn FnMut(String)) -> Option<launch::LaunchTarget> {
+    let world = settings.get_str("QuickPlayWorld", "");
+    if !world.is_empty() {
+        log(format!("will open world '{world}'"));
+        return Some(launch::LaunchTarget {
+            address: String::new(),
+            port: 0,
+            world,
+        });
+    }
     if !settings.get_bool("JoinServerOnLaunch", false) {
         return None;
     }
@@ -2411,6 +2423,29 @@ fn send_done(sender: &mut Sender<LaunchEvent>, run_id: u64, note: String) {
 
 #[cfg(test)]
 mod tests {
+
+    /// A world named for one launch wins over a join-server, and an instance with neither gets
+    /// no target at all -- the three states `join_target` can be in.
+    #[test]
+    fn a_quick_play_world_is_a_target_of_its_own() {
+        // A settings file on disk, because that is the only way this type is built.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("instance.cfg");
+        std::fs::write(&path, "[General]\n").expect("a settings file");
+        let mut settings = Settings::load(&path).expect("loadable settings");
+        assert!(join_target(&settings, &mut |_| {}).is_none(), "nothing set");
+
+        settings.set_bool("JoinServerOnLaunch", true);
+        settings.set_str("JoinServerOnLaunchAddress", "mc.example.com:25565");
+        let server = join_target(&settings, &mut |_| {}).expect("a server target");
+        assert_eq!(server.address, "mc.example.com");
+
+        settings.set_str("QuickPlayWorld", "Harbour Build");
+        let world = join_target(&settings, &mut |_| {}).expect("a world target");
+        assert_eq!(world.world, "Harbour Build");
+        assert!(world.address.is_empty(), "a world target names no server");
+    }
+
     #[test]
     fn a_repair_summary_explains_an_installation_problem() {
         let report = crate::install::InstallReport {

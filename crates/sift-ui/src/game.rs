@@ -77,7 +77,7 @@ struct Reply {
 
 /// The function one worker runs. A pointer rather than a trait object so a test
 /// can substitute a worker without starting a network or a game.
-type Worker = fn(String, u64, Option<(String, String, String)>, Sender<Reply>);
+type Worker = fn(String, u64, Option<(String, String, String)>, Option<String>, Sender<Reply>);
 
 /// The launcher's single game process and the channel its worker answers on.
 pub struct Game {
@@ -130,6 +130,20 @@ impl Game {
     }
 
     pub fn start(&mut self, instance_id: &str) {
+        self.start_with(instance_id, None);
+    }
+
+    /// Start `instance_id` with `world` opened, which the engine turns into
+    /// `--quickPlaySingleplayer`.
+    ///
+    /// `// shortcut: a crash between the write and the clear leaves the world set; upgrade when
+    /// the world is passed somewhere disposable instead.` The world travels through the
+    /// instance's own settings because that is where the engine reads a join target from.
+    pub fn start_world(&mut self, instance_id: &str, world: &str) {
+        self.start_with(instance_id, Some(world.to_owned()));
+    }
+
+    fn start_with(&mut self, instance_id: &str, world: Option<String>) {
         if self.busy() {
             return;
         }
@@ -143,7 +157,7 @@ impl Game {
         let account = self.account.clone();
         let spawned = std::thread::Builder::new()
             .name("sift-launch".to_owned())
-            .spawn(move || worker(instance_id, launch, account, sender));
+            .spawn(move || worker(instance_id, launch, account, world, sender));
         if let Err(error) = spawned {
             self.status = Status::Failed(format!("could not start a launch worker: {error}"));
         }
@@ -182,9 +196,10 @@ fn run_launch(
     instance_id: String,
     launch: u64,
     account: Option<(String, String, String)>,
+    world: Option<String>,
     sender: Sender<Reply>,
 ) {
-    let status = match launch_instance(&instance_id, launch, &sender) {
+    let status = match launch_instance(&instance_id, launch, account, world, &sender) {
         Ok(status) => status,
         Err(reason) => Status::Failed(reason),
     };
@@ -197,12 +212,30 @@ fn run_launch(
 fn launch_instance(
     instance_id: &str,
     launch: u64,
+    account: Option<(String, String, String)>,
+    world: Option<String>,
     sender: &Sender<Reply>,
 ) -> Result<Status, String> {
     // This thread owns the paths because it owns every disk and network call a
     // launch makes. `platform_data_root` is the root `data::instances_dir` reads
     // from, so the id came from the same tree this opens.
     let paths = SiftPaths::at(platform_data_root(System::current()));
+
+    // A world named by the caller is a setting for the length of this launch: `join_target` in
+    // the engine reads it and builds `--quickPlaySingleplayer` from it. Written before the
+    // instance is prepared, removed once the answer is in.
+    let mut world_written = false;
+    if let Some(world) = &world {
+        let root = paths.configured_instances_dir().join(&instance_id);
+        if let Ok(mut instance) = sift_core::instance::Instance::open(&root) {
+            instance
+                .settings_mut()
+                .set_str("QuickPlayWorld", world.clone());
+            if instance.save().is_ok() {
+                world_written = true;
+            }
+        }
+    }
     let wire = Wire::new(paths.meta_dir());
     // The same cache directory the engine's mirror store has always used. The
     // wire owns the download queue; this store owns the version documents.
@@ -258,6 +291,18 @@ fn launch_instance(
             &mut progress,
         )
     };
+
+    // The setting has done its job: the plan above already holds the argument. Removed before
+    // anything else can fail, so a launch that goes wrong does not leave the next one pointing
+    // at a world nobody asked for.
+    if world_written {
+        let root = paths.configured_instances_dir().join(&instance_id);
+        if let Ok(mut instance) = sift_core::instance::Instance::open(&root) {
+            if instance.settings_mut().remove("QuickPlayWorld") {
+                let _ = instance.save();
+            }
+        }
+    }
 
     let plan = match readiness {
         LaunchReadiness::Ready(plan) => plan,
@@ -343,6 +388,7 @@ mod tests {
         _instance: String,
         _launch: u64,
         _account: Option<(String, String, String)>,
+        _world: Option<String>,
         _sender: Sender<Reply>,
     ) {
         WORKERS_STARTED.fetch_add(1, Ordering::SeqCst);
