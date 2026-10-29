@@ -823,6 +823,24 @@ So the whole chain works on the Linux VM: instance → metadata → assets → J
 launcher's own parity work has meant little without this, and it is now checked rather than
 assumed.
 
+### Quick-play reaches the world — 2026-10-29
+
+First the wrong thing, then the right one, both visible on the VM.
+
+The world row passed the name it displays (`LevelName` from `level.dat`) to
+`--quickPlaySingleplayer`, which takes the **folder** under `saves/`. On this VM the row says
+`Harbour Build` while the folder is `folder-name-world`, so the game found nothing and stayed on
+the title screen. The command line said so plainly:
+`--quickPlaySingleplayer Harbour Build`.
+
+The row now carries both: the folder to launch, the name to show. The same press then produced
+`--quickPlaySingleplayer folder-name-world`, and the game opened that world and reported *its* own
+error -- `level.dat_old` is missing, because `folder-name-world` is a stub left by an earlier
+session. The launcher's half is correct; the world on disk is not a world.
+
+**Also seen in the capture:** the shell's status pill reads `Running` while the game is up, and
+Minecraft's title screen runs alongside the launcher's own window.
+
 ### Open after this pass
 
 | # | Region | What differs |
