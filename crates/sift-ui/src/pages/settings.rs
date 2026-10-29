@@ -77,6 +77,85 @@ use crate::theme;
 // State
 // ---------------------------------------------------------------------------
 
+/// Every row label this build knows, taken from the tabs rather than copied.
+fn known_labels() -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    for tab in Tab::ALL {
+        for block in blocks(tab) {
+            if let Block::Row { label, .. } = block {
+                labels.push(*label);
+            }
+        }
+    }
+    labels
+}
+
+/// Where the values this page holds are kept, beside the instances folder.
+fn store_path() -> std::path::PathBuf {
+    crate::data::instances_dir()
+        .parent()
+        .map(|root| root.join("app-settings.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from("app-settings.json"))
+}
+
+/// Read what a previous run wrote into `state`, if anything.
+fn load_into(state: &mut State) {
+    load_at(state, &store_path());
+}
+
+fn load_at(state: &mut State, path: &std::path::Path) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return;
+    };
+    let known = known_labels();
+    if let Some(sliders) = value.get("sliders").and_then(|entry| entry.as_object()) {
+        for (key, entry) in sliders {
+            if let (Some(fraction), Some(label)) =
+                (entry.as_f64(), known.iter().find(|label| **label == key))
+            {
+                state.sliders.push((label, fraction as f32));
+            }
+        }
+    }
+    if let Some(texts) = value.get("texts").and_then(|entry| entry.as_object()) {
+        for (key, entry) in texts {
+            if let (Some(typed), Some(label)) =
+                (entry.as_str(), known.iter().find(|label| **label == key))
+            {
+                state.texts.push((label, typed.to_owned()));
+            }
+        }
+    }
+}
+
+/// Write what the page holds, so the next run starts where this one ended.
+fn save(state: &State) {
+    save_at(state, &store_path());
+}
+
+fn save_at(state: &State, path: &std::path::Path) {
+    let sliders = state
+        .sliders
+        .iter()
+        .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
+        .collect::<serde_json::Map<_, _>>();
+    let texts = state
+        .texts
+        .iter()
+        .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
+        .collect::<serde_json::Map<_, _>>();
+    let value = serde_json::json!({ "sliders": sliders, "texts": texts });
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&value) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
 /// Whether the modal is up, and which tab it is showing.
 #[derive(Debug, Default)]
 pub struct State {
@@ -102,6 +181,10 @@ pub struct State {
     /// What a reader has typed into each field, keyed the same way. A row with no entry is empty,
     /// which is what a field with a placeholder looks like.
     pub texts: Vec<(&'static str, String)>,
+    /// Whether the store has been read, which happens once.
+    pub loaded: bool,
+    /// Whether anything has changed since the file was last written.
+    pub dirty: bool,
     /// The shell keeps drawing while this is true, and stops when it is false.
     pub open: bool,
     /// The selected tab. The source opens on the first one (`index.vue:88-96`).
@@ -1575,7 +1658,12 @@ fn blocks(tab: Tab) -> &'static [Block] {
 /// Returns `state.open`: the shell keeps drawing while it is `true`, and stops when a click
 /// on the close button or a press of Escape has set it false.
 pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, state: &mut State) -> bool {
+    if !state.loaded {
+        state.loaded = true;
+        load_into(state);
+    }
     if !state.open {
+        state.was_open = false;
         return false;
     }
 
@@ -1663,6 +1751,12 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
 
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         state.open = false;
+    }
+    if !state.open && state.dirty {
+        // Closed after a change. This is the only place the file is written, so a drag does not
+        // write once per frame, and both close paths (the button and Escape) come through here.
+        save(state);
+        state.dirty = false;
     }
     if !state.open {
         state.was_open = false;
@@ -2051,6 +2145,7 @@ fn draw_body(
                                         Some((_, stored)) => *stored = fraction,
                                         None => state.sliders.push((label, fraction)),
                                     }
+                                    state.dirty = true;
                                 }
                             }
                         }
@@ -2098,6 +2193,7 @@ fn draw_body(
                             Some((_, typed)) => *typed = text,
                             None => state.texts.push((label, text)),
                         }
+                        state.dirty = true;
                     }
                 }
                 height + ROW_GAP
@@ -2519,6 +2615,36 @@ mod tests {
     /// layout — which is exactly the layout that put three tabs past the dialog's edge and made
     /// them unselectable. What has to hold is the relationship, not the constant.
     /// A drag is a fraction of the track, clamped at both ends.
+    /// The store round-trips the two maps, and a key no row carries is not resurrected.
+    #[test]
+    fn settings_survive_a_write_and_a_read() {
+        let dir = std::env::temp_dir().join(format!("sift-settings-{}", std::process::id()));
+        let path = dir.join("app-settings.json");
+        let mut before = State::default();
+        // A label a row really carries, taken from the tabs themselves.
+        let label = known_labels()[0];
+        before.sliders.push((label, 0.25));
+        before.texts.push((label, "C:/java".to_owned()));
+        save_at(&before, &path);
+
+        let mut after = State::default();
+        load_at(&mut after, &path);
+        assert_eq!(after.sliders, vec![(label, 0.25)]);
+        assert_eq!(after.texts, vec![(label, "C:/java".to_owned())]);
+
+        // A file naming a row this build has renamed away is read as an empty setting, not as a
+        // value attached to nothing.
+        std::fs::write(
+            &path,
+            r#"{"sliders":{"A row that no longer exists":0.5},"texts":{}}"#,
+        )
+        .expect("a file");
+        let mut stale = State::default();
+        load_at(&mut stale, &path);
+        assert!(stale.sliders.is_empty(), "an unknown label is dropped");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn a_pointer_on_a_track_is_a_clamped_fraction() {
         assert_eq!(fraction_at(100.0, 100.0, 160.0), 0.0, "the left end");
