@@ -757,6 +757,8 @@ const SLIDER_TRACK: f32 = 4.0;
 const SLIDER_KNOB: f32 = 14.0;
 /// Room between a slider's printed value and its track.
 const SLIDER_LABEL_GAP: f32 = 12.0;
+/// How tall a row is to a press: label, description and the gap under them.
+const ROW_HIT_BAND: f32 = 46.0;
 
 /// One block of a tab's body, in the order the source lays it out.
 #[derive(Debug, Clone, Copy)]
@@ -2016,10 +2018,12 @@ fn draw_body(
                             .unwrap_or(value);
                         if held {
                             if let Some(pointer) = pointer {
-                                let row_top = y;
-                                let height = SLIDER_HEIGHT;
-                                let in_row = pointer.y >= row_top
-                                    && pointer.y <= row_top + height.max(ROW_LABEL_SIZE);
+                                // The band is the row's, not the slider's: a row with a
+                                // description is about forty points tall, and a press anywhere
+                                // on it is a press on the slider -- testing the control's own
+                                // twenty points made the lower half of every row dead.
+                                let in_row =
+                                    pointer.y >= y - 2.0 && pointer.y <= y + ROW_HIT_BAND;
                                 if in_row && pointer.x >= track_left && pointer.x <= right {
                                     fraction = fraction_at(pointer.x, track_left, SLIDER_WIDTH);
                                     match state
