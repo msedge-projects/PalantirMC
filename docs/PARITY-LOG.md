@@ -751,6 +751,24 @@ account survives a restart; the project page's Links, Creators, Details, Version
 the project's own; servers draw the icons they send; the hosting banner names Sift; sliders drag;
 fields take typing. Releases 0.1.13 through 0.1.18 all carry installers.
 
+### A walk of every page on the Linux VM — 0.1.19
+
+One run, five pages, each captured from the VM's own window (the rail's arithmetic decides the
+clicks: `TITLE_BAR + RAIL_FIRST + index * RAIL_PITCH`).
+
+| Page | What the capture shows |
+| --- | --- |
+| Home | Library with two instances and their Play buttons, `Jump in → Harbour Build`, the getting-started checklist, News, and the banner reading **on Sift.** |
+| Discover | category tabs, a search field with its placeholder, `Sort by: Relevance`, `View: 20`, and cards carrying project icons, tags, follower and download counts and Install buttons |
+| Skins | two sections, `Saved skins` and `Default skins`, five skin cards with names and models, the preview column, and the signed-out note |
+| Screenshots | the empty state: `No screenshots yet`, which is what a fresh data folder has |
+| Servers | `7 servers`, a filter field, `New server`, and cards with **the icons the servers themselves send**, live player counts in green, MOTDs and version lines — including `My Test Server`, the row added through the dialog in an earlier slice |
+
+The walk also caught two copy defects that every earlier capture had missed because the card was
+cut off: the news button read `Upgrade to Modrinth+` and the servers heading `Modrinth Hosting`.
+Both are the catalogue's `{product}` templates, so this build now says `Upgrade to Sift+` and
+`Sift Hosting`.
+
 ### Open after this pass
 
 | # | Region | What differs |
