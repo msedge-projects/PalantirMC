@@ -732,6 +732,25 @@ the project page's Versions tab still says "No versions yet"; the promo art is n
 shortcut in `panel.rs`); and the `owed:` notes in `settings.rs` list rows whose controls are drawn
 but not interactive. Everything else on the five-page brief has a capture.
 
+### The settings fields take typing — 0.1.18
+
+Six rows carry a text field: the four Java locations, the Java arguments and the window width.
+All six were plates showing their own placeholder. They are `TextEdit`s now, placed on the plate
+the row paints, with the placeholder as the hint. Typed `C:/Program Files/Java/jdk-25/bin/javaw.exe`
+into Java 25 location on the VM: the field took it, drew a focus ring and a cursor, and the field
+below kept its `/path/to/java` hint.
+
+**Where this leaves the settings screen.** Two of the reference's three field controls work:
+sliders drag (20 → 6 on quick instances) and fields take typing. The third, chip groups, is still
+drawn as plates, and neither typed values nor slider positions are written to disk — both live in
+the page's state for the length of the window, which is the `shortcut:` in `settings.rs` and the
+honest reason to call the settings screen *drawn* rather than *done*.
+
+**The session's total, each with a capture of this build:** quick-play launches a world; the
+account survives a restart; the project page's Links, Creators, Details, Versions and Gallery are
+the project's own; servers draw the icons they send; the hosting banner names Sift; sliders drag;
+fields take typing. Releases 0.1.13 through 0.1.18 all carry installers.
+
 ### Open after this pass
 
 | # | Region | What differs |

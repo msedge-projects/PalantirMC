@@ -4647,3 +4647,13 @@ method, `docs/PARITY-LOG.md` the per-feature evidence, and this is the summary o
 - Tests: 819 across the workspace, 152 in `sift-ui`.
 - **A capture is only evidence of this app if its strings exist in this tree.** Two items in the
   previous state block were read off the reference's window and were wrong.
+
+### State at 0.1.18
+
+- Settings: sliders drag and fields take typing; chip groups are still plates, and nothing on that
+  screen is written to disk yet (`shortcut:` in `settings.rs`).
+- Account, quick-play, project tabs (Description, Versions, Gallery), server icons and the hosting
+  banner are all working with a capture of this build behind each.
+- Tests: 819 workspace, 152 in `sift-ui`.
+- Every capture that mattered this session was taken **after** killing the reference app on the VM;
+  two earlier ones were of its window and one claim in the previous state block came from them.
