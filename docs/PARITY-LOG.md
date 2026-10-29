@@ -841,6 +841,27 @@ session. The launcher's half is correct; the world on disk is not a world.
 **Also seen in the capture:** the shell's status pill reads `Running` while the game is up, and
 Minecraft's title screen runs alongside the launcher's own window.
 
+### The rename reaches the copy — 0.1.23
+
+Twenty-two user-facing strings named the other product. They say Sift now, and the publisher is
+Sift Studios in About's copyright line and in the installer's `PUBLISHER`:
+
+| Was | Is |
+| --- | --- |
+| `Sign in to Modrinth` | `Sign in to Sift` |
+| `Welcome to Modrinth` | `Welcome to Sift` |
+| `Minimize Modrinth App when Minecraft starts.` | `Minimize Sift Launcher when Minecraft starts.` |
+| `Ads make Modrinth possible and fund creator payouts.` | `Ads make Sift possible…` |
+| `Copyright (c) 2026 Palantir Studios` | `Copyright (c) 2026 Sift Studios` |
+
+Five names are kept on purpose: the `Modrinth Pack` format, the `Modrinth SMP` sample server,
+`cdn.modrinth.com` URLs, the API client's type names, and About's icon-set attribution, which is a
+licence condition. `grep Palantir` over the crates and the installer script finds nothing that is
+not a comment.
+
+**Verified on the VM:** About draws the Sift mark, reads `Sift Launcher 0.1.22` and
+`Copyright (c) 2026 Sift Studios`, with the panel behind it already saying `Sign in to Sift`.
+
 ### Open after this pass
 
 | # | Region | What differs |
