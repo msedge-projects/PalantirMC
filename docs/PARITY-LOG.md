@@ -890,6 +890,32 @@ the reference keeps in `instance.cfg` keys this launcher does not yet read.
 `Images::get_file` was added for the grid: a local file is decoded inline and cached under its path,
 through the cache's existing eviction, so the screenshots cost one decode each and no worker.
 
+### Every field takes typing, and a heading's choice survives — 0.1.27
+
+The field placement lived in the row arm only, so the ten `Block::Standalone(Control::Text …)`
+fields — the pre-launch, wrapper and post-exit hooks, the environment variables, the two search
+boxes — drew a plate with a hint that could not be typed into. One helper serves both arms now.
+
+Verified on the VM:
+
+```
+"texts":   { "Enter pre-launch command...": "echo hello from the hook" }
+"selects": { "Standard languages": "Español" }
+```
+
+and after killing and relaunching the app, the language trigger still reads **Español**.
+
+Two bugs came out of the change. The plate painted its own placeholder under the field, so the
+same words appeared twice a few points apart — the plate is only a plate now. And a value stored
+against a *heading* was dropped on load, because the known-label list collected rows only: the
+language selector is a heading, which is exactly how the reader's choice of Español disappeared
+between runs. Both shapes are collected, with a test (`a_heading_with_a_control_is_a_known_label`)
+that pins it.
+
+**A note on pushing:** `git push` failed with a 403 while the active `gh` account was `MSedgeMC`.
+Switching to `msedge-projects` (`gh auth switch --user msedge-projects`) fixed it; the repository
+belongs to that account, and the credential helper routes by path but apparently not by account.
+
 ### Open after this pass
 
 | # | Region | What differs |
