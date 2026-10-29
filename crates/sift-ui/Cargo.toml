@@ -18,7 +18,7 @@ name = "sift-ui"
 # (vendored at `vendor/fastframe-scroll`) is edition 2024 and states 1.98. Nothing
 # else in the tree needs it; the workspace's own floor is unchanged for the crates
 # that do not depend on this one.
-version = "0.1.20"
+version = "0.1.21"
 edition = "2021"
 rust-version = "1.98"
 publish = false
