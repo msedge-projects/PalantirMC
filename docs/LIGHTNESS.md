@@ -177,3 +177,32 @@ that quietly included them would look like a 1.9-second scroll.
 frame is about a millisecond at p95; the rest of the 16 ms interval is the vsync the compositor
 imposes. That is the `fastframe-scroll` decision paying off: the reference's faster notch needed
 a vendored container, and the container is not what the budget was afraid of.
+
+## Re-measured at 0.1.7 — 2026-10-29
+
+The numbers above were taken at 0.1.0. These are the same five budgets against the current tree,
+on the same VM, with a release build, and the method stated rather than implied.
+
+| Budget | Limit | 0.1.0 | **0.1.7** | How |
+| --- | --- | --- | --- | --- |
+| Startup | ≤ 400 ms | 53 ms | **167 ms** | spawn to the window being found, polled every 10 ms, cold |
+| Idle CPU | 0 ticks | 0 / 10 s | **0 / 10 s** | `utime+stime` over ten seconds after a 25-second warm-up |
+| Idle RSS | ≤ 120 MB | 114.6 MB | **114.7 MB** | `ps -o rss=` at the same moment |
+| Exe | ≤ 28.65 MB | 10.79 MB | **13.82 MB** | the release binary, unstripped, GNU target |
+| Scroll p95 | ≤ 20 ms | 18.53 ms | *not re-measured* | — |
+
+**Two things this pass taught that the numbers alone do not say.**
+
+- **The first ten seconds are not idle.** Measured immediately after the window appeared, the
+  app burned **19 ticks over ten seconds** and sat at **121.7 MB** — one tick budget missed and
+  one megabyte over. After a 25-second warm-up the same build is **0 ticks and 114.7 MB**. Fonts,
+  the icon cache and the first layout are real work that finishes; a measurement that starts
+  before they do reports them as idle cost. Both figures are recorded so the next person does
+  not have to rediscover which one is the budget.
+- **Startup grew from 53 ms to 167 ms** and the honest explanation is not a regression in
+  startup: the 0.1.0 number was a single observation, this one polls `xdotool` in 10 ms steps
+  from a cold cache. They are not the same measurement, which is why the method column exists.
+
+**Scroll p95 is not re-measured here** and is named rather than assumed: the page it was taken
+on (the instance list) still scrolls the same way, but the last figure predates the servers page
+gaining worker threads. That is the next measurement owed.
