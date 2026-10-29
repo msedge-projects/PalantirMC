@@ -621,6 +621,47 @@ name plus address, stored — which is the next slice, not a rename of the sampl
 hand-written copy standing in for Modrinth's own, and a ping that is only ever asked once per
 page visit — re-pinging on demand is a later pass.
 
+### The servers page can be added to — 2026-10-29
+
+`New server` was painted and inert. It opens a dialog: a name, an address, a check that refuses
+what cannot be asked, and a save that survives a restart.
+
+| Piece | What it is |
+| --- | --- |
+| the shape change | `Server`'s fields were `&'static str` and the list was a `const` array, so there was nowhere to put a server a reader typed. Owned `String`s, a `samples()` constructor, `State.servers: Vec<Server>` |
+| the store | `<data root>/servers.json`, `[{"name": ..., "address": ...}]`, read once on first draw and appended on save |
+| the check | `clean_address`: a hostname or IPv4, an optional port, at most 253 characters, no spaces or path separators. Twelve cases in one test, because this is a trust boundary |
+| the dialog | a scrim, the heading, two fields, `Cancel` and `New server`; drawn **last**, for the reason the toast is drawn last |
+
+**Verified by driving it, not by reading it:** typed `My Test Server` and `mc.hypixel.net` into
+the two fields and pressed the button. The file holds exactly that pair, and the page's count
+went from `6 servers` to `7 servers`. A capture from the same run shows the dialog: heading, both
+fields, both buttons, the page dimmed behind them.
+
+**Shortcut, in the code:** the fields are egui's `TextEdit`, not a painted plate. The crate's own
+text field hard-codes its widget id and placeholder, and two instances on one page would collide
+on the same id — the bug this crate already fixed once for result cards. Upgrade when that widget
+takes an id and a placeholder.
+
+**Owed on this page now:** the reference fetches each server's `/server-icon.png` and this draws
+the initial instead; the promo card's copy is still hand-written; and a ping is only asked once
+per page visit, so a server that comes back online is not noticed until the page is left and
+returned to.
+
+### The installer, twice — 2026-10-29
+
+0.1.8 was the first release to ask the runner's NSIS to build the installer after the animated
+banner was removed. It got past the banner and failed on the next line instead:
+
+| Release | Failed at | Why |
+| --- | --- | --- |
+| 0.1.1, 0.1.2, 0.1.4 | line 132 | the `SysAnimate32` welcome banner |
+| 0.1.8 | **line 178** | the `File` that copies the exe: the step passed `../dist/SiftUi.exe` and the script writes `${HERE}${APP_EXE}`, so it asked for `...\installer\../dist/SiftUi.exe`. POSIX makensis normalises that; NSIS 3.13 does not |
+
+Each failure moved the line forward, which is the useful part of the record: the banner really
+was one blocker and not the only one. 0.1.9 copies the exe into `installer/dist/` and hands over a
+plain name.
+
 ### Open after this pass
 
 | # | Region | What differs |
