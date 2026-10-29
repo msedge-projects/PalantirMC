@@ -283,7 +283,7 @@ impl Default for State {
 /// `servers.manage.servers-title` — "Modrinth Hosting" (`ui/src/locales/en-US/index.json:5504`).
 /// The app's own catalogue carries the same words as `app.nav.modrinth-hosting`
 /// (`app-frontend/src/locales/en-US/index.json:1367`).
-const HEADING: &str = "Modrinth Hosting";
+const HEADING: &str = "Sift Hosting";
 
 /// `servers.manage.new-server-button` — "New server" (`ui/src/locales/en-US/index.json:5462`),
 /// the page's primary button (`index.vue:116-119`).
@@ -347,7 +347,7 @@ const UNKNOWN: &str = "Unknown";
 /// `servers.list-empty.modrinth-hosting-label` — "Modrinth Hosting"
 /// (`ui/src/locales/en-US/index.json:5324`), the no-servers screen's title
 /// (`ServerListEmpty.vue:7-9`).
-const EMPTY_HEADING: &str = "Modrinth Hosting";
+const EMPTY_HEADING: &str = "Sift Hosting";
 
 /// `servers.list-empty.no-servers-description` — "Install mods, invite friends, and play
 /// together all from the Modrinth App." (`ui/src/locales/en-US/index.json:5330`).

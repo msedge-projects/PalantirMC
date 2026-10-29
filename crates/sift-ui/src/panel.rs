@@ -286,7 +286,7 @@ const NEWS_COPY: &str =
 const NEWS_DATE: &str = "September 7, 2026";
 
 /// The upgrade row's label: the reference's `app.nav.upgrade-to-modrinth-plus`.
-const UPGRADE: &str = "Upgrade to Modrinth+";
+const UPGRADE: &str = "Upgrade to Sift+";
 
 /// The hosting banner's first line.
 const HOSTING: &str = "Get your next server";
