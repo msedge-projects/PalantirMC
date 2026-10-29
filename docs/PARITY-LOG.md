@@ -662,6 +662,33 @@ Each failure moved the line forward, which is the useful part of the record: the
 was one blocker and not the only one. 0.1.9 copies the exe into `installer/dist/` and hands over a
 plain name.
 
+### Quick-play, a remembered account, and the project sidebar — 2026-10-29
+
+**Shipped in 0.1.14**, with 0.1.13's installer step, so those assets include a setup exe.
+
+| Feature | What it does now |
+| --- | --- |
+| quick-play | pressing play on a world launches that world: the engine's `join_target` reads a `QuickPlayWorld` setting and builds `--quickPlaySingleplayer`; the launcher writes it for one launch and removes it as soon as the plan exists |
+| account | the profile and its refresh token live in `account.json`; the next start shows the name immediately and renews the game token on a worker; a refresh that fails clears the file and says the session expired |
+| project page | `Links`, `Creators` and `Details` under the compatibility block, with the catalogue's own keys |
+
+Each landed with a test for its new branch (`a_quick_play_world_is_a_target_of_its_own`,
+`a_stored_account_round_trips_and_nonsense_is_ignored`), and the workspace is at 819 tests.
+
+**A finding worth more than the feature it blocked.** The settings modal still draws sliders,
+text fields and chip groups as select plates (E-42…E-44). I added a `Control::Slider` kind with
+a track, a fill and a knob, and **reverted it**: a slider that cannot be dragged is a plate with
+a knob, which is the substitution this log keeps recording.
+
+The reason is structural and it is not the enum: `draw_body` takes a `&egui::Painter`, not a
+`ui`, so it has no pointer and no `State`. A control that needs input needs the body to learn
+about input — the body's signature, its call site, and a home in `State` for each value. That is
+the slice. Doing it as a new control kind and calling it done would have been the mistake.
+
+**Still owed, in this order:** settings controls (above), the servers' `/server-icon.png` (the
+ping's `favicon` carries it as a data URI), the Gallery tab (needs image URLs), and the promo
+card's hand-written copy.
+
 ### Open after this pass
 
 | # | Region | What differs |
