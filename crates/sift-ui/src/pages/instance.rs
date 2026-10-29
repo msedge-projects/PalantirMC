@@ -58,6 +58,9 @@ const CARD_GAP: f32 = 14.0;
 /// The card's inner padding: the reference's `p-6` on the tab body (`layout.vue:72`).
 const PAD: f32 = 24.0;
 
+/// One row of the Files and Logs lists: a 20-point line with room to breathe.
+const ROW_H: f32 = 20.0;
+
 /// The instance name's size: the reference's page-header title is `text-2xl`
 /// (`ui/src/components/base/page-header/index.vue:13`).
 const NAME_SIZE: f32 = 24.0;
@@ -309,13 +312,7 @@ pub fn draw(
         Tab::Content => overview(ui, card, theme, instance),
         // owed: the reference's Files tab, a file browser over `plugin:files|file_list`
         // (`files/index.vue:46-67`).
-        Tab::Files => stub(
-            ui,
-            card,
-            theme,
-            Tab::Files,
-            "The instance's folder will be listed here, file by file.",
-        ),
+        Tab::Files => files_tab(ui, card, theme, instance),
         // owed: the reference's Screenshots tab, a grid over the instance's screenshots
         // (`screenshots/index.vue`).
         Tab::Screenshots => stub(
@@ -334,13 +331,7 @@ pub fn draw(
             "This instance's worlds and servers will be listed here.",
         ),
         // owed: the reference's Logs tab, the console (`logs/index.vue:1-5`).
-        Tab::Logs => stub(
-            ui,
-            card,
-            theme,
-            Tab::Logs,
-            "This instance's logs will appear here once it has run.",
-        ),
+        Tab::Logs => logs_tab(ui, card, theme, instance),
     }
     // Nothing on this page animates, so the shell has no frame to schedule.
     false
@@ -397,6 +388,131 @@ fn overview(ui: &mut Ui, card: Rect, theme: &Theme, instance: &Instance) {
 
 /// A tab whose reference screen is not built yet: its own name as the heading, and one sentence
 /// naming what will be there.
+/// The Files tab: the instance's folder, one row per entry.
+fn files_tab(ui: &mut Ui, card: Rect, theme: &Theme, instance: &Instance) {
+    let entries = folder_entries(&instance.path);
+    if entries.is_empty() {
+        stub(ui, card, theme, Tab::Files, "This instance's folder is empty.");
+        return;
+    }
+    let painter = ui.painter();
+    let inner = card.shrink(PAD);
+    let mut y = inner.top();
+    for (name, is_dir, size) in entries.iter().take(24) {
+        if y + ROW_H > inner.bottom() {
+            break;
+        }
+        icons::draw(
+            painter,
+            if *is_dir { Glyph::Folder } else { Glyph::File },
+            Rect::from_center_size(
+                egui::pos2(inner.left() + 8.0, y + ROW_H / 2.0),
+                egui::vec2(14.0, 14.0),
+            ),
+            theme.SECONDARY,
+        );
+        painter.text(
+            egui::pos2(inner.left() + 26.0, y + ROW_H / 2.0),
+            Align2::LEFT_CENTER,
+            name,
+            fonts::body(12.0),
+            theme.BASE,
+        );
+        if !*is_dir {
+            painter.text(
+                egui::pos2(inner.right(), y + ROW_H / 2.0),
+                Align2::RIGHT_CENTER,
+                format_size(*size),
+                fonts::body(11.0),
+                theme.SECONDARY,
+            );
+        }
+        y += ROW_H;
+    }
+}
+
+/// The Logs tab: the last screenful of the game's own log, newest at the bottom.
+fn logs_tab(ui: &mut Ui, card: Rect, theme: &Theme, instance: &Instance) {
+    let Some(text) = log_text(&instance.path) else {
+        stub(
+            ui,
+            card,
+            theme,
+            Tab::Logs,
+            "This instance has no log yet. Start it once and the game writes one.",
+        );
+        return;
+    };
+    let painter = ui.painter();
+    let inner = card.shrink(PAD);
+    let fits = ((inner.height() / ROW_H).floor() as usize).max(1);
+    let mut y = inner.top();
+    for line in tail_lines(&text, fits) {
+        painter.text(
+            egui::pos2(inner.left(), y),
+            Align2::LEFT_TOP,
+            line,
+            fonts::body(11.0),
+            theme.SECONDARY,
+        );
+        y += ROW_H;
+    }
+}
+
+/// The last `count` lines of a log, which is what a log pane shows.
+///
+/// A real `latest.log` reaches megabytes and the pane can show a screenful, so the read is bounded
+/// by the answer rather than by the file.
+fn tail_lines(text: &str, count: usize) -> Vec<&str> {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(count);
+    lines[start..].to_vec()
+}
+
+/// A byte count as the words a file browser uses: `842 B`, `1.4 KB`, `12.1 MB`, `1.2 GB`.
+fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    let value = bytes as f64;
+    if value < KB {
+        format!("{bytes} B")
+    } else if value < KB * KB {
+        format!("{:.1} KB", value / KB)
+    } else if value < KB * KB * KB {
+        format!("{:.1} MB", value / (KB * KB))
+    } else {
+        format!("{:.1} GB", value / (KB * KB * KB))
+    }
+}
+
+/// The instance folder's entries, folders first then files, each with its size.
+fn folder_entries(path: &std::path::Path) -> Vec<(String, bool, u64)> {
+    let Ok(read) = std::fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<(String, bool, u64)> = read
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_owned();
+            let metadata = entry.metadata().ok()?;
+            let is_dir = metadata.is_dir();
+            Some((name, is_dir, if is_dir { 0 } else { metadata.len() }))
+        })
+        .collect();
+    // Folders first, then names, which is how every file browser a reader has used orders them.
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+    entries
+}
+
+/// The text of the instance's newest log, or nothing when the game has not run.
+fn log_text(path: &std::path::Path) -> Option<String> {
+    for candidate in ["minecraft/logs/latest.log", "logs/latest.log"] {
+        if let Ok(text) = std::fs::read_to_string(path.join(candidate)) {
+            return Some(text);
+        }
+    }
+    None
+}
+
 fn stub(ui: &mut Ui, card: Rect, theme: &Theme, tab: Tab, line: &str) {
     let painter = ui.painter();
     let inner = card.shrink(PAD);
@@ -501,6 +617,24 @@ mod tests {
 
     /// The information rows are labelled and ordered as the reference's header states them,
     /// the path is the instance's own, and last played is still the owed placeholder.
+    /// A log pane shows the end of the file, never the start, and never more lines than asked.
+    #[test]
+    fn a_tail_is_the_end_of_a_log() {
+        let text = "one\ntwo\nthree\nfour";
+        assert_eq!(tail_lines(text, 2), vec!["three", "four"]);
+        assert_eq!(tail_lines(text, 99), vec!["one", "two", "three", "four"]);
+        assert_eq!(tail_lines("", 5), Vec::<&str>::new());
+    }
+
+    /// A file browser's sizes read as words at every scale it meets.
+    #[test]
+    fn sizes_read_as_words() {
+        assert_eq!(format_size(842), "842 B");
+        assert_eq!(format_size(1536), "1.5 KB");
+        assert_eq!(format_size(12_700_000), "12.1 MB");
+        assert_eq!(format_size(2_147_483_648), "2.0 GB");
+    }
+
     #[test]
     fn the_information_rows_are_labelled_and_ordered() {
         assert_eq!(
