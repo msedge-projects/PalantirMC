@@ -9294,3 +9294,45 @@ $ python tools/progress.py --check
   says nothing yet about them being served by the code above. Stage 5 does not
   cover it either: what is left is the panel's other sections and every page that
   is not Discover, which is what stage 3's own open list names.
+
+## State at 0.1.7 — 2026-10-29
+
+Recorded so the four record files agree: `docs/LIGHTNESS.md` holds the measurements and their
+method, `docs/PARITY-LOG.md` the per-feature evidence, and this is the summary of both.
+
+**Measured on the shipped tree** (release build, `sift-launcher` VM):
+
+| Budget | Limit | 0.1.7 |
+| --- | --- | --- |
+| Startup | ≤ 400 ms | 167 ms |
+| Idle CPU | 0 ticks | 0 / 10 s (after a 25 s warm-up; 19 ticks in the first ten) |
+| Idle RSS | ≤ 120 MB | 114.7 MB (121.7 MB before the warm-up) |
+| Exe | ≤ 28.65 MB | 13.82 MB GNU release; 11.24 MB as shipped |
+| Scroll p95 | ≤ 20 ms | **not re-measured** — last figure 18.53 ms at 0.1.0 |
+
+**Shipped and verified by driving the window, not only by tests:**
+
+- **Installs load.** A `.mrpack`'s mods and overrides land in the instance's `minecraft/`
+  folder. 65 mods, 413 MB, Fabric 0.19.2 from the pack's own manifest.
+- **Sign in with Microsoft** reaches the live endpoint and prints a real device code; a
+  signed-in launch builds an `msa` session; the checklist reads `Signed in as <name>`.
+- **Worlds** carry their names from `level.dat` and are found where the game keeps them.
+- **Skins** has both sections and its preview column; **Settings** has the three theme cards;
+  **the instance page** opens from a row's `Edit`; **Servers** pings its servers and draws their
+  own MOTDs and counts.
+- **Messages are visible** — the toast was painted under the content column and is now drawn
+  last, which fixed every message the launcher had ever produced.
+
+**Owed, in the order a next session should take them:**
+
+1. **Scroll p95 re-measured** — the one budget with no current evidence; `tools/scroll_lag.py`
+   reads a PGM recording and no recording has been taken since the servers page gained workers.
+2. **The servers' `New server` dialog** — name plus address, stored. The page's labels are still
+   the sample's while the MOTDs are the servers', and a dialog is what fixes that honestly.
+3. **Account persistence** — the session is memory only, so a restart asks again.
+4. **Project page** — gallery image and the sidebar's links, tags, creators and details.
+5. **Settings** — sliders, text fields and chip groups draw as plates; rich-text strings keep
+   their markup. Twenty-four `owed:` notes name the specific rows.
+6. **Quick-play** — a world's name shows and its Play launches nothing.
+7. **Installer** — `installer/sift.nsi` compiles under POSIX `makensis` and aborts on the
+   runner's NSIS 3.13 at its animated welcome banner (E-45).
