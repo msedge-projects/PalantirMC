@@ -192,9 +192,13 @@ jobs:
           # makensis resolves `!define HERE` and its output against the directory it is run
           # from, which is why this pushes into `installer/`. Its output is captured so a
           # failure carries NSIS's own sentence into the log instead of only the line number.
+          # Both paths are resolved from `installer/dist`, an anchor that does not depend on the
+          # working directory: computed from `.` after the Push-Location, ROOT came out as
+          # `.../installer/` and NSIS looked for the licence inside it.
+          $payload = (Resolve-Path installer/dist/SiftUi.exe).Path
+          $root = ((Get-Item installer).Parent.FullName -replace '\\', '/') + '/'
+          Write-Host "root:     $root"
           Push-Location installer
-          $payload = (Resolve-Path dist/SiftUi.exe).Path
-          $root = ((Resolve-Path .).Path -replace '\\', '/') + '/'
           $out = & $makensis /V3 /DVERSION=$version "/DPAYLOAD=$payload" "/DROOT=$root" sift.nsi 2>&1
           $code = $LASTEXITCODE
           Pop-Location
