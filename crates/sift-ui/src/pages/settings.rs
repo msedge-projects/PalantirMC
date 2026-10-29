@@ -101,8 +101,13 @@ fn known_labels() -> Vec<&'static str> {
     let mut labels = Vec::new();
     for tab in Tab::ALL {
         for block in blocks(tab) {
-            if let Block::Row { label, .. } = block {
-                labels.push(*label);
+            // A heading can carry a control too -- the language selector does -- and a value
+            // whose row is not in this list is dropped on the next start. That is how the
+            // reader's choice of language vanished once, so both shapes are collected.
+            match block {
+                Block::Row { label, .. } => labels.push(*label),
+                Block::Heading { text, .. } => labels.push(*text),
+                _ => {}
             }
         }
     }
@@ -1513,9 +1518,8 @@ const JAVA_AND_MEMORY_BLOCKS: &[Block] = &[
 /// (`:78-96`) and height (`:97-115`) fields, which the source disables while fullscreen is on
 /// (`:91`, `:110`).
 ///
-/// `// owed:` the two fields are `Input type="number"`s, drawn here as select plates holding
-/// their placeholders, and neither shows the disabled state the fullscreen switch puts them
-/// in. `force_fullscreen`'s default is not in this checkout -- it lives in the Rust settings
+/// The two fields are `Input type="number"`s and take typing. `// owed:` neither shows the
+/// disabled state the fullscreen switch puts them in, and only the width was converted. `force_fullscreen`'s default is not in this checkout -- it lives in the Rust settings
 /// store -- so the switch is drawn off.
 const WINDOW_BLOCKS: &[Block] = &[
     Block::Row {
@@ -1540,8 +1544,8 @@ const WINDOW_BLOCKS: &[Block] = &[
 /// The Launch hooks tab (`launch-hooks-settings.vue:82-156`): pre-launch (`:85-101`), wrapper
 /// (`:102-118`) and post-exit (`:119-135`) hooks, then the variable list (`:136-146`).
 ///
-/// `// owed:` the three hooks are `Input type="text"`s, drawn here as select plates holding
-/// their placeholders. The six `$INST_*` lines (`:138-145`,
+/// The three hooks are `Input type="text"`s and are drawn as fields that take typing; what is
+/// owed here is the six `$INST_*` lines (`:138-145`,
 /// `instance.settings.tabs.hooks.variables.*.description`, :4229-4244) are `<li>` items with
 /// no list block to draw them in, so only the line that introduces them is ported.
 const LAUNCH_HOOKS_BLOCKS: &[Block] = &[
@@ -2270,6 +2274,46 @@ fn resolve_select(
     resolved
 }
 
+/// A field's rect, right-aligned on a row's first line.
+fn rect_for_field(right: f32, y: f32) -> Rect {
+    Rect::from_center_size(
+        egui::pos2(right - FIELD_WIDTH / 2.0, y + ROW_LABEL_SIZE / 2.0),
+        egui::vec2(FIELD_WIDTH, FIELD_HEIGHT),
+    )
+}
+
+/// Put a real `TextEdit` over a field's plate, and keep what is typed.
+///
+/// Keyed by `key`: a row passes its label, a standalone field its own placeholder, which is unique
+/// to it. The state is the store, and a change marks the page dirty so the save runs at close.
+fn place_field(
+    ui: &mut Ui,
+    state: &mut State,
+    key: &'static str,
+    placeholder: &str,
+    rect: Rect,
+) {
+    let mut text = state
+        .texts
+        .iter()
+        .find(|(known, _)| *known == key)
+        .map(|(_, typed)| typed.clone())
+        .unwrap_or_default();
+    let output = ui.put(
+        rect,
+        egui::TextEdit::singleline(&mut text)
+            .hint_text(placeholder)
+            .desired_width(rect.width()),
+    );
+    if output.changed() {
+        match state.texts.iter_mut().find(|(known, _)| *known == key) {
+            Some((_, typed)) => *typed = text,
+            None => state.texts.push((key, text)),
+        }
+        state.dirty = true;
+    }
+}
+
 /// The selected tab's body: its pane, its heading, and its rows.
 /// Draw the tab's body, scrolled by `scroll`, and return its total height.
 ///
@@ -2485,32 +2529,8 @@ fn draw_body(
                     Some(control),
                     ROW_LABEL_SIZE,
                 );
-                // A field is a `Ui` child, so it goes on top of the plate the row just painted.
-                // Centred on the label's first line, where the plate sits.
                 if let Control::Text { placeholder } = control {
-                    let rect = Rect::from_center_size(
-                        egui::pos2(right - FIELD_WIDTH / 2.0, y + ROW_LABEL_SIZE / 2.0),
-                        egui::vec2(FIELD_WIDTH, FIELD_HEIGHT),
-                    );
-                    let mut text = state
-                        .texts
-                        .iter()
-                        .find(|(key, _)| *key == label)
-                        .map(|(_, typed)| typed.clone())
-                        .unwrap_or_default();
-                    let output = ui.put(
-                        rect,
-                        egui::TextEdit::singleline(&mut text)
-                            .hint_text(placeholder)
-                            .desired_width(FIELD_WIDTH),
-                    );
-                    if output.changed() {
-                        match state.texts.iter_mut().find(|(key, _)| *key == label) {
-                            Some((_, typed)) => *typed = text,
-                            None => state.texts.push((label, text)),
-                        }
-                        state.dirty = true;
-                    }
+                    place_field(ui, state, label, placeholder, rect_for_field(right, y));
                 }
                 height + ROW_GAP
             }
@@ -2518,6 +2538,14 @@ fn draw_body(
                 // Left-aligned: the control's right edge is its own width past the inset.
                 let width = control.width(&body);
                 control.draw(&body, theme, left + width, y + control.height() / 2.0);
+                // A standalone field has no row label, so its placeholder is its key.
+                if let Control::Text { placeholder } = control {
+                    let rect = Rect::from_min_size(
+                        egui::pos2(left, y),
+                        egui::vec2(FIELD_WIDTH, FIELD_HEIGHT),
+                    );
+                    place_field(ui, state, placeholder, placeholder, rect);
+                }
                 control.height() + ROW_GAP
             }
             Block::ThemeCards { selected } => {
@@ -2760,14 +2788,10 @@ impl Control {
                     pos2(right - FIELD_WIDTH, centre_y - FIELD_HEIGHT / 2.0),
                     vec2(FIELD_WIDTH, FIELD_HEIGHT),
                 );
+                // The plate only: the `TextEdit` placed on it carries the hint, and drawing it
+                // here as well put two copies of the same words a few points apart.
+                let _ = placeholder;
                 painter.rect_filled(rect, CONTROL_RADIUS, theme.BUTTON_BG);
-                painter.text(
-                    pos2(rect.left() + CONTROL_PADDING, centre_y),
-                    Align2::LEFT_CENTER,
-                    placeholder,
-                    fonts::body(CONTROL_TEXT_SIZE),
-                    theme.SECONDARY,
-                );
             }
             Control::Slider {
                 value,
@@ -3006,6 +3030,17 @@ mod tests {
         load_at(&mut stale, &path);
         assert!(stale.sliders.is_empty(), "an unknown label is dropped");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A heading can carry a control, and a value whose row is not a known label is dropped on
+    /// the next start -- which is how a reader's language choice vanished once.
+    #[test]
+    fn a_heading_with_a_control_is_a_known_label() {
+        let labels = known_labels();
+        assert!(
+            labels.contains(&LANGUAGE_CATEGORY),
+            "the language selector's heading is a label"
+        );
     }
 
     #[test]
