@@ -42,6 +42,17 @@ pub struct Project {
     pub followers: &'static str,
     /// The icon's URL.
     pub icon: &'static str,
+    /// The project's links, as `(label, url)`. Labels are the catalogue's
+    /// `project.about.links.*` strings.
+    pub links: &'static [(&'static str, &'static str)],
+    /// The team, as `(name, role)`.
+    pub creators: &'static [(&'static str, &'static str)],
+    /// When it was first published, in the reference's own long date spelling.
+    pub published: &'static str,
+    /// When it last changed.
+    pub updated: &'static str,
+    /// The licence it ships under.
+    pub license: &'static str,
 }
 
 /// The three tabs the page's own strip has. `Description` is the default.
@@ -367,7 +378,85 @@ pub fn panel(ui: &mut Ui, rect: Rect, theme: &Theme, project: &Project) -> f32 {
         }
         y += 32.0;
     }
+
+    // The three sections the reference puts under compatibility. Their headings are the
+    // catalogue's own, cited on each.
+    y += section(
+        painter,
+        rect,
+        y,
+        theme,
+        "Links", // project.about.links.title
+        project.links,
+    );
+    y += section(
+        painter,
+        rect,
+        y,
+        theme,
+        "Creators", // project.about.creators.title
+        project.creators,
+    );
+    y += section(
+        painter,
+        rect,
+        y,
+        theme,
+        "Details", // label.details
+        &[
+            // project.about.details.published
+            ("Published", project.published),
+            // project.about.details.updated
+            ("Updated", project.updated),
+            // project.license.title
+            ("License", project.license),
+        ],
+    );
+
     y - rect.top()
+}
+
+/// One sidebar section: a heading, then a label/value row per entry.
+///
+/// Returns the height it used, so the next section starts where this one ended. `value` may be
+/// empty for a row that is only a label (`Creators` shows a role under a name instead).
+fn section(
+    painter: &egui::Painter,
+    rect: Rect,
+    top: f32,
+    theme: &Theme,
+    heading: &str,
+    rows: &[(&str, &str)],
+) -> f32 {
+    let mut y = top;
+    painter.text(
+        egui::pos2(rect.left(), y),
+        Align2::LEFT_TOP,
+        heading,
+        fonts::semibold(15.0),
+        theme.CONTRAST,
+    );
+    y += 24.0;
+    for (label, value) in rows {
+        painter.text(
+            egui::pos2(rect.left(), y),
+            Align2::LEFT_TOP,
+            *label,
+            fonts::body(12.0),
+            theme.BASE,
+        );
+        if !value.is_empty() {
+            painter.text(
+                egui::pos2(rect.right(), y),
+                Align2::RIGHT_TOP,
+                *value,
+                fonts::body(12.0),
+                theme.SECONDARY,
+            );
+        }
+        y += 20.0;
+    }
+    y - top + 8.0
 }
 
 /// The project the Discover list's first card opens, so the page can be captured against the
@@ -392,6 +481,21 @@ pub fn sample() -> Project {
         downloads: "19.4M downloads",
         followers: "5K followers",
         icon: "https://cdn.modrinth.com/data/1KVo5zza/d8152911f8fd5d7e9a8c499fe89045af81fe816e_96.webp",
+        // project.about.links.{source,issues,wiki,discord}
+        links: &[
+            ("View source", "https://github.com/Fabulously-Optimized/fabulously-optimized"),
+            ("Report issues", "https://github.com/Fabulously-Optimized/fabulously-optimized/issues"),
+            ("Visit wiki", "https://fabulously-optimized.github.io/"),
+            ("Join Discord", "https://discord.gg/fabulously-optimized"),
+        ],
+        creators: &[
+            ("Robitobi01", "Owner"),
+            ("unmojang", "Maintainer"),
+            ("trimbe", "Maintainer"),
+        ],
+        published: "September 7, 2021",
+        updated: "September 7, 2026",
+        license: "LGPL-3.0-only",
     }
 }
 
