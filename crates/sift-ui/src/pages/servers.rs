@@ -245,6 +245,10 @@ pub struct State {
     /// Whether the pings have been started, so a page that is left and returned to does not
     /// ask every server again.
     asked: bool,
+    /// Whether the reader's own servers have been read off disk yet.
+    loaded: bool,
+    /// The `New server` dialog, when it is open.
+    dialog: Option<Draft>,
 }
 
 impl Default for State {
@@ -256,6 +260,8 @@ impl Default for State {
             live: Vec::new(),
             pinger: None,
             asked: false,
+            loaded: false,
+            dialog: None,
         }
     }
 }
@@ -885,11 +891,111 @@ fn empty_height() -> f32 {
 // The page
 // ---------------------------------------------------------------------------
 
+/// The dialog's plate: `// guess: re-measure` against the reference's `New server` modal,
+/// which this page has no capture of yet.
+const DIALOG_WIDTH: f32 = 440.0;
+const DIALOG_HEIGHT: f32 = 250.0;
+const DIALOG_PADDING: f32 = 20.0;
+const DIALOG_RADIUS: u8 = 16;
+/// As much as the settings dialog dims the page behind it.
+const DIALOG_SCRIM: u8 = 120;
+
 /// How long a single server has to answer before it is `Offline`.
 ///
 /// Twenty seconds is generous for a handshake on a home connection and short enough that a card
 /// stops saying `Unknown` in the time a reader is still looking at it.
 const PING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The file a reader's own servers live in, beside the instances folder.
+fn store_path() -> std::path::PathBuf {
+    crate::data::instances_dir()
+        .parent()
+        .map(|root| root.join("servers.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from("servers.json"))
+}
+
+/// Read the servers a reader added. A missing or unreadable file is an empty list.
+///
+/// The file is `[{"name": "...", "address": "..."}]`; an entry missing either field is
+/// skipped rather than guessed at, because a server with no address cannot be asked anything.
+pub fn read_store() -> Vec<Server> {
+    let Ok(text) = std::fs::read_to_string(store_path()) else {
+        return Vec::new();
+    };
+    let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&text) else {
+        return Vec::new();
+    };
+    entries
+        .into_iter()
+        .filter_map(|entry| {
+            let name = entry.get("name")?.as_str()?.trim();
+            let address = entry.get("address")?.as_str()?.trim();
+            if name.is_empty() || address.is_empty() {
+                return None;
+            }
+            Some(Server {
+                name: name.to_owned(),
+                // The ping fills these in; the file only promises the label and where to ask.
+                motd: String::new(),
+                mc_version: String::new(),
+                loader: String::new(),
+                players: None,
+                address: address.to_owned(),
+                shared: false,
+            })
+        })
+        .collect()
+}
+
+/// Append one server to the file. Returns the reason when the file cannot be written, which
+/// the dialog shows rather than reporting a save that did not happen.
+pub fn append_store(server: &Server) -> Result<(), String> {
+    let mut stored: Vec<serde_json::Value> = read_store()
+        .into_iter()
+        .map(|server| {
+            serde_json::json!({ "name": server.name, "address": server.address })
+        })
+        .collect();
+    stored.push(serde_json::json!({ "name": server.name, "address": server.address }));
+
+    let path = store_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let text = serde_json::to_string_pretty(&stored)
+        .map_err(|error| format!("the list could not be written: {error}"))?;
+    std::fs::write(&path, text)
+        .map_err(|error| format!("{} could not be written: {error}", path.display()))
+}
+
+/// An address a reader typed, checked: a hostname or an IPv4, optionally with a port.
+///
+/// Deliberately narrow. A launcher asks a server one question and a bad address costs a
+/// twenty-second ping, so the obvious mistakes are refused here instead.
+pub fn clean_address(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() || trimmed.len() > 253 || trimmed.contains(char::is_whitespace) {
+        return None;
+    }
+    let (host, port) = match trimmed.rsplit_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (trimmed, None),
+    };
+    if host.is_empty()
+        || !host
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_'))
+    {
+        return None;
+    }
+    if let Some(port) = port {
+        match port.parse::<u16>() {
+            Ok(port) if port > 0 => return Some(format!("{host}:{port}")),
+            _ => return None,
+        }
+    }
+    Some(host.to_owned())
+}
 
 impl State {
     /// Start one worker per address, the first time the page is drawn.
@@ -967,6 +1073,17 @@ fn shown_of(server: &Server, live: &[(String, Option<sift_net::slp::Status>)]) -
     }
 }
 
+/// The `New server` dialog's two fields.
+#[derive(Debug, Default, Clone)]
+pub struct Draft {
+    /// The label the reader gives it.
+    pub name: String,
+    /// Where to ask, as they typed it.
+    pub address: String,
+    /// Why the last press of Save was refused, if it was.
+    pub error: Option<String>,
+}
+
 /// One card's worth of text: where it came from is `State::shown`'s business.
 struct Shown {
     motd: String,
@@ -987,6 +1104,10 @@ pub fn draw(
     // The page owns its rect (`pages/mod.rs`'s seam); paint the page colour first so the cards
     // sit on `--color-bg` even if the caller did not clear the column.
     ui.painter().rect_filled(rect, 0, theme.BG);
+    if !state.loaded {
+        state.loaded = true;
+        state.servers.extend(read_store());
+    }
     state.ask_servers();
     state.poll_servers();
 
@@ -1026,10 +1147,24 @@ pub fn draw(
     let shown = sections[0].cards.len() + sections[1].cards.len();
     let show_no_match = shown == 0;
 
-    let list_top = {
+    let (list_top, new_server) = {
         let painter = ui.painter();
         heading_and_toolbar(painter, rect, theme, state.servers.len(), shown)
     };
+
+    // A press on the brand plate opens the dialog. Read from the pointer rather than registered
+    // with egui, for the reason the panel's rows are: a full-column interaction registered later
+    // in the frame would take the press away.
+    let asked_to_add = ui.input(|input| {
+        input
+            .pointer
+            .interact_pos()
+            .is_some_and(|pointer| new_server.contains(pointer))
+            && input.pointer.primary_clicked()
+    });
+    if asked_to_add && state.dialog.is_none() {
+        state.dialog = Some(Draft::default());
+    }
 
     let view = Rect::from_min_max(
         egui::pos2(rect.left() + PAGE_PADDING, list_top),
@@ -1093,7 +1228,166 @@ pub fn draw(
             draw_promo(ui, promo, theme);
         });
 
+    // Last, for the reason the toast is last in the shell: anything drawn after a modal would
+    // be drawn on top of it.
+    draw_dialog(ui, rect, theme, state);
+
     false
+}
+
+/// The `New server` dialog.
+///
+/// `shortcut: the fields are egui's TextEdit, not a painted plate; upgrade when the crate's own
+/// text field takes an id and a placeholder.` `widgets::search::Search` hard-codes both, and two
+/// of them on one page would collide on the same widget id -- the bug this crate already fixed
+/// once for result cards.
+fn draw_dialog(ui: &mut Ui, page: Rect, theme: &Theme, state: &mut State) {
+    let Some(mut draft) = state.dialog.clone() else {
+        return;
+    };
+
+    let size = egui::vec2(DIALOG_WIDTH, DIALOG_HEIGHT);
+    let dialog = Rect::from_center_size(
+        egui::pos2(page.center().x, page.top() + PAGE_PADDING + size.y / 2.0),
+        size,
+    );
+
+    {
+        let painter = ui.painter();
+        painter.rect_filled(page, 0, Color32::from_black_alpha(DIALOG_SCRIM));
+        painter.rect_filled(dialog, DIALOG_RADIUS, theme.RAISED_BG);
+        painter.text(
+            egui::pos2(dialog.left() + DIALOG_PADDING, dialog.top() + DIALOG_PADDING),
+            Align2::LEFT_TOP,
+            NEW_SERVER,
+            fonts::heading(SECTION_HEADING_SIZE),
+            theme.CONTRAST,
+        );
+    }
+
+    let field_width = dialog.width() - 2.0 * DIALOG_PADDING;
+    let name_rect = Rect::from_min_size(
+        egui::pos2(dialog.left() + DIALOG_PADDING, dialog.top() + DIALOG_PADDING + 34.0),
+        egui::vec2(field_width, CONTROL_HEIGHT),
+    );
+    let address_rect = name_rect.translate(egui::vec2(0.0, CONTROL_HEIGHT + 44.0));
+
+    {
+        let painter = ui.painter();
+        painter.text(
+            egui::pos2(name_rect.left(), name_rect.top() - 18.0),
+            Align2::LEFT_TOP,
+            "Name",
+            fonts::label(LABEL_SIZE),
+            theme.SECONDARY,
+        );
+        painter.text(
+            egui::pos2(address_rect.left(), address_rect.top() - 18.0),
+            Align2::LEFT_TOP,
+            "Address",
+            fonts::label(LABEL_SIZE),
+            theme.SECONDARY,
+        );
+    }
+
+    // The two fields. `TextEdit` inside a child Ui so egui's own layout cannot move the plate
+    // the page painted around it.
+    for (rect, text) in [
+        (name_rect, &mut draft.name),
+        (address_rect, &mut draft.address),
+    ] {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        child.painter().rect_filled(rect, CONTROL_RADIUS, theme.BUTTON_BG);
+        child.add(
+            egui::TextEdit::singleline(text)
+                .desired_width(rect.width() - 16.0)
+                .font(fonts::body(LABEL_SIZE))
+                .text_color(theme.CONTRAST),
+        );
+    }
+
+    // The error line and the two buttons.
+    let buttons_y = dialog.bottom() - DIALOG_PADDING - CONTROL_HEIGHT;
+    if let Some(error) = &draft.error {
+        ui.painter().text(
+            egui::pos2(dialog.left() + DIALOG_PADDING, buttons_y - 18.0),
+            Align2::LEFT_TOP,
+            error,
+            fonts::label(LABEL_SIZE),
+            theme.RED,
+        );
+    }
+
+    let add_width = button_width(ui.painter(), theme, NEW_SERVER);
+    let add_rect = Rect::from_min_size(
+        egui::pos2(dialog.right() - DIALOG_PADDING - add_width, buttons_y),
+        egui::vec2(add_width, CONTROL_HEIGHT),
+    );
+    let cancel_width = button_width(ui.painter(), theme, "Cancel");
+    let cancel_rect = Rect::from_min_size(
+        egui::pos2(add_rect.left() - CONTROL_GAP - cancel_width, buttons_y),
+        egui::vec2(cancel_width, CONTROL_HEIGHT),
+    );
+    primary_button(ui.painter(), add_rect, theme, NEW_SERVER, Glyph::Plus);
+    {
+        let painter = ui.painter();
+        painter.rect_filled(cancel_rect, CONTROL_RADIUS, theme.BUTTON_BG);
+        painter.text(
+            cancel_rect.center(),
+            Align2::CENTER_CENTER,
+            "Cancel",
+            fonts::semibold(LABEL_SIZE),
+            theme.CONTRAST,
+        );
+    }
+
+    let (pointer, clicked) = ui.input(|input| {
+        (
+            input.pointer.interact_pos(),
+            input.pointer.primary_clicked(),
+        )
+    });
+    let pressed = |rect: Rect| {
+        clicked && pointer.is_some_and(|pointer: egui::Pos2| rect.contains(pointer))
+    };
+
+    if pressed(cancel_rect) {
+        state.dialog = None;
+        return;
+    }
+    if pressed(add_rect) {
+        match clean_address(&draft.address) {
+            _ if draft.name.trim().is_empty() => {
+                draft.error = Some("Give it a name.".to_owned());
+            }
+            None => {
+                draft.error = Some("That is not an address the launcher can ask.".to_owned());
+            }
+            Some(address) => {
+                let server = Server {
+                    name: draft.name.trim().to_owned(),
+                    motd: String::new(),
+                    mc_version: String::new(),
+                    loader: String::new(),
+                    players: None,
+                    address,
+                    shared: false,
+                };
+                match append_store(&server) {
+                    Ok(()) => {
+                        state.servers.push(server);
+                        // Every address is asked again on the next frame, which is how the
+                        // new one gets its MOTD without a second code path for one server.
+                        state.asked = false;
+                        state.dialog = None;
+                        return;
+                    }
+                    Err(error) => draft.error = Some(error),
+                }
+            }
+        }
+    }
+    state.dialog = Some(draft);
 }
 
 // ---------------------------------------------------------------------------
@@ -1112,7 +1406,7 @@ fn heading_and_toolbar(
     theme: &Theme,
     count: usize,
     shown: usize,
-) -> f32 {
+) -> (f32, Rect) {
     let heading_at = egui::pos2(rect.left() + PAGE_PADDING, rect.top() + PAGE_PADDING);
     // `h1.w-full.text-2xl.font-extrabold.text-contrast` (`index.vue:101`).
     let heading = painter.text(
@@ -1148,7 +1442,7 @@ fn heading_and_toolbar(
     search_plate(painter, search, theme, shown);
     primary_button(painter, button, theme, NEW_SERVER, Glyph::Plus);
 
-    row_top + CONTROL_HEIGHT + HEADING_GAP
+    (row_top + CONTROL_HEIGHT + HEADING_GAP, button)
 }
 
 /// A brand button's width: `px-2.5 gap-1.5` around a 20-point glyph and its label
@@ -1784,6 +2078,29 @@ mod tests {
         assert_eq!(count_phrase(0), "0 servers");
         assert_eq!(search_placeholder(6), "Search 6 servers...");
         assert_eq!(search_placeholder(1), "Search 1 server...");
+    }
+
+    /// An address is accepted in the two spellings a player types, and refused when it could
+    /// not be asked. Each refusal is a case here rather than a silent `None` in the dialog.
+    #[test]
+    fn an_address_is_cleaned_or_refused() {
+        assert_eq!(clean_address("mc.example.com").as_deref(), Some("mc.example.com"));
+        assert_eq!(clean_address("  mc.example.com  ").as_deref(), Some("mc.example.com"));
+        assert_eq!(
+            clean_address("play.example.com:25566").as_deref(),
+            Some("play.example.com:25566"),
+            "a port the reader typed is kept"
+        );
+        assert_eq!(clean_address("192.168.1.10").as_deref(), Some("192.168.1.10"));
+
+        assert_eq!(clean_address(""), None, "empty");
+        assert_eq!(clean_address("   "), None, "whitespace only");
+        assert_eq!(clean_address("two words"), None, "a space is not a hostname");
+        assert_eq!(clean_address("host:0"), None, "port zero");
+        assert_eq!(clean_address("host:70000"), None, "port past u16");
+        assert_eq!(clean_address("host:abc"), None, "a port that is not a number");
+        assert_eq!(clean_address("bad/host"), None, "a path separator");
+        assert_eq!(clean_address(&"a".repeat(254)), None, "longer than a hostname may be");
     }
 
     /// The order the source's own comparator produces, mapped onto what this reader knows:
