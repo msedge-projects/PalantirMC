@@ -155,13 +155,42 @@ jobs:
       - name: Check the exe's DLL dependencies
         run: python .github/scripts/check_exe.py dist/SiftUi.exe
 
-      # The installer is NOT built here yet. `installer/sift.nsi` compiles under POSIX
-      # makensis (verified: it produced SiftLauncher-x64-setup.exe locally), but on the
-      # runner's NSIS 3.13 it aborts on line 132 -- the `nsDialogs::CreateControl
-      # "SysAnimate32"` animated welcome banner -- after the icon and path problems were
-      # fixed. Three release attempts (0.1.1, 0.1.2, 0.1.4) died there, and a decoration is
-      # not worth more of them: the exes are the product, the installer is a convenience.
-      # Owed as E-45 in docs/PARITY-LOG.md with the exact line to start from.
+      # The installer, on the msvc leg only: it wraps the static-CRT exe, and the gnu leg
+      # would produce a second, differently-linked setup for no benefit.
+      #
+      # 0.1.1, 0.1.2 and 0.1.4 all died here: `installer/sift.nsi` opened an animated banner
+      # in a `SysAnimate32` control, which POSIX makensis compiles and the runner's NSIS 3.13
+      # refuses. The banner is gone (see the file), so what is left is a stock NSIS script --
+      # and this step is where that claim is finally tested on 3.13.
+      - name: Build the installer
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        env:
+          REQUESTED: ${{ inputs.tag || github.ref_name }}
+        run: |
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            choco install nsis --no-progress -y
+            Get-ChildItem "${env:ProgramFiles(x86)}\NSIS" -ErrorAction SilentlyContinue | Write-Host
+          }
+          if (-not (Test-Path $makensis)) { throw "makensis is not installed at $makensis" }
+
+          # The tag is `v0.1.8`; the installer prints the version, so it is the bare one.
+          $version = $env:REQUESTED.TrimStart('v')
+
+          # makensis resolves `!define HERE` and the `../dist` output against the directory
+          # it is run from, which is why this pushes into `installer/` rather than passing
+          # absolute paths the script does not expect.
+          Push-Location installer
+          & $makensis /V2 /DVERSION=$version /DAPP_EXE=../dist/SiftUi.exe sift.nsi
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0) { throw "makensis exited $code" }
+
+          $setup = Get-ChildItem dist -Filter *-setup.exe
+          if (-not $setup) { throw "no setup exe was produced" }
+          if ($setup.Length -lt 1MB) { throw "Unexpected setup size: $($setup.Length) bytes" }
+          Write-Host "Installer: $($setup.Name), $($setup.Length) bytes"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -207,6 +236,18 @@ jobs:
             # continues with the next one, which is what keeps the temporary iced
             # artefacts out of the release without changing the loop body below.
             if ($_.Directory.Name -notlike 'sift-launcher-*') { return }
+
+            # The setup exe is already named the way it should be published, and the rename
+            # below would flatten it onto the bare exe's name -- two different files, one
+            # name, whichever the loop reached last.
+            if ($_.Name -like '*-setup.exe') {
+              Copy-Item $_.FullName "release/$($_.Name)"
+              $setupHash = (Get-FileHash "release/$($_.Name)" -Algorithm SHA256).Hash.ToLower()
+              [System.IO.File]::WriteAllText("release/$($_.Name).sha256", "$setupHash  $($_.Name)`n")
+              "| $($_.Name) | $($_.Length) bytes | $setupHash |" |
+                Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+              return
+            }
 
             $target = $_.Directory.Name
             $label = switch -Wildcard ($target) {
