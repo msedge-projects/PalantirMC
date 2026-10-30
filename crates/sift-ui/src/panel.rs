@@ -57,6 +57,23 @@ const RULE: f32 = crate::theme::STROKE_WIDTH;
 // Section headings
 // ---------------------------------------------------------------------------
 
+/// The Discover panel's own heading, where the other pages say `News`.
+const CATEGORY: &str = "Category";
+
+/// One category row's height, and how many the panel lists before a `See more` would go.
+const CATEGORY_ROW: f32 = 26.0;
+const CATEGORY_ROWS: usize = 6;
+
+/// The API's category ids are lowercase; a reader sees them capitalised.
+fn capitalised(name: &str) -> String {
+    let spaced = name.replace('-', " ");
+    let mut letters = spaced.chars();
+    match letters.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), letters.as_str()),
+        None => String::new(),
+    }
+}
+
 /// A section heading's size: `Getting started` and `News` are both semibold 16.
 const HEADING_SIZE: f32 = 16.0;
 
@@ -225,8 +242,10 @@ const CARD_RADIUS: u8 = crate::theme::RADIUS_MD;
 // ---------------------------------------------------------------------------
 
 /// One step of the checklist, as a thing the shell can act on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
+    /// A category the reader pressed, as the API spells it.
+    Category(String),
     /// `Create first instance`.
     CreateInstance,
     /// `Sign in to Minecraft`.
@@ -242,6 +261,8 @@ impl Step {
     /// The row's own label.
     pub fn label(self) -> &'static str {
         match self {
+            // A category press carries its own name and never asks for a step label.
+            Step::Category(_) => "",
             Step::CreateInstance => STEPS[0],
             Step::Minecraft => STEPS[1],
             Step::Modrinth => STEPS[2],
@@ -300,7 +321,14 @@ const HOSTING_ACCENT: &str = "on Sift.";
 /// Returns whether anything is still animating. Nothing is: the hovers are steps between
 /// two fills rather than tweens, and egui asks for a frame by itself when the pointer
 /// moves, so no frame is owed after this one.
-pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme, account: Option<&str>) -> Option<Step> {
+pub fn draw(
+    ui: &mut Ui,
+    rect: Rect,
+    theme: &Theme,
+    account: Option<&str>,
+    categories: &[String],
+    facet: Option<&str>,
+) -> Option<Step> {
     let painter = ui.painter();
 
     // The panel's own ground, then its one-pixel left rule.
@@ -373,7 +401,7 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme, account: Option<&str>) -> Op
         // theme's own `--hover-brightness`, and a press is reported to the shell.
         let over = pointer.is_some_and(|pointer| row.contains(pointer));
         if over && clicked {
-            pressed = Step::ALL.get(index).copied();
+            pressed = Step::ALL.get(index).cloned();
         }
         let hovered = over;
         let fill = if hovered {
@@ -399,13 +427,53 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme, account: Option<&str>) -> Op
         painter.text(
             egui::pos2(row.left() + ROW_PAD + RING + RING_GAP, row.center().y),
             Align2::LEFT_CENTER,
-            row_label(Step::ALL[index], account),
+            row_label(Step::ALL[index].clone(), account),
             fonts::body(STEP_SIZE),
             theme.BASE,
         );
     }
 
     // ---- `News` --------------------------------------------------------------
+    if !categories.is_empty() {
+        // The reference's Discover panel: a `Category` heading and its rows, in the slot the
+        // other pages give to `News`. A press reports the category, which the shell turns into
+        // a facet; the chosen one is drawn in the brand colour.
+        painter.text(
+            egui::pos2(column.left(), plan.news),
+            Align2::LEFT_TOP,
+            CATEGORY,
+            fonts::semibold(HEADING_SIZE),
+            theme.CONTRAST,
+        );
+        for (index, name) in categories.iter().take(CATEGORY_ROWS).enumerate() {
+            let row = Rect::from_min_size(
+                egui::pos2(
+                    column.left(),
+                    plan.news + HEADING_LINE + HEADING_TO_BODY + index as f32 * CATEGORY_ROW,
+                ),
+                egui::vec2(column.width(), CATEGORY_ROW),
+            );
+            let chosen = facet.is_some_and(|chosen| chosen == format!("categories:{name}"));
+            let over = pointer.is_some_and(|pointer| row.contains(pointer));
+            if over && clicked {
+                pressed = Some(Step::Category(format!("categories:{name}")));
+            }
+            let ink = if chosen {
+                theme.BRAND
+            } else if over {
+                theme.CONTRAST
+            } else {
+                theme.BASE
+            };
+            painter.text(
+                egui::pos2(row.left() + 4.0, row.center().y),
+                Align2::LEFT_CENTER,
+                capitalised(name),
+                fonts::body(13.0),
+                ink,
+            );
+        }
+    } else {
     painter.text(
         egui::pos2(column.left(), plan.news),
         Align2::LEFT_TOP,
@@ -501,6 +569,8 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme, account: Option<&str>) -> Op
         label,
         theme.ACCENT_CONTRAST,
     );
+
+    }
 
     // ---- The hosting banner --------------------------------------------------
     let banner = Rect::from_min_size(

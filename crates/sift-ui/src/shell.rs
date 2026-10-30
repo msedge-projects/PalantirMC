@@ -115,6 +115,15 @@ pub struct Shell {
     page: u32,
     /// The question the page belongs to, so a new one starts at the first page.
     asked: String,
+    /// The categories the API lists for the current project type, empty until they arrive.
+    categories: Vec<String>,
+    /// Whether the category list has been asked for.
+    categories_asked: bool,
+    /// The worker's answer, until it is taken.
+    categories_rx: Option<std::sync::mpsc::Receiver<Vec<String>>>,
+    /// The chosen category as a facet group, e.g. `["categories:adventure"]`; `None` is no
+    /// filter at all.
+    facet: Option<String>,
     /// Which of the tab strip's kinds the search is for: `modpack`, `mod`, `resourcepack`,
     /// `datapack`, `shader` or `plugin`.
     project_type: &'static str,
@@ -170,6 +179,10 @@ impl Default for Shell {
             results: crate::search::Search::default(),
             page: 0,
             asked: String::new(),
+            facet: None,
+            categories: Vec::new(),
+            categories_asked: false,
+            categories_rx: None,
             project_type: "modpack",
             sort_index: "relevance",
             page_size: 20,
@@ -948,16 +961,35 @@ impl Shell {
             .account
             .session()
             .map(|(name, _)| name.to_owned());
-        let step = crate::panel::draw(ui, shared, &self.theme, signed_in.as_deref());
+        let step = crate::panel::draw(
+            ui,
+            shared,
+            &self.theme,
+            signed_in.as_deref(),
+            &self.categories,
+            self.facet.as_deref(),
+        );
+        let pressed = step.is_some();
         if let Some(step) = step {
             self.panel_step(step);
         }
-        step.is_some()
+        pressed
     }
 
     /// Do what a checklist row asked for.
     fn panel_step(&mut self, step: crate::panel::Step) {
         match step {
+            // A category press is a filter, not a step: it replaces whatever was chosen, or
+            // clears it when the same one is pressed again.
+            crate::panel::Step::Category(facet) => {
+                self.facet = if self.facet.as_deref() == Some(facet.as_str()) {
+                    None
+                } else {
+                    Some(facet)
+                };
+                self.page = 0;
+                self.results.forget();
+            }
             crate::panel::Step::CreateInstance => self.create_instance(),
             crate::panel::Step::Minecraft => self.start_sign_in(),
             // Modrinth's own account is a separate service with its own flow; nothing here
@@ -1052,6 +1084,9 @@ impl Shell {
                 && !selected
             {
                 self.project_type = kind;
+                // The list belongs to the kind: a new one asks again.
+                self.categories_asked = false;
+                self.categories.clear();
                 // A new kind is a new search; dropping the answered query makes the request
                 // below fire even when the text has not changed.
                 self.results.forget();
@@ -1090,20 +1125,51 @@ impl Shell {
             // coarse test is the field, and the selects close themselves on selection.
             let _ = &self.open_select;
         }
-        if let Some(query) = self.search.query().map(str::to_owned) {
+        // The category list, asked for once for the kind in hand: it is a fixed list per project
+        // type, so a second question would be the same answer bought twice.
+        if !self.categories_asked {
+            self.categories_asked = true;
+            let (sender, receiver) = std::sync::mpsc::channel();
+            self.categories_rx = Some(receiver);
+            let kind = self.project_type.to_owned();
+            let _ = std::thread::Builder::new()
+                .name("sift-categories".to_owned())
+                .spawn(move || {
+                    let _ = sender.send(load_categories(&kind));
+                });
+        }
+        if let Some(receiver) = &self.categories_rx {
+            if let Ok(list) = receiver.try_recv() {
+                self.categories = list;
+                self.categories_rx = None;
+                // The panel drew before this answer arrived, and an idle window schedules no
+                // frame of its own -- without this the list waits for a stray press.
+                ui.ctx().request_repaint();
+            }
+        }
+        // A facet without a query is a question too -- it is what a category press asks -- so this
+        // is not nested inside the field's `Option`.
+        let asked_query = self.search.query().map(str::to_owned).unwrap_or_default();
+        if !asked_query.is_empty() || self.facet.is_some() {
+            let query = asked_query;
             // A different question starts at the first page: the offset is part of the request
             // now, so paging and then typing would ask for page three of a search with one page.
-            let question = format!("{query}|{}|{}|{}", self.project_type, self.sort_index, self.page_size);
+            let question = format!(
+                "{query}|{}|{}|{}|{:?}",
+                self.project_type, self.sort_index, self.page_size, self.facet
+            );
             if self.asked != question {
                 self.asked = question;
                 self.page = 0;
             }
+            let facets: Vec<String> = self.facet.iter().map(|name| name.clone()).collect();
             self.results.request(
                 &query,
                 self.project_type,
                 self.sort_index,
                 self.page_size,
                 self.page.saturating_mul(self.page_size),
+                &facets,
             );
         }
         self.results.poll();
@@ -1682,6 +1748,31 @@ fn tags_that_fit(widths: &[f32], gaps: f32, limit: f32) -> usize {
         x += width + gaps;
     }
     widths.len()
+}
+
+/// Fetch the category list for one project type and return its names, in the API's order.
+///
+/// Runs on a worker thread: the answer is a fixed list, and a failed fetch simply means the panel
+/// shows no categories rather than an error a reader could do anything about.
+fn load_categories(project_type: &str) -> Vec<String> {
+    let url = sift_net::modrinth::tag_categories_url();
+    let path = std::env::temp_dir().join(format!("sift-categories-{project_type}.json"));
+    let fetched = sift_net::download_file(&url, &path, std::time::Duration::from_secs(15));
+    let Ok(_) = fetched else {
+        return Vec::new();
+    };
+    let Ok(body) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let _ = std::fs::remove_file(&path);
+    let parsed = serde_json::from_str::<Vec<sift_net::modrinth::CategoryTag>>(&body);
+    let Ok(tags) = parsed else {
+        return Vec::new();
+    };
+    tags.into_iter()
+        .filter(|tag| tag.project_type == project_type)
+        .map(|tag| tag.name)
+        .collect()
 }
 
 /// The page numbers a strip shows: the first, the last, the page in hand and one either side of

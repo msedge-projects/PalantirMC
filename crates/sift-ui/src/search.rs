@@ -99,15 +99,32 @@ impl Search {
     ///
     /// The empty query is not asked: Discover with no query shows the reference's own default
     /// feed, which is a different request with its own facets and does not belong here yet.
-    pub fn request(&mut self, query: &str, project_type: &str, index: &str, limit: u32, offset: u32) {
+    pub fn request(
+        &mut self,
+        query: &str,
+        project_type: &str,
+        index: &str,
+        limit: u32,
+        offset: u32,
+        facets: &[String],
+    ) {
         let query = query.trim();
-        // The page is part of the question: without it a second page is the first page's answer.
-        let asked = format!("{project_type}|{index}|{limit}|{offset}|{query}");
-        if query.is_empty() || self.current.as_deref() == Some(asked.as_str()) {
+        // The page and the filters are part of the question: without them a second page or a
+        // filtered search is the unfiltered first page's answer.
+        let asked = format!(
+            "{project_type}|{index}|{limit}|{offset}|{}|{query}",
+            facets.join(",")
+        );
+        // An empty box is the reference's default feed and is not asked -- unless a facet is
+        // chosen, which is a question of its own and the one a category press asks.
+        if (query.is_empty() && facets.is_empty())
+            || self.current.as_deref() == Some(asked.as_str())
+        {
             return;
         }
         self.current = Some(asked);
         self.state = State::Loading;
+        let filters = facets.to_vec();
 
         let owned = query.to_owned();
         let kind = project_type.to_owned();
@@ -117,7 +134,7 @@ impl Search {
         let spawned = std::thread::Builder::new()
             .name("sift-search".to_owned())
             .spawn(move || {
-                let _ = sender.send((reply, run(&owned, &kind, &order, limit, offset)));
+                let _ = sender.send((reply, run(&owned, &kind, &order, limit, offset, &filters)));
             });
         if spawned.is_err() {
             self.state = State::Failed {
@@ -159,23 +176,25 @@ fn run(
     index: &str,
     limit: u32,
     offset: u32,
+    facets: &[String],
 ) -> Result<(Vec<Hit>, u64), String> {
     // The tab the reader is on is a facet, not a filter applied afterwards: the API answers
     // the right kind of project and counts the right total, which a local filter could not.
     // The sort and the page size are the API's own parameters, not a re-sort afterwards: the
     // total has to match the order the reader asked for, and only the API can count that.
-    let url = sift_net::modrinth::search_url_parts(
+    let url = sift_net::modrinth::search_url_parts_with_facets(
         query,
         Some(project_type),
         Some(index),
         limit,
         offset,
+        facets,
     );
     // The launcher's own client, streaming to a temporary file: the same timeout and user
     // agent as every other request, and a body that never has to fit on this thread's stack.
     let path = std::env::temp_dir().join(format!(
         "sift-search-{:016x}.json",
-        hash(&format!("{project_type}|{index}|{limit}|{offset}|{query}"))
+        hash(&format!("{project_type}|{index}|{limit}|{offset}|{}|{query}", facets.join(",")))
     ));
     let fetched = sift_net::download_file(&url, &path, Duration::from_secs(20))
         .map_err(|error| error.to_string());
@@ -296,6 +315,31 @@ fn hash(query: &str) -> u64 {
 mod tests {
     use super::*;
 
+    /// A facet is part of the question: the same query with a filter is a different request, and
+    /// an empty box with a filter is still a request.
+    #[test]
+    fn a_facet_is_part_of_the_question() {
+        let mut search = Search::default();
+        search.request("", "modpack", "relevance", 20, 0, &[]);
+        assert!(
+            matches!(search.state(), State::Idle),
+            "an empty box with no filter is the default feed, not a request"
+        );
+
+        let facet = vec!["categories:adventure".to_owned()];
+        search.request("", "modpack", "relevance", 20, 0, &facet);
+        assert!(
+            matches!(search.state(), State::Loading),
+            "an empty box with a filter is a question"
+        );
+
+        // The same query with a second filter is a different question, not a cached answer.
+        let other = vec!["categories:magic".to_owned()];
+        let before = search.current.clone();
+        search.request("", "modpack", "relevance", 20, 0, &other);
+        assert_ne!(search.current, before, "the filter is part of the key");
+    }
+
     /// The abbreviations the reference's cards show, at each threshold.
     #[test]
     fn counts_abbreviate_the_way_the_reference_shows_them() {
@@ -324,11 +368,11 @@ mod tests {
     #[test]
     fn the_same_query_is_not_asked_twice() {
         let mut search = Search::default();
-        search.request("   ", "modpack", "relevance", 20, 0);
+        search.request("   ", "modpack", "relevance", 20, 0, &[]);
         assert!(matches!(search.state(), State::Idle), "whitespace is not a query");
-        search.request("sodium", "modpack", "relevance", 20, 0);
+        search.request("sodium", "modpack", "relevance", 20, 0, &[]);
         assert!(matches!(search.state(), State::Loading));
-        search.request("sodium", "modpack", "relevance", 20, 0);
+        search.request("sodium", "modpack", "relevance", 20, 0, &[]);
         assert!(matches!(search.state(), State::Loading), "still the first request");
     }
 
