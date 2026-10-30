@@ -1221,6 +1221,27 @@ which is the honest behaviour rather than a guess from an instance's name.
 Verified on the VM: the switch, the heading, four rows and the `See more` link all draw, with the
 chosen category in the brand colour.
 
+### Settings buttons press, and `Clear cache` asks — 0.1.46
+
+`Control::Button` was drawn and never hit-tested, so every button on that page was decoration. The
+standalone arm registers a press on the control's own rectangle now.
+
+`Clear cache` is wired to an action because it is the one whose behaviour the source defines: the
+first press asks (`Press again to clear the cache.`), the second deletes the launcher's HTTP cache --
+refetched on demand, so only time is lost -- and reports the size that went. `button_pressed` holds
+the rule and its test pins the three cases, because a button that cleared a cache on one press is the
+wrong thing to learn by trying.
+
+**Owed, and recorded as such:** no capture shows the press working. Three attempts to reach the
+Troubleshooting tab missed its rail row, and the row-rect print I added to aim with never fired --
+the rail's rows are computed by `rail_rows`, and my print went into a loop that does not iterate
+them. The next attempt should print from `rail_rows`' own output.
+
+**Three stale notes corrected**, which is worth more than it sounds: the quick-instance count and the
+memory slider both claimed to be missing their sliders, and the feature flags claimed `Reset to
+default` was absent. All three have worked for several releases, so the owed list was overstating the
+gap.
+
 ### Open after this pass
 
 | # | Region | What differs |
