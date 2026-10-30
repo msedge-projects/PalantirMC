@@ -144,7 +144,8 @@ fn load_at(state: &mut State, path: &std::path::Path) {
             .find(|choice| choice.label() == theme)
         {
             state.theme = choice;
-    
+        }
+    }
     if let Some(sliders) = value.get("sliders").and_then(|entry| entry.as_object()) {
         for (key, entry) in sliders {
             if let (Some(fraction), Some(label)) =
