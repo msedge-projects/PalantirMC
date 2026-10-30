@@ -1244,6 +1244,18 @@ memory slider both claimed to be missing their sliders, and the feature flags cl
 default` was absent. All three have worked for several releases, so the owed list was overstating the
 gap.
 
+### `Copy ad details` — 0.1.48
+
+The button copies and says `Copied` with a check for three seconds, as the reference's does. What it
+copies is this build's own line -- product, version, platform, data root -- because a launcher with
+no ad surface cannot copy an ad's details, and a support report wants exactly that.
+
+**A platform finding worth keeping:** `request_repaint_after(3s)` does not wake this app. The first
+build set the deadline and the word stayed on screen for twelve seconds. The frames that bring it
+back are requested directly while the word is lit; that costs three seconds of frames after a
+deliberate press and nothing otherwise. Any future "wait then redraw" in this tree should assume the
+same and ask for its own frames.
+
 ### Open after this pass
 
 | # | Region | What differs |
