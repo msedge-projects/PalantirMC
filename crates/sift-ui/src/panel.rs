@@ -417,16 +417,15 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme, account: Option<&str>) -> Op
     let rows = plan.news_rows;
     let card = plan.card;
 
-    // The art plate. The reference loads the article's `thumbnail` into the top of this
-    // card; the launcher does not load news images yet -- the feed answers with a URL and
-    // the only image pipeline here fetches project icons -- so the plate stands in, in the
-    // super-raised fill, inside the sheet's own `border-button-border` edge
+    // The card's art. The reference loads the article's own `thumbnail` here; this build draws
+    // its own motif instead (`news_art`), because the feed's image is Modrinth's art rather than
+    // ours, and keeps the sheet's `border-button-border` edge
     // (`ui/components/content/NewsArticleCard.vue:28`).
     let art = Rect::from_min_size(
         egui::pos2(column.left(), card + rows.art),
         egui::vec2(column.width(), ART_H),
     );
-    painter.rect_filled(art, CARD_RADIUS, theme.SUPER_RAISED_BG);
+    news_art(painter, art, theme);
     painter.rect_stroke(
         art,
         CARD_RADIUS,
@@ -530,9 +529,18 @@ pub fn draw(ui: &mut Ui, rect: Rect, theme: &Theme, account: Option<&str>) -> Op
         fonts::semibold(BANNER_SIZE),
         theme.BRAND,
     );
+    // The art, in the room the banner keeps for it ([`BANNER_ART`]): drawn rather than loaded,
+    // because the reference's promo is its own illustration and this build does not carry that
+    // texture. The rect belongs to the banner -- `art` above is the news card's.
+    let promo = Rect::from_min_size(
+        egui::pos2(
+            banner.left() + BANNER_PAD,
+            banner.bottom() - BANNER_PAD - BANNER_ART,
+        ),
+        egui::vec2(banner.width() - 2.0 * BANNER_PAD, BANNER_ART),
+    );
+    hosting_art(painter, promo, theme);
     // The call to action, where the reference puts it: at the banner's foot, past the copy.
-    // The art's room above it stays empty -- the promo's own mark is a texture this build does
-    // not carry yet (`// shortcut: no promo art, upgrade when an asset pipeline for it exists`).
     let cta_label = painter.layout_no_wrap(
         BANNER_CTA.to_owned(),
         fonts::semibold(13.0),
@@ -606,6 +614,65 @@ struct NewsRows {
     link: f32,
     /// The card's height: the bottom edge of the upgrade row.
     height: f32,
+}
+
+/// The news card's art: three slider tracks and a link badge, on the card's own ground.
+///
+/// The reference's card carries its own illustration here; the shapes below are this build's, in
+/// the brand palette, so the slot reads as art rather than as an empty plate.
+fn news_art(painter: &egui::Painter, rect: Rect, theme: &crate::theme::Theme) {
+    painter.rect_filled(rect, CARD_RADIUS, theme.SUPER_RAISED_BG);
+    let inset = rect.shrink(rect.height() * 0.22);
+    let track = egui::Color32::from_rgba_unmultiplied(
+        theme.BRAND.r(),
+        theme.BRAND.g(),
+        theme.BRAND.b(),
+        90,
+    );
+    for (index, fraction) in [0.62_f32, 0.38, 0.78].into_iter().enumerate() {
+        let y = inset.top() + index as f32 * (inset.height() / 3.0) + 4.0;
+        let line = egui::Rect::from_min_size(
+            egui::pos2(inset.left(), y),
+            egui::vec2(inset.width() * 0.62, 4.0),
+        );
+        painter.rect_filled(line, 2, track);
+        let knob = egui::pos2(line.left() + line.width() * fraction, y + 2.0);
+        painter.circle_filled(knob, 6.0, theme.BRAND);
+    }
+    // The link badge, where the reference puts its chain mark.
+    let centre = egui::pos2(inset.right() - 14.0, inset.center().y);
+    painter.circle_filled(centre, 16.0, theme.BRAND);
+    painter.circle_stroke(centre, 16.0, Stroke::new(2.0, theme.BG));
+    painter.circle_stroke(centre, 6.0, Stroke::new(2.0, theme.ACCENT_CONTRAST));
+}
+
+/// The hosting banner's art: a stack of server boxes in the brand palette.
+fn hosting_art(painter: &egui::Painter, rect: Rect, theme: &crate::theme::Theme) {
+    if rect.height() < 24.0 || rect.width() < 40.0 {
+        return;
+    }
+    let box_size = egui::vec2(rect.width() * 0.46, rect.height() * 0.30);
+    let origin = egui::pos2(rect.left() + 8.0, rect.bottom() - box_size.y - 6.0);
+    for (index, lift) in [0.0_f32, 1.0, 2.0].into_iter().enumerate() {
+        let plate = egui::Rect::from_min_size(
+            egui::pos2(origin.x + lift * 10.0, origin.y - lift * (box_size.y * 0.72)),
+            box_size,
+        );
+        let tint = match index {
+            0 => theme.BRAND,
+            1 => theme.BRAND.gamma_multiply(1.35),
+            _ => theme.CONTRAST,
+        };
+        painter.rect_filled(plate, 6, tint.gamma_multiply(0.85));
+        // Two lights on each box, the way a rack reads.
+        for lamp in 0..2 {
+            painter.circle_filled(
+                egui::pos2(plate.left() + 8.0 + lamp as f32 * 10.0, plate.center().y),
+                2.5,
+                theme.BG,
+            );
+        }
+    }
 }
 
 /// The card's rows, given the height the copy was given.
