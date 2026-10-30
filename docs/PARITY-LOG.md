@@ -1184,6 +1184,19 @@ Still different from the reference on this page: the reference's preview is a 3D
 chips or Add button; its `Default skins` shows four previews; and its foot carries the demo-account
 bar. All of those are listed, not approximated.
 
+### Two more authored skins — 0.1.43
+
+Four cards now draw characters rather than three glyphs: the blue and purple palettes are authored
+beside the first two, and `Lantern Keeper` and `Snowbound` show their own colours.
+
+**Owed, with the reason measured:** the `Default skins` row still reads
+`Sign in to your Minecraft account to use its default skins.` where the reference draws four
+previews. The row is written and does not fit, because that section lives in the page's fixed strip
+below the grid instead of inside the scroll area -- so whatever the window height, it has no room.
+Reserving the height was tried and backed out: it left empty scroll below the grid without moving
+the drawing. The fix is to put the section inside the grid's own scrolling column, which is how the
+reference lays its page out.
+
 ### Open after this pass
 
 | # | Region | What differs |
