@@ -204,6 +204,25 @@ fn save(state: &State) {
     save_at(state, &store_path());
 }
 
+/// How long `Copied` stays on the button.
+const COPIED_SECONDS: f64 = 3.0;
+
+/// The line `Copy ad details` puts on the clipboard.
+///
+/// The reference copies details of an ad it can see; this build has no ad surface, so the line is
+/// what a support report needs from a launcher: its version, its platform and the log's location.
+fn ad_details() -> String {
+    format!(
+        "Sift Launcher {}\n{}\n{}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        crate::data::instances_dir()
+            .parent()
+            .map(|root| root.display().to_string())
+            .unwrap_or_default(),
+    )
+}
+
 /// What a button's press does: `Clear cache` asks once, then clears.
 ///
 /// Separated from the frame so the rule can be tested without a window -- a button that cleared a
@@ -339,6 +358,8 @@ pub struct State {
     /// The button waiting for its second press, and the line to say under it.
     pub confirming: Option<&'static str>,
     pub notice: Option<String>,
+    /// The frame-time `Copied` stops showing, in seconds since the process started.
+    pub copied_until: Option<f64>,
     /// Option rects painted this frame, and the ones painted last frame: a press is
     /// tested against the second before the body sees it, so an option beats the row.
     pub open_lists: Vec<(Rect, &'static [&'static str], &'static str)>,
@@ -730,7 +751,9 @@ const DEBUG_INFO_DESCRIPTION: &str = "Export app logs and diagnostic data to a Z
 const DEBUG_INFO_EXPORT_LABEL: &str = "Export debug info"; // app.settings.resource-management.debug-info.export (:2810)
 const REPORT_AD_TITLE: &str = "Report an ad"; // app.settings.troubleshooting.report-ad.title (:3182)
 const REPORT_AD_DESCRIPTION: &str = "Seen an inappropriate or offensive ad? Copy its details while it's showing and send them to <support>Sift Support</support>. We'll review it and remove it."; // app.settings.troubleshooting.report-ad.description (:3173); the `<support>` span is a link to support.modrinth.com (troubleshooting-settings.vue:299-309)
-const REPORT_AD_COPY_LABEL: &str = "Copy ad details"; // app.settings.troubleshooting.report-ad.copy (:3170)
+const REPORT_AD_COPY_LABEL: &str = "Copy ad details";
+/// `app.settings.troubleshooting.report-ad.copied` (:3167), shown for three seconds.
+const REPORT_AD_COPIED_LABEL: &str = "Copied"; // app.settings.troubleshooting.report-ad.copy (:3170)
 const COPY_DETAILS_LABEL: &str = "Always show copy details"; // app.settings.resource-management.always-show-copy-details.title (:2774)
 const COPY_DETAILS_DESCRIPTION: &str = "Show the Copy details action while an install is queued or running. It is always available for failed or interrupted installs."; // app.settings.resource-management.always-show-copy-details.description (:2771)
 
@@ -2012,7 +2035,16 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
     // which asks first and then deletes the launcher's own HTTP cache -- refetched on demand, so
     // nothing a reader made is lost.
     if let Some(label) = state.pressed_button.take() {
-        button_pressed(state, label);
+        if label == REPORT_AD_COPY_LABEL {
+            // The clipboard is the frame's business, not the rule's.
+            ui.ctx().copy_text(ad_details());
+            state.copied_until = Some(ui.input(|input| input.time) + COPIED_SECONDS);
+            // One frame at the end of the three seconds, so the word returns on its own.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(COPIED_SECONDS));
+        } else {
+            button_pressed(state, label);
+        }
     }
     if !state.open && state.dirty {
         // Closed after a change. This is the only place the file is written, so a drag does not
@@ -2670,6 +2702,30 @@ fn draw_body(
                 height + ROW_GAP
             }
             Block::Standalone(control) => {
+                // A button that has just done its job says so, in its own place: the reference's
+                // `Copied` for three seconds.
+                let control = match control {
+                    Control::Button { label, .. }
+                        if label == REPORT_AD_COPY_LABEL
+                            && state.copied_until.is_some_and(|until| {
+                                let now = ui.input(|input| input.time);
+                                if now < until {
+                                    // The deadline alone does not wake this loop, so the frames
+                                    // that carry the word back are asked for here.
+                                    ui.ctx().request_repaint();
+                                    true
+                                } else {
+                                    false
+                                }
+                            }) =>
+                    {
+                        Control::Button {
+                            label: REPORT_AD_COPIED_LABEL,
+                            glyph: Some(Glyph::Check),
+                        }
+                    }
+                    other => other,
+                };
                 // Left-aligned: the control's right edge is its own width past the inset.
                 let width = control.width(&body);
                 control.draw(&body, theme, left + width, y + control.height() / 2.0);
