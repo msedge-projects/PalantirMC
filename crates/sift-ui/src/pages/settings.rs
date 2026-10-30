@@ -614,6 +614,15 @@ const LANGUAGE_TITLE: &str = "Language"; // settings.language.title (ui :6356)
 const LANGUAGE_WARNING: &str = "Changing the app language may cause some content to appear in English if a translation is not available. The app is not yet fully translated, so some content may remain in English for certain languages."; // settings.language.warning (ui :6359)
 const LANGUAGE_DESCRIPTION: &str = "Choose your preferred language for the app. Translations are contributed by volunteers <crowdin-link>on Crowdin</crowdin-link>."; // settings.language.description (ui :6338); the `<crowdin-link>` span is a link to translate.modrinth.com (`index.vue:16-20`)
 const LANGUAGE_CATEGORY: &str = "Standard languages"; // settings.language.categories.default (ui :6323)
+/// The locales the reference lists, in its order (`language-settings-selector.vue:24-31`).
+const LANGUAGE_OPTIONS: &[&str] = &[
+    "English (United States)",
+    "Deutsch",
+    "Español",
+    "Français",
+    "Português (Brasil)",
+];
+#[allow(dead_code)]
 const LANGUAGE_CURRENT: &str = "English (United States)"; // locale.en-US (ui :2826), the name the list checks; the en-US locale's own name is the same string in `packages/ui/src/locales/en-US/meta.json:4`
 const LANGUAGE_SEARCH_PLACEHOLDER: &str = "Search for a language..."; // settings.language.languages.search-field.placeholder (ui :6341)
 
@@ -1062,6 +1071,9 @@ const RESET_HEIGHT: f32 = 18.0;
 /// Room between that button and the control it resets.
 const RESET_GAP: f32 = 12.0;
 
+/// One row of a radio list: the reference's locale rows are `py-2` around 13-point text.
+const RADIO_ROW: f32 = 26.0;
+
 /// A chip's box, gap and padding, from `Chips.vue`: `px-3 py-1` around 12-point text.
 const CHIP_HEIGHT: f32 = 26.0;
 const CHIP_GAP: f32 = 6.0;
@@ -1105,6 +1117,17 @@ enum Block {
         description: Option<&'static str>,
         /// The control on the right.
         control: Control,
+    },
+    /// A radio list: one row per option, the chosen one ringed in the brand colour
+    /// (`language-settings-selector.vue:221-297`). The store is the select store, keyed by the
+    /// heading's own key, so the select above the list and the list itself are one setting.
+    RadioList {
+        /// The key the choice is stored under, which is the heading's own label.
+        key: &'static str,
+        /// The options, in the source's order.
+        options: &'static [&'static str],
+        /// The option drawn as chosen.
+        selected: &'static str,
     },
     /// The theme selector's row of preview cards
     /// (`appearance-settings-theme-selector.vue`): three miniature windows, the chosen one
@@ -1361,6 +1384,11 @@ const LANGUAGE_BLOCKS: &[Block] = &[
         }),
     },
     Block::Standalone(Control::Text { placeholder: LANGUAGE_SEARCH_PLACEHOLDER }),
+    Block::RadioList {
+        key: LANGUAGE_CATEGORY,
+        options: LANGUAGE_OPTIONS,
+        selected: LANGUAGE_CURRENT,
+    },
 ];
 
 /// The Feature flags tab: the search field (`feature-flag-settings.vue:49-55`), then one row
@@ -2775,6 +2803,61 @@ fn draw_body(
                 }
                 control.height() + ROW_GAP
             }
+            Block::RadioList {
+                key,
+                options,
+                selected,
+            } => {
+                // The chosen value comes from the store first, so a press moves the ring on the
+                // same frame it happens.
+                let chosen = state
+                    .selects
+                    .iter()
+                    .find(|(known, _)| *known == key)
+                    .map(|(_, value)| *value)
+                    .unwrap_or(selected);
+                let mut height: f32 = 0.0;
+                for (index, option) in options.iter().enumerate() {
+                    let row = Rect::from_min_size(
+                        egui::pos2(left, y + index as f32 * RADIO_ROW),
+                        egui::vec2(right - left, RADIO_ROW),
+                    );
+                    height = height.max(row.bottom() - y);
+                    let lit = *option == chosen;
+                    let over = pointer.is_some_and(|pointer| row.contains(pointer));
+                    body.circle_stroke(
+                        egui::pos2(row.left() + 8.0, row.center().y),
+                        6.0,
+                        Stroke::new(1.0, theme.DIVIDER),
+                    );
+                    if lit {
+                        body.circle_filled(egui::pos2(row.left() + 8.0, row.center().y), 6.0, theme.BRAND);
+                    }
+                    body.text(
+                        egui::pos2(row.left() + 24.0, row.center().y),
+                        Align2::LEFT_CENTER,
+                        *option,
+                        fonts::body(13.0),
+                        if lit {
+                            theme.CONTRAST
+                        } else if over {
+                            theme.CONTRAST
+                        } else {
+                            theme.BASE
+                        },
+                    );
+                    if !state.consumed
+                        && ui.input(|input| input.pointer.any_click())
+                        && over
+                    {
+                        state.selects.retain(|(known, _)| *known != key);
+                        state.selects.push((key, option));
+                        state.dirty = true;
+                        state.consumed = true;
+                    }
+                }
+                height + ROW_GAP
+            }
             Block::ThemeCards { .. } => {
                 // Four cards, three to a row, the fourth (`Sync with system`) as wide as the row
                 // it starts: that is the reference's grid (`AppearanceCards.vue`), where each card
@@ -3523,7 +3606,7 @@ mod tests {
             (Tab::Appearance, 6),
             (Tab::Features, 13),
             (Tab::Behavior, 14),
-            (Tab::Language, 3),
+            (Tab::Language, 4),
             (Tab::FeatureFlags, 11),
             (Tab::Profile, 5),
             (Tab::Social, 4),
@@ -3570,6 +3653,21 @@ mod tests {
                         if let Some(control) = control {
                             assert_control_is_lettered(tab, control);
                         }
+                    }
+                    Block::RadioList {
+                        key,
+                        options,
+                        selected,
+                    } => {
+                        assert!(!key.is_empty(), "{} has an unlettered list", tab.label());
+                        for option in options {
+                            assert!(!option.is_empty(), "{} has an empty option", tab.label());
+                        }
+                        assert!(
+                            options.contains(&selected),
+                            "{} draws a choice that is not one of its options",
+                            tab.label()
+                        );
                     }
                     Block::Row {
                         label,
