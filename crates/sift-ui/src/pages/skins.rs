@@ -815,13 +815,52 @@ pub fn draw(
 
     let defaults_top = section_header(ui, grid_left, below_grid, theme, DEFAULT_SECTION_TITLE);
     if defaults_top + HEADING_LINE <= rect.bottom() - PAGE_PADDING {
-        ui.painter().text(
-            egui::pos2(grid_left, defaults_top),
-            Align2::LEFT_TOP,
-            DEFAULT_SECTION_BODY,
-            fonts::body(13.0),
-            theme.SECONDARY,
-        );
+        // The four authored skins, as the reference shows its own four with a check on the one
+        // in use. `DEFAULT_SECTION_BODY` stays as the accessible sentence when the row does not
+        // fit -- a narrow window is the case that reads it.
+        let row_top = defaults_top + HEADING_LINE;
+        let card = (grid.card_width * 0.66).max(64.0);
+        let fits = row_top + card <= rect.bottom() - PAGE_PADDING;
+        if !fits {
+            ui.painter().text(
+                egui::pos2(grid_left, defaults_top),
+                Align2::LEFT_TOP,
+                DEFAULT_SECTION_BODY,
+                fonts::body(13.0),
+                theme.SECONDARY,
+            );
+        } else {
+            for index in 0..ART.len() {
+                let tile = Rect::from_min_size(
+                    egui::pos2(grid_left + index as f32 * (card + GRID_GAP), row_top),
+                    egui::vec2(card, card),
+                );
+                ui.painter().rect_filled(tile, 12, theme.RAISED_BG);
+                if let Some(texture) = art_texture(ui.ctx(), state, index) {
+                    let height = (card - 16.0).min((card - 16.0) * 2.0);
+                    ui.painter().image(
+                        texture.id(),
+                        Rect::from_center_size(
+                            tile.center(),
+                            egui::vec2(height / 2.0, height),
+                        ),
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
+                if index == 0 {
+                    // The check the reference puts on the skin in use.
+                    let badge = egui::pos2(tile.right() - 14.0, tile.top() + 14.0);
+                    ui.painter().circle_filled(badge, 9.0, theme.BRAND);
+                    icons::draw(
+                        &ui.painter().clone(),
+                        Glyph::Check,
+                        Rect::from_center_size(badge, Vec2::splat(11.0)),
+                        theme.ACCENT_CONTRAST,
+                    );
+                }
+            }
+        }
     }
 
     false
@@ -1219,7 +1258,7 @@ impl Art {
 }
 
 /// The skins this build ships, authored here: a green-clad one and a warm one.
-const ART: [Art; 2] = [
+const ART: [Art; 4] = [
     Art {
         palette: &[
             ('.', [0, 0, 0, 0]),
@@ -1266,7 +1305,76 @@ const ART: [Art; 2] = [
         leg: &["pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "bbbb",
                "bbbb", "bbbb"],
     },
+    Art {
+        palette: &[
+            ('.', [0, 0, 0, 0]),
+            ('h', [0x2b, 0x2b, 0x38, 255]),
+            ('s', [0xd9, 0xa3, 0x7c, 255]),
+            ('e', [0x1b, 0x1b, 0x1b, 255]),
+            ('c', [0x2f, 0x5f, 0xc8, 255]),
+            ('p', [0x22, 0x22, 0x2c, 255]),
+            ('b', [0x11, 0x11, 0x11, 255]),
+        ],
+        head: &[
+            "hhhhhhhh", "hhhhhhhh", "hssssssh", "ssssssss", "sesssses", "ssssssss", "ssssssss",
+            "ssssssss",
+        ],
+        body: &[
+            "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc",
+            "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc",
+        ],
+        arm: &["cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "ssss",
+               "ssss", "ssss"],
+        leg: &["pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "bbbb",
+               "bbbb", "bbbb"],
+    },
+    Art {
+        palette: &[
+            ('.', [0, 0, 0, 0]),
+            ('h', [0x5a, 0x2a, 0x6a, 255]),
+            ('s', [0xf0, 0xc8, 0xa8, 255]),
+            ('e', [0x1b, 0x1b, 0x1b, 255]),
+            ('c', [0x8a, 0x3f, 0xa8, 255]),
+            ('p', [0x2d, 0x2d, 0x3a, 255]),
+            ('b', [0x1a, 0x1a, 0x1a, 255]),
+        ],
+        head: &[
+            "hhhhhhhh", "hhhhhhhh", "hssssssh", "ssssssss", "sesssses", "ssssssss", "ssssssss",
+            "ssssssss",
+        ],
+        body: &[
+            "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc",
+            "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc",
+        ],
+        arm: &["cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "ssss",
+               "ssss", "ssss"],
+        leg: &["pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "bbbb",
+               "bbbb", "bbbb"],
+    },
 ];
+
+/// The composed view of the `index`th authored skin, uploaded on first use.
+fn art_texture(
+    ctx: &egui::Context,
+    state: &mut State,
+    index: usize,
+) -> Option<egui::TextureHandle> {
+    if index >= ART.len() {
+        return None;
+    }
+    if state.textures.len() < ART.len() {
+        state.textures.resize_with(ART.len(), || None);
+    }
+    if state.textures[index].is_none() {
+        let image = compose_front(&ART[index].atlas());
+        state.textures[index] = Some(ctx.load_texture(
+            format!("skin-art-{index}"),
+            image,
+            egui::TextureOptions::NEAREST,
+        ));
+    }
+    state.textures[index].clone()
+}
 
 /// The composed view of a named skin, uploaded on first use.
 ///
@@ -1281,18 +1389,7 @@ fn skin_texture(
     if index >= ART.len() {
         return None;
     }
-    if state.textures.len() < ART.len() {
-        state.textures.resize_with(ART.len(), || None);
-    }
-    if state.textures[index].is_none() {
-        let image = compose_front(&ART[index].atlas());
-        state.textures[index] = Some(ctx.load_texture(
-            format!("skin-{name}"),
-            image,
-            egui::TextureOptions::NEAREST,
-        ));
-    }
-    state.textures[index].clone()
+    art_texture(ctx, state, index)
 }
 
 /// Draw the preview column: the chosen skin's tile at preview size, its name, the edit button,
