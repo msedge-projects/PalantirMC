@@ -37,7 +37,10 @@ enum Entry {
 /// that scrolls Discover all afternoon keeps every icon it has ever seen and the idle-RSS
 /// measurement stops being repeatable. 256 is far more than one screen of cards plus the
 /// project pages a reader moves between, so eviction is invisible in use.
-const CACHE_LIMIT: usize = 256;
+// 256 decoded icons was a guess at "many"; the Discover page shows twenty cards and the library a
+// handful of rows, so most of those textures were held for a screen that never draws them. Ninety-
+// six still covers several pages of re-visits.
+const CACHE_LIMIT: usize = 96;
 
 /// The icon cache: one entry per URL, and the channel its workers answer on.
 pub struct Images {

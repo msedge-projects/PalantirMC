@@ -269,3 +269,53 @@ fifth of a millisecond — the interval is not spent drawing. The one **2073 ms*
 the settings dialog opening (a first frame that builds the body), not a scroll, and it is named
 here so nobody mistakes it for one. Xvfb has no vsync, so the ~12 ms interval is the app's own
 pace rather than a 16.7 ms cap being held.
+
+## Measured at 0.1.32 — 2026-10-30
+
+The build is the release profile, on the sift-launcher VM (`:99`, 1440x900, no GPU). Every number
+below was taken on the binary CI ships, not a debug build.
+
+| Gate | Budget | Measured | |
+| --- | --- | --- | --- |
+| Startup, exec to window | <= 400 ms | **30 ms** | pass, 13x inside |
+| Idle CPU, 5 s window | 0 | **0 ticks** | pass |
+| Scroll, view time p95 | <= 20 ms | **0.07 - 0.12 ms** | pass, ~200x inside |
+| Idle RSS | <= 120 MB | **124.4 MB** total | **fail by 4.4 MB on this VM — see below** |
+
+### The RSS total, split
+
+`smaps` for the idle process, grouped by mapping:
+
+```
+VmRSS:        124352 kB
+anon RSS:       7.1 MB   (app stack, shared memory objects)
+file RSS:     114.4 MB
+  50.8 MB   libLLVM.so.19.1     <- mesa's llvmpipe rasterizer
+  26.1 MB   [heap]              <- the app's own heap
+  10.1 MB   SiftUi              <- the binary's text and data
+  10.0 MB   libgallium          <- mesa's llvmpipe rasterizer
+   5.1 MB   SYSV00000000        <- the X shared-memory framebuffer (1440x900x4)
+   1.7 MB   libcrypto.so.3
+   1.5 MB   libc.so.6
+   1.3 MB   libstdc++.so.6
+```
+
+**The two rasterizer rows are the whole difference.** This VM has no GPU, so mesa answers with
+llvmpipe, which is built on LLVM: 60.8 MB of driver that a machine with any GPU never maps at all.
+Taking them out leaves **63.5 MB** for everything the launcher owns — heap, binary, framebuffer and
+its C/C++ runtime — which is 56 MB inside the gate.
+
+I tried to prove that on the VM by choosing a rasterizer that does not use LLVM
+(`GALLIUM_DRIVER=softpipe`): it measured **230 MB**, because modern mesa's softpipe also links
+LLVM. So the split above is a `smaps` measurement rather than something this VM can demonstrate by
+running the app differently, and that is worth saying plainly.
+
+### What changed for it
+
+`images::CACHE_LIMIT` went from 256 decoded icons to 96: a page shows twenty cards and the library a
+handful of rows, so most of those textures were held for a screen that never draws them. Measured
+effect at idle: **none** (124,352 -> 124,764 kB, inside noise), because no icons are loaded until
+Discover or the library renders. It is a real saving once they are, not a fix for the gate.
+
+The trimmed `[heap]` figure is what a reader should watch: 26.1 MB is the launcher's own, and it is
+the only part of this table a change in this tree can move.
