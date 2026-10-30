@@ -1052,6 +1052,21 @@ target for this page is its *source* rather than its behaviour, and the capture 
 reason, not as a comparison. The same capture does show the page's underlying shape — centred
 illustration, heading, body line — which this build's empty state follows.
 
+### The right panel's art — 0.1.34
+
+The two empty plates in the right panel were the one difference that showed on **every** page, so
+they went first. The reference fills them with its own illustrations — a sliders-and-link thumbnail
+on the news card, a pixel-art server scene on the hosting banner — which are Modrinth's art, not
+this build's to copy. Both slots are drawn from primitives in the brand palette instead: three
+slider tracks with a link badge, and a stack of three server boxes.
+
+It is honest art rather than the reference's art, and the record says which. What it buys is that
+the panel no longer reads as unfinished on any page.
+
+Worth keeping: the first attempt drew the banner's boxes *on the news card*, because one function
+draws both and `art` there is the news card's rect. The banner keeps `BANNER_ART` points at its own
+foot for exactly this purpose; the rect is built from that now.
+
 ### Open after this pass
 
 | # | Region | What differs |
