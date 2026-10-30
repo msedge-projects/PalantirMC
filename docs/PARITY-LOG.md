@@ -1067,6 +1067,13 @@ Worth keeping: the first attempt drew the banner's boxes *on the news card*, bec
 draws both and `art` there is the news card's rect. The banner keeps `BANNER_ART` points at its own
 foot for exactly this purpose; the rect is built from that now.
 
+### The rail names itself — 0.1.35
+
+Hovering a destination now shows its name in a dark pill beside the icon, as the reference does.
+Drawn at the end of the frame, not with the rail: the rail is painted before the content column, so
+the first attempt left the pill underneath the library cards — the same reason the toast is drawn
+last.
+
 ### Open after this pass
 
 | # | Region | What differs |
