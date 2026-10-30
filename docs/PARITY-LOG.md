@@ -942,6 +942,29 @@ taken here. Parity evidence is therefore the reference *source* at `.scratch/mod
 file-and-line at every row, plus one capture of this build per page. That is a weaker claim than a
 pair of screenshots and is recorded as one.
 
+### Appearance, side by side with the reference — 0.1.29
+
+The reference runs again, in the container the earlier sessions built
+(`/data/workspace/tools/Dockerfile.modrinth`, image `modrinth-ui:1`, Arch + webkit for the GLIBC
+2.43 the AppImage needs). Its Appearance tab and this build's were captured at the same 1280x800
+geometry and compared:
+
+| | Reference | This build, before | This build, after |
+| --- | --- | --- | --- |
+| Choices | Dark, Light, OLED, **Sync with system as a fourth card** | three cards, no fourth | four cards, sync is the wide one |
+| Each card | preview, then a footer strip with a radio and the label inside it | preview with the label *below* the card, no radio | preview, then a footer strip with a radio and the label |
+| Clicking | changes the theme | **did nothing — the cards were not clickable** | changes the theme: Light turned the whole window light |
+
+`theme::light()` already existed and `theme::oled()` is new — the dark scheme with its grounds at
+true black — so the picker switches the real thing. `Sync with system` remembers the choice and
+keeps the current scheme, because this build has no system preference to ask; it is a `shortcut:`
+in the shell's match rather than a silent no-op.
+
+**Two operational notes.** The VM's disk read 99% full with 0.2 GiB free (`target/` had grown to
+15 GB with incremental builds, and the reference image was 2.17 GB); clearing both took it to 15 GB
+free. And `git push` is refused with a 403 while the active `gh` account is `MSedgeMC` — this
+repository belongs to `msedge-projects`.
+
 ### Open after this pass
 
 | # | Region | What differs |
