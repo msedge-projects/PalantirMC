@@ -1028,6 +1028,30 @@ prints `5,023`. Its cards show `19.62M` beside `5,023`, `15.44M` beside `662`, `
 Still owed for Discover: the numbered page strip, the `+1` tag overflow chip, and the
 Discover-specific sidebar (`Hide already installed`, `Category`, See more).
 
+### Screenshots verified; Servers cannot be — 0.1.33
+
+**Screenshots** was captured beside the reference at the same geometry and the two agree on the
+parts that matter: the stacked-photos illustration, `No screenshots yet`, and the subtitle
+`Screenshots you take in-game will appear here.` What differed was the rail — the reference's has a
+hairline and a `+` below its five destinations and this build stopped after the five, so creating an
+instance from the rail was impossible. Fixed in this release.
+
+Owed on this page: the rail's hover tooltips (the reference labels each destination on hover), and
+the news and promo imagery in the right panel, which this build draws as empty plates.
+
+**Servers cannot be compared on 0.22.0 at all.** The reference's own Servers page answers with:
+
+```
+Modrinth App update required
+You need to update to use Modrinth Hosting through the Modrinth App.
+[ Download to update ]
+```
+
+over a faded empty state, because the hosting service has moved past that build. So the parity
+target for this page is its *source* rather than its behaviour, and the capture is recorded as the
+reason, not as a comparison. The same capture does show the page's underlying shape — centred
+illustration, heading, body line — which this build's empty state follows.
+
 ### Open after this pass
 
 | # | Region | What differs |
