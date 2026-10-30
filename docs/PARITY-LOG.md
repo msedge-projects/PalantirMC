@@ -1008,6 +1008,26 @@ fixed here: the offset travels with the request, the page count is drawn with wo
 new query starts at page one. The numbered strip, the card's third column, the Discover-specific
 sidebar and the `+1` chip are owed and listed above rather than approximated.
 
+### Two corrections to the Discover comparison — 0.1.32
+
+The table in the 0.1.31 entry has a row that was wrong, and checking it against the code rather than
+against my note is what found it:
+
+- **"Card's right column: downloads, followers, 'Last week' vs tags, then downloads and followers in
+  one row."** No: this build draws its stats at the right end of the *same* row as the tags, exactly
+  as the reference does. There was no difference to record.
+- **The real difference on the card was the tags.** The API sends display categories and loaders in
+  one `categories` array, and the mapping kept only the loader names -- so a live card showed
+  `Fabric` where the reference shows `Client  Lightweight  Multiplayer  Optimization  Fabric`. The
+  categories are drawn ahead of the loaders now.
+
+Found in the same pass and also fixed: followers were abbreviated to `5.0K` where the reference
+prints `5,023`. Its cards show `19.62M` beside `5,023`, `15.44M` beside `662`, `11.62M` beside
+`2,744` -- abbreviation is a download-count rule, not a size rule.
+
+Still owed for Discover: the numbered page strip, the `+1` tag overflow chip, and the
+Discover-specific sidebar (`Hide already installed`, `Category`, See more).
+
 ### Open after this pass
 
 | # | Region | What differs |
