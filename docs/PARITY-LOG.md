@@ -1087,6 +1087,22 @@ The numbered page strip remains owed, and the reason is now measurable: the refe
 column ends near x=1250 while this build's ends at 1159, so the ~150 points a `1 2 … 953` strip
 needs do not exist on this row. That is a column-width difference, not a pager one.
 
+### The numbered page strip — 0.1.37
+
+The strip the reference draws — `1 2 … 953` with the current page in a brand pill — is in place, and
+the reason the earlier count version existed is now fixed at its cause: the search field took 62% of
+the toolbar row where the reference's takes about half, which left 79 points for a pager that needs
+about 150. The field takes 50% now.
+
+`pager_items(current, pages)` is the decision and has a test: ends always shown, the page in hand
+with one neighbour either side, an ellipsis where a number is skipped, and no ellipsis when the gap
+is a single page.
+
+Verified on the VM: `sodium` drew `1 2 … 9` with page one in the pill; pressing 2 drew
+`1 2 3 … 9` with the pill on two and different cards beneath.
+
+Still owed on Discover: the `Hide already installed` switch and the `Category` sidebar.
+
 ### Open after this pass
 
 | # | Region | What differs |
