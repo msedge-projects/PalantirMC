@@ -990,6 +990,24 @@ and I committed it, so `master` did not build until the next commit. It is the c
 repo already has — fix forward, never amend — but it is still a broken commit that a `cargo build`
 before `git commit` would have caught.
 
+### Discover, side by side with the reference — 0.1.31
+
+The reference ran again in its container and its Discover page was captured at the same 1280x800
+geometry as this build's. What the comparison found, in the order it matters:
+
+| | Reference | This build |
+| --- | --- | --- |
+| Paging | numbered strip `1 2 … 953 ◀ ▶` | **no paging at all — the offset was hard-coded to zero** |
+| Now | — | `◀ 1 / 9 ▶`, paging works: `sodium` page 2 shows different projects |
+| Card's right column | downloads, followers, "Last week" | tags, then downloads and followers in one row |
+| Discover sidebar | `Hide already installed`, then `Category` with a See more link | the shared Getting started / News panel |
+| Tag overflow | `+1` chip when the tags do not fit | no overflow marker |
+
+Paging was the one that made the page *not work* rather than look different, so it is the one
+fixed here: the offset travels with the request, the page count is drawn with working arrows, and a
+new query starts at page one. The numbered strip, the card's third column, the Discover-specific
+sidebar and the `+1` chip are owed and listed above rather than approximated.
+
 ### Open after this pass
 
 | # | Region | What differs |
