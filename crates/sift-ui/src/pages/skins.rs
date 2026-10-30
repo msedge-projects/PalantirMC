@@ -472,7 +472,6 @@ impl Default for Model {
 
 /// The page's own state: which model tab is selected, and what has been typed into the
 /// search plate.
-#[derive(Debug)]
 pub struct State {
     /// The selected model tab.
     pub model: Model,
@@ -483,6 +482,24 @@ pub struct State {
     /// The skin the preview column shows. Nothing changes it yet: a card is painted, not
     /// interactive, so this is the first skin until cards report presses.
     pub selected: &'static str,
+    /// The authored skins' composed views, uploaded once each.
+    textures: Vec<Option<egui::TextureHandle>>,
+}
+
+impl std::fmt::Debug for State {
+    /// A texture handle has no `Debug`, so the cache is reported by how much of it is filled.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("skins::State")
+            .field("model", &self.model)
+            .field("query", &self.query)
+            .field("selected", &self.selected)
+            .field(
+                "textures",
+                &self.textures.iter().filter(|slot| slot.is_some()).count(),
+            )
+            .finish()
+    }
 }
 
 impl Default for State {
@@ -492,6 +509,7 @@ impl Default for State {
             model: Model::default(),
             query: String::new(),
             selected: SKINS[0].name,
+            textures: Vec::new(),
         }
     }
 }
@@ -648,6 +666,12 @@ pub fn draw(
     images: &mut crate::images::Images,
     state: &mut State,
 ) -> bool {
+    // Every skin's view, uploaded on first use and read by name below: the grid closure
+    // cannot borrow the state mutably, and a skin's view does not change while the page is up.
+    let textures: Vec<(&'static str, Option<egui::TextureHandle>)> = SKINS
+        .iter()
+        .map(|skin| (skin.name, skin_texture(ui.ctx(), state, skin.name)))
+        .collect();
     // The page owns its rect (`pages/mod.rs`'s seam); paint the page colour first so the
     // grid sits on `--color-bg` even if the caller did not clear the column.
     ui.painter().rect_filled(rect, 0, theme.BG);
@@ -772,7 +796,16 @@ pub fn draw(
                         // Slot zero is the dropzone; the reader's own skins start at the
                         // second slot (`VirtualSkinSectionList.vue:426-443`).
                         match slot.checked_sub(1).and_then(|index| visible.get(index)) {
-                            Some(skin) => draw_card(painter, card, theme, skin),
+                            Some(skin) => draw_card(
+                                painter,
+                                card,
+                                theme,
+                                skin,
+                                textures
+                                    .iter()
+                                    .find(|(name, _)| *name == skin.name)
+                                    .and_then(|(_, texture)| texture.as_ref()),
+                            ),
                             None => dropzone_tile(painter, card, theme),
                         }
                     }
@@ -1102,6 +1135,166 @@ fn card_height(card_width: f32) -> f32 {
 // The card
 // ---------------------------------------------------------------------------
 
+/// One skin as a 64x64 atlas in RGBA, and the view made from it.
+///
+/// The atlas is only filled where the front view reads it -- the 3D model the reference draws would
+/// need all six faces of every part, which is a renderer rather than a blit.
+pub const ATLAS: usize = 64;
+/// The composed view: a head over a body with an arm either side and two legs.
+pub const VIEW_W: usize = 16;
+pub const VIEW_H: usize = 32;
+
+/// The six front faces, as (atlas x, atlas y, width, height, view x, view y).
+const FACES: [(usize, usize, usize, usize, usize, usize); 6] = [
+    (8, 8, 8, 8, 4, 0),      // head
+    (20, 20, 8, 12, 4, 8),   // body
+    (44, 20, 4, 12, 0, 8),   // right arm
+    (36, 52, 4, 12, 12, 8),  // left arm
+    (4, 20, 4, 12, 4, 20),   // right leg
+    (20, 52, 4, 12, 8, 20),  // left leg
+];
+
+/// Compose one atlas's front view. Pixels the faces do not cover stay transparent.
+pub fn compose_front(atlas: &[u8]) -> egui::ColorImage {
+    let mut pixels = vec![egui::Color32::TRANSPARENT; VIEW_W * VIEW_H];
+    for (ax, ay, aw, ah, vx, vy) in FACES {
+        for y in 0..ah {
+            for x in 0..aw {
+                let source = ((ay + y) * ATLAS + (ax + x)) * 4;
+                let Some(pixel) = atlas.get(source..source + 4) else {
+                    continue;
+                };
+                pixels[(vy + y) * VIEW_W + (vx + x)] =
+                    egui::Color32::from_rgba_unmultiplied(pixel[0], pixel[1], pixel[2], pixel[3]);
+            }
+        }
+    }
+    egui::ColorImage {
+        size: [VIEW_W, VIEW_H],
+        pixels,
+        source_size: egui::vec2(VIEW_W as f32, VIEW_H as f32),
+    }
+}
+
+/// An authored skin: rows of palette letters, painted onto the faces it needs.
+///
+/// `.` is transparent, and each letter is one colour from the palette beside it. The rows run head,
+/// body, arms, legs -- the order the faces are read in -- so a reader can see the character in the
+/// art rather than in a coordinate table.
+struct Art {
+    palette: &'static [(char, [u8; 4])],
+    head: &'static [&'static str],
+    body: &'static [&'static str],
+    arm: &'static [&'static str],
+    leg: &'static [&'static str],
+}
+
+impl Art {
+    /// Paint this art into a blank 64x64 atlas.
+    fn atlas(&self) -> Vec<u8> {
+        let mut atlas = vec![0_u8; ATLAS * ATLAS * 4];
+        let mut paint = |rows: &[&str], ax: usize, ay: usize| {
+            for (y, row) in rows.iter().enumerate() {
+                for (x, letter) in row.chars().enumerate() {
+                    let Some((_, rgba)) = self.palette.iter().find(|(key, _)| *key == letter)
+                    else {
+                        continue;
+                    };
+                    let at = ((ay + y) * ATLAS + (ax + x)) * 4;
+                    if let Some(slot) = atlas.get_mut(at..at + 4) {
+                        slot.copy_from_slice(rgba);
+                    }
+                }
+            }
+        };
+        // The six faces, in `FACES` order.
+        paint(self.head, 8, 8);
+        paint(self.body, 20, 20);
+        paint(self.arm, 44, 20);
+        paint(self.arm, 36, 52);
+        paint(self.leg, 4, 20);
+        paint(self.leg, 20, 52);
+        atlas
+    }
+}
+
+/// The skins this build ships, authored here: a green-clad one and a warm one.
+const ART: [Art; 2] = [
+    Art {
+        palette: &[
+            ('.', [0, 0, 0, 0]),
+            ('h', [0x3a, 0x2a, 0x1c, 255]), // hair
+            ('s', [0xd9, 0xa3, 0x7c, 255]), // skin
+            ('e', [0x1b, 0x1b, 0x1b, 255]), // eyes
+            ('c', [0x1f, 0x9d, 0x55, 255]), // shirt
+            ('p', [0x27, 0x3a, 0x5c, 255]), // trousers
+            ('b', [0x11, 0x11, 0x11, 255]), // boots
+        ],
+        head: &[
+            "hhhhhhhh", "hhhhhhhh", "hssssssh", "ssssssss", "sesssses", "ssssssss", "ssssssss",
+            "ssssssss",
+        ],
+        body: &[
+            "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc",
+            "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc",
+        ],
+        arm: &["cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "ssss",
+               "ssss", "ssss"],
+        leg: &["pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "bbbb",
+               "bbbb", "bbbb"],
+    },
+    Art {
+        palette: &[
+            ('.', [0, 0, 0, 0]),
+            ('h', [0xb8, 0x5c, 0x1e, 255]), // ginger hair
+            ('s', [0xf0, 0xc8, 0xa8, 255]),
+            ('e', [0x1b, 0x1b, 0x1b, 255]),
+            ('c', [0xe8, 0x7a, 0x2f, 255]), // orange shirt
+            ('p', [0x33, 0x4a, 0x38, 255]),
+            ('b', [0x1a, 0x1a, 0x1a, 255]),
+        ],
+        head: &[
+            "hhhhhhhh", "hhhhhhhh", "hssssssh", "ssssssss", "sesssses", "ssssssss", "ssssssss",
+            "ssssssss",
+        ],
+        body: &[
+            "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc",
+            "cccccccc", "cccccccc", "cccccccc", "cccccccc", "cccccccc",
+        ],
+        arm: &["cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "cccs", "ssss",
+               "ssss", "ssss"],
+        leg: &["pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "pppp", "bbbb",
+               "bbbb", "bbbb"],
+    },
+];
+
+/// The composed view of a named skin, uploaded on first use.
+///
+/// Filtered nearest, because a skin is pixel art and a smoothed one reads as a different skin.
+fn skin_texture(
+    ctx: &egui::Context,
+    state: &mut State,
+    name: &str,
+) -> Option<egui::TextureHandle> {
+    let index = SKINS.iter().position(|skin| skin.name == name)?;
+    // The list holds more skins than this build authors art for; the rest keep the glyph.
+    if index >= ART.len() {
+        return None;
+    }
+    if state.textures.len() < ART.len() {
+        state.textures.resize_with(ART.len(), || None);
+    }
+    if state.textures[index].is_none() {
+        let image = compose_front(&ART[index].atlas());
+        state.textures[index] = Some(ctx.load_texture(
+            format!("skin-{name}"),
+            image,
+            egui::TextureOptions::NEAREST,
+        ));
+    }
+    state.textures[index].clone()
+}
+
 /// Draw the preview column: the chosen skin's tile at preview size, its name, the edit button,
 /// and the account bar at the foot.
 ///
@@ -1127,11 +1320,22 @@ fn draw_preview(ui: &mut Ui, rect: Rect, theme: &Theme, state: &mut State) {
         .copied()
         .unwrap_or(SKINS[0]);
     let plate = Rect::from_min_max(rect.min, egui::pos2(rect.right(), bar.top()));
+    // The character, at the view's own proportions: sixteen texels across, thirty-two down.
+    let width = (plate.width() * 0.42).min(128.0);
     let glyph = Rect::from_center_size(
-        plate.center() - egui::vec2(0.0, 24.0),
-        egui::vec2(96.0, 96.0),
+        plate.center() - egui::vec2(0.0, 32.0),
+        egui::vec2(width, width * VIEW_H as f32 / VIEW_W as f32),
     );
-    icons::draw(painter, Glyph::Shirt, glyph, theme.SECONDARY);
+    if let Some(texture) = skin_texture(ui.ctx(), state, chosen.name) {
+        painter.image(
+            texture.id(),
+            glyph,
+            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    } else {
+        icons::draw(painter, Glyph::Shirt, glyph, theme.SECONDARY);
+    }
     painter.text(
         egui::pos2(plate.center().x, glyph.bottom() + 12.0),
         Align2::CENTER_TOP,
@@ -1197,7 +1401,13 @@ fn draw_preview(ui: &mut Ui, rect: Rect, theme: &Theme, state: &mut State) {
 /// 1-point edge -- with the contents inset by `CARD_PADDING`. The name, author and tag stack
 /// up from the bottom the way the reference's action row sits at `bottom-3`
 /// (`SkinButton.vue:118-123`).
-fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, skin: &Skin) {
+fn draw_card(
+    painter: &egui::Painter,
+    rect: Rect,
+    theme: &Theme,
+    skin: &Skin,
+    texture: Option<&egui::TextureHandle>,
+) {
     painter.rect_filled(rect, CARD_RADIUS, theme.SUPER_RAISED_BG);
     painter.rect_stroke(
         rect,
@@ -1232,13 +1442,28 @@ fn draw_card(painter: &egui::Painter, rect: Rect, theme: &Theme, skin: &Skin) {
         egui::pos2(rect.right() - CARD_PADDING, name_top - CARD_TEXT_GAP),
     );
     if face.width() > 1.0 && face.height() > 1.0 {
-        let side = (face.height() * 0.5).clamp(16.0, 64.0);
-        icons::draw(
-            painter,
-            Glyph::Shirt,
-            Rect::from_center_size(face.center(), Vec2::splat(side)),
-            theme.SECONDARY,
-        );
+        match texture {
+            Some(texture) => {
+                // The view's own 1:2 proportions, as tall as the face allows.
+                let height = face.height().min(face.width() * 2.0).max(16.0);
+                let size = egui::vec2(height / 2.0, height);
+                painter.image(
+                    texture.id(),
+                    Rect::from_center_size(face.center(), size),
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+            None => {
+                let side = (face.height() * 0.5).clamp(16.0, 64.0);
+                icons::draw(
+                    painter,
+                    Glyph::Shirt,
+                    Rect::from_center_size(face.center(), Vec2::splat(side)),
+                    theme.SECONDARY,
+                );
+            }
+        }
     }
 
     clipped_line(
@@ -1420,9 +1645,31 @@ fn no_matches(painter: &egui::Painter, rect: Rect, theme: &Theme) {
     );
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The view is sixteen by thirty-two, and a pixel in it is the pixel the face it came from
+    /// holds -- head at the top, body under it, an arm either side, legs at the foot.
+    #[test]
+    fn the_front_view_is_composed_from_the_faces() {
+        let atlas = super::ART[0].atlas();
+        let view = super::compose_front(&atlas);
+        assert_eq!(view.size, [super::VIEW_W, super::VIEW_H]);
+
+        // The head's top-left corner: atlas (8,8) is the view's (4,0).
+        let head = view.pixels[0 * super::VIEW_W + 4];
+        assert_ne!(head, egui::Color32::TRANSPARENT, "the head is painted");
+        // The body's first pixel: atlas (20,20) is the view's (4,8).
+        let body = view.pixels[8 * super::VIEW_W + 4];
+        assert_ne!(body, egui::Color32::TRANSPARENT, "the body is painted");
+        // A corner no face covers stays transparent.
+        assert_eq!(view.pixels[0], egui::Color32::TRANSPARENT, "the corners are empty");
+        // The legs reach the last row.
+        let foot = view.pixels[(super::VIEW_H - 1) * super::VIEW_W + 4];
+        assert_ne!(foot, egui::Color32::TRANSPARENT, "the legs reach the foot");
+    }
 
     /// The shell's content column at a window width: the rail, the panel and the 24-point
     /// inset, with the last 16 points the shell keeps for itself (`pages/mod.rs:39-58`).
