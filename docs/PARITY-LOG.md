@@ -1113,10 +1113,14 @@ project type -- `adventure`, `challenging`, `combat`, `kitchen-sink`, `lightweig
 **Verified on the VM:** the list draws under its heading and a pressed row turns brand-green, while
 pressing the same row again clears it.
 
-**Not verified, and recorded as owed:** that the press changes the cards. The facet reaches the
-request and `a_facet_is_part_of_the_question` pins the three ways it must (empty box with no filter
-is not a request; empty box with a filter is; a second filter is a different key), but no capture
-shows filtered results yet -- the click probes kept landing on the heading rather than a row.
+**Verified after that entry was written:** the press changes the cards. Pressing `Adventure` on an
+empty search drew Adventure-tagged projects -- Cobblemon Official Modpack, COBBLEVERSE -- each with
+an `Adventure` chip of its own, which is the filter naming itself.
+
+The probe kept missing because the rows are laid out from the panel's own plan and were being
+guessed at from a cropped capture; printing the row rects once (`adventure` at y 276-302) put the
+click in the right place first time. The lesson is the cheap one: ask the code for the coordinate
+rather than measuring a screenshot.
 
 Two faults worth keeping: the request block was nested inside `if let Some(query)` so a press with
 an empty box never reached the search, and `request` refused an empty query outright, which is right
