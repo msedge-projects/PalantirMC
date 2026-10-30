@@ -916,6 +916,32 @@ that pins it.
 Switching to `msedge-projects` (`gh auth switch --user msedge-projects`) fixed it; the repository
 belongs to that account, and the credential helper routes by path but apparently not by account.
 
+### Reset to default, and a second key bug — 0.1.28
+
+`Reset to default` appears on a row the reader has changed, for all five control kinds, and one
+helper clears the row across every store. Verified: pressing it on `Sync with system` wrote
+`"switches": {}` and left the other rows alone.
+
+The run also caught the second instance of one bug: `known_labels()` decides which stored keys
+survive a load, and it listed only row labels and heading texts. A `Block::Standalone` field is
+keyed by its **placeholder**, so the pre-launch hook's text was saved and then silently dropped.
+Placeholders are in the list now, with a test, and the hook reads `echo persisted` after a restart.
+
+### A limitation worth stating: the live side-by-side is not possible here
+
+This objective calls for parity "verified per page by side-by-side captures". The reference for
+this work is the Modrinth App 0.22.0 AppImage, which is still on the VM at
+`/data/workspace/tools/modrinth.AppImage` — and it **no longer starts**:
+
+```
+ModrinthApp: /lib/x86_64-linux-gnu/libm.so.6: version `GLIBC_2.43' not found
+```
+
+This VM's glibc is older than the AppImage needs, so a side-by-side of the two windows cannot be
+taken here. Parity evidence is therefore the reference *source* at `.scratch/modrinth-0.22`, cited
+file-and-line at every row, plus one capture of this build per page. That is a weaker claim than a
+pair of screenshots and is recorded as one.
+
 ### Open after this pass
 
 | # | Region | What differs |
