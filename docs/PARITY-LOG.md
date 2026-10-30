@@ -1256,6 +1256,20 @@ back are requested directly while the word is lit; that costs three seconds of f
 deliberate press and nothing otherwise. Any future "wait then redraw" in this tree should assume the
 same and ask for its own frames.
 
+### The language list — 0.1.49
+
+`Block::RadioList` draws the reference's locale list: one row per locale with a radio, the chosen
+name in the brand colour and a dot inside its ring. A press stores the choice under the heading's own
+key, so the select above the list and the list itself are one setting -- pressing `Deutsch` leaves the
+select reading `Deutsch` and the ring on it, verified on the VM.
+
+Owed on that tab still: the flag and coverage percentage each row carries in the reference, and the
+search field filtering the list (it is drawn, not searched).
+
+**An operational note:** the VM's disk went to 97% twice this session, both times because `target/`
+had grown to 15 GB from debug builds. `rm -rf target/debug/incremental` took it back to 70% in one
+command; the release tree alone is small.
+
 ### Open after this pass
 
 | # | Region | What differs |
