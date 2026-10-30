@@ -1103,6 +1103,28 @@ Verified on the VM: `sodium` drew `1 2 … 9` with page one in the pill; pressin
 
 Still owed on Discover: the `Hide already installed` switch and the `Category` sidebar.
 
+### Discover's own sidebar — 0.1.38
+
+`Category` now takes the slot `News` occupies on the other pages, as the reference's Discover does.
+The ten modpack categories come from `GET /v2/tag/category` on a worker, filtered to the tab's
+project type -- `adventure`, `challenging`, `combat`, `kitchen-sink`, `lightweight`, `magic`,
+`multiplayer`, `optimization`, `quests`, `technology`, which is the reference's list in its order.
+
+**Verified on the VM:** the list draws under its heading and a pressed row turns brand-green, while
+pressing the same row again clears it.
+
+**Not verified, and recorded as owed:** that the press changes the cards. The facet reaches the
+request and `a_facet_is_part_of_the_question` pins the three ways it must (empty box with no filter
+is not a request; empty box with a filter is; a second filter is a different key), but no capture
+shows filtered results yet -- the click probes kept landing on the heading rather than a row.
+
+Two faults worth keeping: the request block was nested inside `if let Some(query)` so a press with
+an empty box never reached the search, and `request` refused an empty query outright, which is right
+for the default feed and wrong once a facet is chosen.
+
+Still owed on Discover: `Hide already installed` and its switch, and the `See more` link under the
+list.
+
 ### Open after this pass
 
 | # | Region | What differs |
