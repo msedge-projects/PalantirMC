@@ -1072,7 +1072,7 @@ impl Shell {
         );
         let field = Rect::from_min_size(
             row.min,
-            egui::vec2(row.width() * 0.62, g::SEARCH_ROW),
+            egui::vec2(row.width() * 0.50, g::SEARCH_ROW),
         );
         // The field is a widget with state now: focus, a caret that blinks and a clear button.
         // Its return value is frame debt -- true while it is focused, because the caret is
@@ -1188,7 +1188,7 @@ impl Shell {
             let pages = self.result_pages();
             let middle = row.center().y;
             let right = row.right();
-            // An empty search says so where the count would be; there are no pages to turn.
+            // An empty search says so where the strip would be; there are no pages to turn.
             if range == "No results" {
                 ui.painter().text(
                     egui::pos2(right, middle),
@@ -1198,52 +1198,83 @@ impl Shell {
                     self.theme.SECONDARY,
                 );
             } else {
-            let next = egui::Rect::from_center_size(
-                egui::pos2(right - 14.0, middle),
-                egui::Vec2::splat(22.0),
-            );
-            let pages_right = next.left() - 8.0;
-            let count = egui::text::LayoutJob::simple_singleline(
-                format!("{} / {}", self.page + 1, pages.max(1)),
-                crate::fonts::body(12.0).clone(),
-                self.theme.SECONDARY,
-            );
-            let width = ui.painter().layout_job(count.clone()).size().x;
-            ui.painter().galley(
-                egui::pos2(pages_right - width, middle - 7.0),
-                ui.painter().layout_job(count),
-                self.theme.SECONDARY,
-            );
-            let prev = egui::Rect::from_center_size(
-                egui::pos2(pages_right - width - 26.0, middle),
-                egui::Vec2::splat(22.0),
-            );
-            for (rect, step, enabled) in [
-                (prev, -1_i64, self.page > 0),
-                (next, 1, (self.page as u64 + 1) < pages.max(1)),
-            ] {
-                let ink = if enabled {
-                    self.theme.BASE
-                } else {
-                    self.theme.SECONDARY
-                };
-                ui.painter().text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    if step < 0 { "<" } else { ">" },
-                    crate::fonts::body(13.0),
-                    ink,
+                let next = egui::Rect::from_center_size(
+                    egui::pos2(right - 12.0, middle),
+                    egui::Vec2::splat(22.0),
                 );
-                if enabled
-                    && ui
-                        .interact(rect, egui::Id::new(("page-step", step)), egui::Sense::click())
-                        .clicked()
-                {
-                    self.page = (self.page as i64 + step).max(0) as u32;
-                    self.results.forget();
-                    ui.ctx().request_repaint();
+                let mut x = next.left() - 6.0;
+                for item in pager_items(self.page + 1, pages).into_iter().rev() {
+                    let label = match item {
+                        Some(number) => number.to_string(),
+                        None => "…".to_owned(),
+                    };
+                    let ink = if item == Some(u64::from(self.page) + 1) {
+                        self.theme.BUTTON_TEXT_SELECTED
+                    } else {
+                        self.theme.SECONDARY
+                    };
+                    let galley = ui.painter().layout_no_wrap(
+                        label.clone(),
+                        crate::fonts::body(12.0),
+                        ink,
+                    );
+                    let width = if item.is_some() { PAGER_CELL } else { galley.size().x + 4.0 };
+                    let cell = egui::Rect::from_min_size(
+                        egui::pos2(x - width, middle - 11.0),
+                        egui::vec2(width, 22.0),
+                    );
+                    if item == Some(u64::from(self.page) + 1) {
+                        ui.painter().rect_filled(cell, 6, self.theme.BUTTON_BG_SELECTED);
+                    }
+                    ui.painter().galley(
+                        egui::pos2(cell.center().x - galley.size().x / 2.0, middle - 7.0),
+                        galley,
+                        ink,
+                    );
+                    if let Some(number) = item {
+                        if number != u64::from(self.page) + 1
+                            && ui
+                                .interact(cell, egui::Id::new(("page", number)), egui::Sense::click())
+                                .clicked()
+                        {
+                            self.page = (number - 1) as u32;
+                            self.results.forget();
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                    x = cell.left() - 2.0;
                 }
-            }
+                // The `-` sits just left of where the numbers stopped, whatever they were.
+                let prev = egui::Rect::from_center_size(
+                    egui::pos2(x - 10.0, middle),
+                    egui::Vec2::splat(22.0),
+                );
+                for (rect, step, enabled) in [
+                    (prev, -1_i64, self.page > 0),
+                    (next, 1, (self.page as u64 + 1) < pages.max(1)),
+                ] {
+                    let ink = if enabled {
+                        self.theme.BASE
+                    } else {
+                        self.theme.SECONDARY
+                    };
+                    ui.painter().text(
+                        rect.center(),
+                        Align2::CENTER_CENTER,
+                        if step < 0 { "<" } else { ">" },
+                        crate::fonts::body(13.0),
+                        ink,
+                    );
+                    if enabled
+                        && ui
+                            .interact(rect, egui::Id::new(("page-step", step)), egui::Sense::click())
+                            .clicked()
+                    {
+                        self.page = (self.page as i64 + step).max(0) as u32;
+                        self.results.forget();
+                        ui.ctx().request_repaint();
+                    }
+                }
             }
         }
 
@@ -1653,6 +1684,39 @@ fn tags_that_fit(widths: &[f32], gaps: f32, limit: f32) -> usize {
     widths.len()
 }
 
+/// The page numbers a strip shows: the first, the last, the page in hand and one either side of
+/// it, with `None` where an ellipsis belongs. One-based, and never a number outside `1..=pages`.
+fn pager_items(current: u32, pages: u64) -> Vec<Option<u64>> {
+    let pages = pages.max(1);
+    let current = u64::from(current).clamp(1, pages);
+    let mut wanted: Vec<u64> = Vec::new();
+    for candidate in [1, current.saturating_sub(1), current, current + 1, pages] {
+        if candidate >= 1 && candidate <= pages && !wanted.contains(&candidate) {
+            wanted.push(candidate);
+        }
+    }
+    wanted.sort_unstable();
+    let mut items = Vec::new();
+    let mut previous: Option<u64> = None;
+    for number in wanted {
+        if let Some(last) = previous {
+            // A gap of exactly one is a number worth showing; anything wider is an ellipsis.
+            if number - last == 2 {
+                items.push(Some(last + 1));
+            } else if number - last > 1 {
+                items.push(None);
+            }
+        }
+        items.push(Some(number));
+        previous = Some(number);
+    }
+    items
+}
+
+/// A page number's cell in the strip, and how much room each candidate needs.
+const PAGER_CELL: f32 = 20.0;
+const PAGER_WIDTH: f32 = PAGER_CELL + 2.0;
+
 /// The room the stats keep at the right of a card's tag row: three stats and their glyphs.
 const TAG_ROW_RESERVE: f32 = 260.0;
 
@@ -1794,6 +1858,18 @@ fn ellipsise(text: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The strip always offers the ends, the page in hand and its neighbours, and says how wide the
+    /// gap is when it skips one.
+    #[test]
+    fn the_strip_shows_the_first_last_and_the_page_in_hand() {
+        assert_eq!(pager_items(1, 9), vec![Some(1), Some(2), None, Some(9)]);
+        assert_eq!(pager_items(5, 9), vec![Some(1), None, Some(4), Some(5), Some(6), None, Some(9)]);
+        assert_eq!(pager_items(9, 9), vec![Some(1), None, Some(8), Some(9)]);
+        // One page is one number, and a gap of one is filled rather than elided.
+        assert_eq!(pager_items(1, 1), vec![Some(1)]);
+        assert_eq!(pager_items(1, 3), vec![Some(1), Some(2), Some(3)]);
+    }
 
     /// A tag that does not fit stops the row, and the count it leaves is what the `+N` says.
     #[test]
