@@ -762,8 +762,13 @@ pub fn draw(
             // second slot whether the list is empty or not.
             let slots = visible.len() + 1;
             let rows = slots.div_ceil(columns);
-            let content_height =
+            let grid_height =
                 (rows as f32 * (grid.card_height + GRID_GAP) - GRID_GAP).max(GRID_MIN_HEIGHT);
+            // The default skins ride in the same column, under the cards, as the reference's one
+            // scrolling list does: in the page's fixed strip below the scroll they had no room.
+            let defaults_top_local = grid_height + SECTION_GAP;
+            let default_card = (grid.card_width * 0.66).max(64.0);
+            let content_height = defaults_top_local + HEADING_LINE + default_card;
             // Directly under the cards when they fit, and at the reserved strip when they
             // do not: the heading follows the content, not the space reserved for it.
             below_grid = grid_rect.top() + content_height.min(grid_rect.height()) + SECTION_GAP;
@@ -809,57 +814,50 @@ pub fn draw(
                             None => dropzone_tile(painter, card, theme),
                         }
                     }
-                });
-        }
-    }
 
-    let defaults_top = section_header(ui, grid_left, below_grid, theme, DEFAULT_SECTION_TITLE);
-    if defaults_top + HEADING_LINE <= rect.bottom() - PAGE_PADDING {
-        // The four authored skins, as the reference shows its own four with a check on the one
-        // in use. `DEFAULT_SECTION_BODY` stays as the accessible sentence when the row does not
-        // fit -- a narrow window is the case that reads it.
-        let row_top = defaults_top + HEADING_LINE;
-        let card = (grid.card_width * 0.66).max(64.0);
-        let fits = row_top + card <= rect.bottom() - PAGE_PADDING;
-        if !fits {
-            ui.painter().text(
-                egui::pos2(grid_left, defaults_top),
-                Align2::LEFT_TOP,
-                DEFAULT_SECTION_BODY,
-                fonts::body(13.0),
-                theme.SECONDARY,
-            );
-        } else {
-            for index in 0..ART.len() {
-                let tile = Rect::from_min_size(
-                    egui::pos2(grid_left + index as f32 * (card + GRID_GAP), row_top),
-                    egui::vec2(card, card),
-                );
-                ui.painter().rect_filled(tile, 12, theme.RAISED_BG);
-                if let Some(texture) = art_texture(ui.ctx(), state, index) {
-                    let height = (card - 16.0).min((card - 16.0) * 2.0);
-                    ui.painter().image(
-                        texture.id(),
-                        Rect::from_center_size(
-                            tile.center(),
-                            egui::vec2(height / 2.0, height),
-                        ),
-                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
+                    // The default skins, under the cards in the same column.
+                    let heading = area.top() + defaults_top_local;
+                    painter.text(
+                        egui::pos2(area.left(), heading),
+                        Align2::LEFT_TOP,
+                        DEFAULT_SECTION_TITLE,
+                        fonts::semibold(16.0),
+                        theme.CONTRAST,
                     );
-                }
-                if index == 0 {
-                    // The check the reference puts on the skin in use.
-                    let badge = egui::pos2(tile.right() - 14.0, tile.top() + 14.0);
-                    ui.painter().circle_filled(badge, 9.0, theme.BRAND);
-                    icons::draw(
-                        &ui.painter().clone(),
-                        Glyph::Check,
-                        Rect::from_center_size(badge, Vec2::splat(11.0)),
-                        theme.ACCENT_CONTRAST,
-                    );
-                }
-            }
+                    for index in 0..ART.len() {
+                        let tile = Rect::from_min_size(
+                            egui::pos2(
+                                area.left() + index as f32 * (default_card + GRID_GAP),
+                                heading + HEADING_LINE,
+                            ),
+                            egui::vec2(default_card, default_card),
+                        );
+                        painter.rect_filled(tile, 12, theme.RAISED_BG);
+                        if let Some(texture) = art_texture(ui.ctx(), state, index) {
+                            let height = default_card - 16.0;
+                            painter.image(
+                                texture.id(),
+                                Rect::from_center_size(
+                                    tile.center(),
+                                    egui::vec2(height / 2.0, height),
+                                ),
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                        if index == 0 {
+                            // The check the reference puts on the skin in use.
+                            let badge = egui::pos2(tile.right() - 14.0, tile.top() + 14.0);
+                            painter.circle_filled(badge, 9.0, theme.BRAND);
+                            icons::draw(
+                                painter,
+                                Glyph::Check,
+                                Rect::from_center_size(badge, Vec2::splat(11.0)),
+                                theme.ACCENT_CONTRAST,
+                            );
+                        }
+                    }
+                });
         }
     }
 
