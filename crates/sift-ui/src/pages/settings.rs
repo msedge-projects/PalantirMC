@@ -138,6 +138,13 @@ fn load_at(state: &mut State, path: &std::path::Path) {
         return;
     };
     let known = known_labels();
+    if let Some(theme) = value.get("theme").and_then(|entry| entry.as_str()) {
+        if let Some(choice) = ThemeChoice::ALL
+            .into_iter()
+            .find(|choice| choice.label() == theme)
+        {
+            state.theme = choice;
+    
     if let Some(sliders) = value.get("sliders").and_then(|entry| entry.as_object()) {
         for (key, entry) in sliders {
             if let (Some(fraction), Some(label)) =
@@ -223,6 +230,7 @@ fn save_at(state: &State, path: &std::path::Path) {
         .map(|(key, index)| (key.to_string(), serde_json::json!(index)))
         .collect::<serde_json::Map<_, _>>();
     let value = serde_json::json!({
+        "theme": state.theme.label(),
         "sliders": sliders,
         "texts": texts,
         "chips": chips,

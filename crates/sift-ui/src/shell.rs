@@ -134,6 +134,8 @@ pub struct Shell {
     about_open: bool,
     /// The settings modal: open flag and selected tab.
     settings: crate::pages::settings::State,
+    /// The theme the window is drawn in, so a change can be noticed once rather than every frame.
+    theme_choice: crate::pages::settings::ThemeChoice,
 }
 
 impl Default for Shell {
@@ -168,6 +170,7 @@ impl Default for Shell {
             restored_account: false,
             about_open: false,
             settings: crate::pages::settings::State::default(),
+            theme_choice: crate::pages::settings::ThemeChoice::Dark,
         }
     }
 }
@@ -331,14 +334,19 @@ impl Shell {
         let was_settings = self.settings.open;
         crate::pages::about::draw(ui, Self::window_rect(), &self.theme, &mut self.about_open);
         crate::pages::settings::draw(ui, Self::window_rect(), &self.theme, &mut self.settings);
-        // The theme cards choose; the shell owns the theme, so it builds the one asked for.
-        if let Some(choice) = self.settings.chosen_theme.take() {
-            let chosen = match choice {
+        // The theme cards choose; the shell owns the theme. A press arrives as `chosen_theme`,
+        // the stored choice arrives in `theme` with the first load, and one expression covers
+        // both -- the earlier pair of `if`s left the window dark on a press, because the press
+        // had already set both fields equal.
+        let requested = self.settings.chosen_theme.take().unwrap_or(self.settings.theme);
+        if requested != self.theme_choice {
+            self.theme_choice = requested;
+            let chosen = match requested {
                 crate::pages::settings::ThemeChoice::Dark => crate::theme::dark(),
                 crate::pages::settings::ThemeChoice::Light => crate::theme::light(),
                 crate::pages::settings::ThemeChoice::Oled => crate::theme::oled(),
-                // `Sync with system` has no system to ask on this build, so it stays where it
-                // is; the choice is still remembered and shown.
+                // `Sync with system` has no system preference to ask on this build, so it keeps
+                // the scheme it was drawn in; the choice is remembered and shown.
                 crate::pages::settings::ThemeChoice::System => self.theme,
             };
             if chosen != self.theme {
