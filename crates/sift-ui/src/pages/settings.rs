@@ -204,6 +204,57 @@ fn save(state: &State) {
     save_at(state, &store_path());
 }
 
+/// What a button's press does: `Clear cache` asks once, then clears.
+///
+/// Separated from the frame so the rule can be tested without a window -- a button that cleared a
+/// reader's cache on one press would be the wrong behaviour to find by trying it.
+fn button_pressed(state: &mut State, label: &'static str) {
+    if label != CLEAR_CACHE_LABEL {
+        return;
+    }
+    if state.confirming == Some(label) {
+        state.notice = Some(clear_cache());
+        state.confirming = None;
+    } else {
+        state.confirming = Some(label);
+        state.notice = None;
+    }
+}
+
+/// Delete the launcher's HTTP cache and say how much went.
+///
+/// The cache is refetched on demand, so this costs a reader time and nothing else. A directory that
+/// is already gone is not an error: the answer is the same either way.
+fn clear_cache() -> String {
+    let root = crate::data::instances_dir();
+    let Some(data_root) = root.parent() else {
+        return "No cache to clear.".to_owned();
+    };
+    let cache = data_root.join("cache");
+    let freed = directory_size(&cache);
+    match std::fs::remove_dir_all(&cache) {
+        Ok(()) => format!("Cleared {:.1} MB of cached downloads.", freed as f64 / 1_048_576.0),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            "No cache to clear.".to_owned()
+        }
+        Err(error) => format!("Could not clear the cache: {error}"),
+    }
+}
+
+/// How many bytes a directory holds, following its subdirectories.
+fn directory_size(path: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_dir() => directory_size(&entry.path()),
+            _ => entry.metadata().map(|meta| meta.len()).unwrap_or(0),
+        })
+        .sum()
+}
+
 fn save_at(state: &State, path: &std::path::Path) {
     let sliders = state
         .sliders
@@ -283,6 +334,11 @@ pub struct State {
     pub chosen_theme: Option<ThemeChoice>,
     /// The theme the ring is on.
     pub theme: ThemeChoice,
+    /// A button pressed this frame, by its own label.
+    pub pressed_button: Option<&'static str>,
+    /// The button waiting for its second press, and the line to say under it.
+    pub confirming: Option<&'static str>,
+    pub notice: Option<String>,
     /// Option rects painted this frame, and the ones painted last frame: a press is
     /// tested against the second before the body sees it, so an option beats the row.
     pub open_lists: Vec<(Rect, &'static [&'static str], &'static str)>,
@@ -1090,10 +1146,9 @@ const APPEARANCE_BLOCKS: &[Block] = &[
 /// then `Instances` with its three switches (`:279-322`), `Sidebar` with two switches and the
 /// quick-instance count (`:325-376`), and `Play page` with the Jump in switch (`:379-...`).
 ///
-/// `// owed:` the quick-instance count is a `Slider` (`:364`), which is not one of the three
-/// controls this pass draws, so the row shows its value in a select; the signed-out tooltip
-/// on the sync switch (`app.features-settings.sync-across-devices.signed-out-tooltip`) is
-/// also still owed.
+/// The quick-instance count is a `Slider` (`:364`) and is drawn as one. `// owed:` the tooltip
+/// on the sync switch while signed out
+/// (`app.features-settings.sync-across-devices.signed-out-tooltip`).
 const FEATURES_BLOCKS: &[Block] = &[
     Block::Heading {
         text: FEATURES_SYNC_LABEL,
@@ -1289,10 +1344,10 @@ const LANGUAGE_BLOCKS: &[Block] = &[
 /// per entry in `DEFAULT_FEATURE_FLAGS` (`use-app-settings.ts:3-14`) in its declaration
 /// order. Each switch is the flag's own default, so only `Pride Fundraiser` starts on.
 ///
-/// `// owed:` every row also carries a quiet `Reset to default` button (`:63-69`), and the
-/// list is filtered with Fuse (`:20-32`) with `No flags found matching` for an empty result
-/// (`:77-79`, a template literal). A row holds one control here, and the search plate is
-/// drawn rather than searched: both are owed.
+/// Every row the reader has changed carries the reference's quiet `Reset to default`
+/// (`:63-69`). `// owed:` the list is filtered with Fuse (`:20-32`) with
+/// `No flags found matching` for an empty result (`:77-79`, a template literal) -- the search
+/// plate is drawn rather than searched.
 const FEATURE_FLAG_BLOCKS: &[Block] = &[
     Block::Standalone(Control::Text { placeholder: FLAGS_SEARCH_PLACEHOLDER }),
     Block::Row {
@@ -1474,12 +1529,10 @@ const PRIVACY_BLOCKS: &[Block] = &[
 /// `[25, 21, 17, 8]`, then the `border-t` group (`:74`) holding memory allocation
 /// (`:76-106`), Java arguments (`:107-123`) and environment variables (`:124-140`).
 ///
-/// `// owed:` memory allocation is a `Slider` from 512 MB to the machine's memory in 64 MB
-/// steps (`:80-93`) and the two argument fields are `Input`s (`:111-119`, `:128-136`); with no
-/// slider and no text field, each is drawn as a select plate -- the memory one showing the
-/// slider's own `512 MB` min-label, the fields their placeholders. Each Java row's selector is
-/// an `Input` with `Detect` and `Browse` buttons (`JavaSelector.vue:9`, `:75-87`); the row
-/// draws only its path placeholder.
+/// Memory allocation is a `Slider` from 512 MB to the machine's memory in 64 MB steps (`:80-93`)
+/// and the two argument fields are `Input`s (`:111-119`, `:128-136`); all three are drawn as what
+/// they are. `// owed:` each Java row's selector is an `Input` with `Detect` and `Browse` buttons
+/// (`JavaSelector.vue:9`, `:75-87`), and the row draws only its path placeholder.
 const JAVA_AND_MEMORY_BLOCKS: &[Block] = &[
     Block::Heading {
         text: JAVA_INSTALLATIONS_HEADING,
@@ -1953,6 +2006,12 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
 
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         state.open = false;
+    }
+    // A pressed button is acted on here: the one behaviour the source defines is `Clear cache`,
+    // which asks first and then deletes the launcher's own HTTP cache -- refetched on demand, so
+    // nothing a reader made is lost.
+    if let Some(label) = state.pressed_button.take() {
+        button_pressed(state, label);
     }
     if !state.open && state.dirty {
         // Closed after a change. This is the only place the file is written, so a drag does not
@@ -2613,6 +2672,42 @@ fn draw_body(
                 // Left-aligned: the control's right edge is its own width past the inset.
                 let width = control.width(&body);
                 control.draw(&body, theme, left + width, y + control.height() / 2.0);
+                // A standalone button has no row label and no widget behind it, so its own
+                // rectangle is the target: the same left edge the drawing used and its width.
+                if let Control::Button { label, .. } = control {
+                    let rect = Rect::from_min_size(
+                        egui::pos2(left, y),
+                        egui::vec2(width, control.height()),
+                    );
+                    if !state.consumed
+                        && ui.input(|input| input.pointer.any_click())
+                        && pointer.is_some_and(|pointer| rect.contains(pointer))
+                    {
+                        state.pressed_button = Some(label);
+                        state.consumed = true;
+                    }
+                    // What a two-step button owes the reader: why nothing happened yet, and what
+                    // happened when it did.
+                    if label == CLEAR_CACHE_LABEL {
+                        let line = state.notice.clone().or_else(|| {
+                            state
+                                .confirming
+                                .map(|_| "Press again to clear the cache.".to_owned())
+                        });
+                        if let Some(line) = line {
+                            body.text(
+                                egui::pos2(
+                                    rect.right() + 12.0,
+                                    rect.center().y,
+                                ),
+                                Align2::LEFT_CENTER,
+                                line,
+                                fonts::body(12.0),
+                                theme.SECONDARY,
+                            );
+                        }
+                    }
+                }
                 // A standalone field has no row label, so its placeholder is its key.
                 if let Control::Text { placeholder } = control {
                     let rect = Rect::from_min_size(
@@ -3040,6 +3135,27 @@ fn switch_knob(fraction: f32, track: Rect) -> Rect {
         Vec2::splat(SWITCH_KNOB),
     )
 }
+
+    /// The first press only asks; the second clears. `Clear cache` is the one button whose
+    /// behaviour the source defines, and it must not delete anything on a single press.
+    #[test]
+    fn clear_cache_asks_before_it_clears() {
+        let mut state = State::default();
+        button_pressed(&mut state, CLEAR_CACHE_LABEL);
+        assert_eq!(state.confirming, Some(CLEAR_CACHE_LABEL), "the first press asks");
+        assert!(state.notice.is_none(), "nothing is claimed before the second");
+
+        // The second press runs the clear and clears the question.
+        button_pressed(&mut state, CLEAR_CACHE_LABEL);
+        assert_eq!(state.confirming, None, "the question is answered");
+        assert!(state.notice.is_some(), "and the result is reported");
+
+        // Any other button is not this one.
+        let mut other = State::default();
+        button_pressed(&mut other, "Verify and repair");
+        assert_eq!(other.confirming, None);
+        assert!(other.notice.is_none());
+    }
 
 #[cfg(test)]
 mod tests {
