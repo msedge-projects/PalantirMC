@@ -1460,13 +1460,32 @@ fn card(
     );
     painter.galley(egui::pos2(rect.left() + 96.0, rect.top() + 44.0), summary, theme.SECONDARY);
 
-    // The tag pills, each with its own glyph, then the stats on the same row.
+    // The tag pills, each with its own glyph, then the stats on the same row. The row stops
+    // where the stats begin and reports what it could not show as a `+N` chip, which is what the
+    // reference draws -- without it the pills ran under the download count.
     let mut x = rect.left() + 96.0;
-    for tag in &result.tags {
+    let tag_limit = rect.right() - TAG_ROW_RESERVE - (rect.left() + 96.0);
+    let widths: Vec<f32> = result
+        .tags
+        .iter()
+        .map(|tag| {
+            painter
+                .layout_no_wrap(tag.0.clone(), crate::fonts::body(11.0), theme.SECONDARY)
+                .size()
+                .x
+                + 30.0
+        })
+        .collect();
+    let fitted = tags_that_fit(&widths, 6.0, tag_limit);
+    for (index, tag) in result.tags.iter().enumerate() {
+        if index >= fitted {
+            break;
+        }
         let text = painter.layout_no_wrap(tag.0.clone(), crate::fonts::body(11.0), theme.SECONDARY);
+        let pill_width = text.size().x + 30.0;
         let pill = Rect::from_min_size(
             egui::pos2(x, rect.top() + 104.0),
-            egui::vec2(text.size().x + 30.0, 24.0),
+            egui::vec2(pill_width, 24.0),
         );
         painter.rect_filled(pill, 12, theme.BUTTON_BG);
         icons::draw(
@@ -1484,6 +1503,24 @@ fn card(
             theme.SECONDARY,
         );
         x = pill.right() + 6.0;
+    }
+    if fitted < result.tags.len() {
+        let rest = result.tags.len() - fitted;
+        let chip = painter.layout_no_wrap(
+            format!("+{rest}"),
+            crate::fonts::body(11.0),
+            theme.SECONDARY,
+        );
+        let plate = Rect::from_min_size(
+            egui::pos2(x, rect.top() + 104.0),
+            egui::vec2(chip.size().x + 20.0, 24.0),
+        );
+        painter.rect_filled(plate, 12, theme.BUTTON_BG);
+        painter.galley(
+            egui::pos2(plate.left() + 10.0, plate.center().y - chip.size().y / 2.0),
+            chip,
+            theme.SECONDARY,
+        );
     }
 
     // The stats and the install button, right-aligned: downloads, followers, updated.
@@ -1600,6 +1637,24 @@ pub struct Card {
     /// The project icon's URL.
     pub icon: String,
 }
+
+/// How many of a card's tags fit before `limit`, and how many are left over.
+///
+/// A tag that does not fit is not shown and everything from it on is counted in the chip, which is
+/// what the reference's `+N` reports.
+fn tags_that_fit(widths: &[f32], gaps: f32, limit: f32) -> usize {
+    let mut x = 0.0;
+    for (index, width) in widths.iter().enumerate() {
+        if x + width > limit {
+            return index;
+        }
+        x += width + gaps;
+    }
+    widths.len()
+}
+
+/// The room the stats keep at the right of a card's tag row: three stats and their glyphs.
+const TAG_ROW_RESERVE: f32 = 260.0;
 
 /// The icon the reference puts beside a category, by the category's own name; anything it does
 /// not name gets the plain tag.
@@ -1735,9 +1790,21 @@ fn ellipsise(text: &str, limit: usize) -> String {
 }
 
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tag that does not fit stops the row, and the count it leaves is what the `+N` says.
+    #[test]
+    fn tags_stop_before_the_stats() {
+        // Three 100-wide pills with 6 between them: 100 + 6 + 100 = 206 fits two.
+        assert_eq!(tags_that_fit(&[100.0, 100.0, 100.0], 6.0, 206.0), 2);
+        assert_eq!(tags_that_fit(&[100.0, 100.0, 100.0], 6.0, 318.0), 3);
+        // Nothing fits in no room, and an empty row is empty.
+        assert_eq!(tags_that_fit(&[100.0], 6.0, 99.0), 0);
+        assert_eq!(tags_that_fit(&[], 6.0, 100.0), 0);
+    }
 
     /// A summary inside the limit is returned untouched: a card must not pay for an
     /// ellipsis it does not need.
