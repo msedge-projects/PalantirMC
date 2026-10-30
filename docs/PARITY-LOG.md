@@ -965,6 +965,31 @@ in the shell's match rather than a silent no-op.
 free. And `git push` is refused with a 403 while the active `gh` account is `MSedgeMC` — this
 repository belongs to `msedge-projects`.
 
+### The chosen theme comes back — 0.1.30
+
+Both halves verified on the VM from a clean checkout of `master`:
+
+```
+"theme": "Light"          the file after picking Light
+                           the next start opened light, with Light ringed
+```
+
+The apply path is one expression now. A press arrives as `chosen_theme`, the stored choice arrives
+in `theme` on the first load, and both go through the same comparison — the earlier pair of `if`s
+compared two fields the press had just set equal, which is how a ringed Light card could leave the
+window dark while the ring said otherwise.
+
+**A workflow trap worth recording.** `push_one.py` resets the VM to `origin/master` before copying
+the files named on its command line, so an **uncommitted edit to any other file is erased** by the
+next copy. Several rounds of "the shell change did nothing" this session were exactly that: the
+shell edit was gone by the time the binary was built. Uncommitted work now goes up as a commit
+before anything else is pushed to the VM.
+
+**And a process error of mine:** stripping the debug prints from that block took one brace with it
+and I committed it, so `master` did not build until the next commit. It is the case for the rule the
+repo already has — fix forward, never amend — but it is still a broken commit that a `cargo build`
+before `git commit` would have caught.
+
 ### Open after this pass
 
 | # | Region | What differs |
