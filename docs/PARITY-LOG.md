@@ -1232,10 +1232,12 @@ refetched on demand, so only time is lost -- and reports the size that went. `bu
 the rule and its test pins the three cases, because a button that cleared a cache on one press is the
 wrong thing to learn by trying.
 
-**Owed, and recorded as such:** no capture shows the press working. Three attempts to reach the
-Troubleshooting tab missed its rail row, and the row-rect print I added to aim with never fired --
-the rail's rows are computed by `rail_rows`, and my print went into a loop that does not iterate
-them. The next attempt should print from `rail_rows`' own output.
+**Verified afterwards, in three presses:** the first press draws `Press again to clear the cache.`;
+the second, with no cache, draws `No cache to clear.`; and with a 2 MB cache planted by hand it draws
+`Cleared 1.9 MB of cached downloads.` and the directory is gone.
+
+The tab was reachable all along -- my clicks were landing below its row. Printing `rail_rows`' own
+output put Troubleshooting at y 743-773, where I had been aiming at 792.
 
 **Three stale notes corrected**, which is worth more than it sounds: the quick-instance count and the
 memory slider both claimed to be missing their sliders, and the feature flags claimed `Reset to
