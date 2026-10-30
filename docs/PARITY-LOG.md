@@ -1129,6 +1129,18 @@ for the default feed and wrong once a facet is chosen.
 Still owed on Discover: `Hide already installed` and its switch, and the `See more` link under the
 list.
 
+### The rail names its hosting item — 0.1.40
+
+The tooltip over that item said `Servers`, the heading of the page it opens. The reference's own
+tooltip names its hosting product there instead, so this one says `Sift Hosting` — the word the
+page's heading and the promo banner already use.
+
+Found by accident while trying to capture Skins: the click landed on this item and the tooltip was
+the evidence. **The Skins comparison is still not taken** — two attempts opened Servers and
+Screenshots instead, and the reference's rail y-positions are not where my readings of its captures
+put them. The next attempt should ask the reference for its rail rects the way this build's panel
+now prints its own, rather than measuring a screenshot.
+
 ### Open after this pass
 
 | # | Region | What differs |
