@@ -1207,6 +1207,20 @@ The earlier attempt reserved the height without moving the drawing, which would 
 scroll below the grid; that was backed out before it shipped and is recorded in the 0.1.43 entry. A
 reservation and its drawing belong in one change.
 
+### Discover's sidebar is complete — 0.1.45
+
+`Hide already installed` sits above the `Category` heading with a switch, the list shows four rows,
+and `See more` appends the rest -- the reference's arrangement.
+
+The switch needed data nothing had: **no instance recorded which project it came from**, in either
+`instance.cfg` or `mmc-pack.json`. So the installer now writes `sift.project.id` beside Prism's own
+keys (Prism ignores settings it does not know), the library reads it back, and the filter hides a
+result only when that id matches. Instances installed before this have no id and are never hidden,
+which is the honest behaviour rather than a guess from an instance's name.
+
+Verified on the VM: the switch, the heading, four rows and the `See more` link all draw, with the
+chosen category in the brand colour.
+
 ### Open after this pass
 
 | # | Region | What differs |
