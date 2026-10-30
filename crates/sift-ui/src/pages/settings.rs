@@ -107,6 +107,9 @@ fn known_labels() -> Vec<&'static str> {
             match block {
                 Block::Row { label, .. } => labels.push(*label),
                 Block::Heading { text, .. } => labels.push(*text),
+                // A standalone field has no label: `place_field` keys it by its placeholder, so
+                // the placeholder is what a stored value arrives under.
+                Block::Standalone(Control::Text { placeholder }) => labels.push(*placeholder),
                 _ => {}
             }
         }
@@ -946,6 +949,12 @@ impl ThemeChoice {
 
 /// One row of an open select: `Option.vue`'s 28-point line.
 const OPTION_HEIGHT: f32 = 28.0;
+
+/// The row's `Reset to default`: a quiet word-button the width of its own text.
+const RESET_WIDTH: f32 = 96.0;
+const RESET_HEIGHT: f32 = 18.0;
+/// Room between that button and the control it resets.
+const RESET_GAP: f32 = 12.0;
 
 /// A chip's box, gap and padding, from `Chips.vue`: `px-3 py-1` around 12-point text.
 const CHIP_HEIGHT: f32 = 26.0;
@@ -2274,6 +2283,25 @@ fn resolve_select(
     resolved
 }
 
+/// Whether the reader has changed this row away from what its `Block` declares.
+fn row_changed(state: &State, label: &str) -> bool {
+    state.sliders.iter().any(|(known, _)| *known == label)
+        || state.texts.iter().any(|(known, _)| *known == label)
+        || state.chips.iter().any(|(known, _)| *known == label)
+        || state.switches.iter().any(|(known, _)| *known == label)
+        || state.selects.iter().any(|(known, _)| *known == label)
+}
+
+/// Put a row back to the value its `Block` declares, whatever kind of control it holds.
+fn reset_row(state: &mut State, label: &str) {
+    state.sliders.retain(|(known, _)| *known != label);
+    state.texts.retain(|(known, _)| *known != label);
+    state.chips.retain(|(known, _)| *known != label);
+    state.switches.retain(|(known, _)| *known != label);
+    state.selects.retain(|(known, _)| *known != label);
+    state.dirty = true;
+}
+
 /// A field's rect, right-aligned on a row's first line.
 fn rect_for_field(right: f32, y: f32) -> Rect {
     Rect::from_center_size(
@@ -2531,6 +2559,33 @@ fn draw_body(
                 );
                 if let Control::Text { placeholder } = control {
                     place_field(ui, state, label, placeholder, rect_for_field(right, y));
+                }
+                // A row that differs from its declared default offers the way back, just left of
+                // the control it belongs to.
+                if row_changed(state, label) {
+                    let width = control.width(&body);
+                    let pill = Rect::from_min_size(
+                        egui::pos2(
+                            right - width - RESET_GAP - RESET_WIDTH,
+                            y + (ROW_LABEL_SIZE - RESET_HEIGHT) / 2.0,
+                        ),
+                        egui::vec2(RESET_WIDTH, RESET_HEIGHT),
+                    );
+                    let hovered = pointer.is_some_and(|pointer| pill.contains(pointer));
+                    painter.text(
+                        pill.center(),
+                        Align2::CENTER_CENTER,
+                        "Reset to default",
+                        fonts::body(10.5),
+                        if hovered { theme.BASE } else { theme.SECONDARY },
+                    );
+                    if !state.consumed
+                        && ui.input(|input| input.pointer.any_click())
+                        && hovered
+                    {
+                        reset_row(state, label);
+                        state.consumed = true;
+                    }
                 }
                 height + ROW_GAP
             }
@@ -3034,6 +3089,16 @@ mod tests {
 
     /// A heading can carry a control, and a value whose row is not a known label is dropped on
     /// the next start -- which is how a reader's language choice vanished once.
+    /// A standalone field is keyed by its placeholder, so a stored value under that key must
+    /// survive the load -- the hook text was dropped once for want of this entry.
+    #[test]
+    fn a_standalone_field_is_a_known_key() {
+        assert!(
+            known_labels().contains(&PRE_LAUNCH_PLACEHOLDER),
+            "the pre-launch field's key is its placeholder"
+        );
+    }
+
     #[test]
     fn a_heading_with_a_control_is_a_known_label() {
         let labels = known_labels();
