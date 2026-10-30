@@ -64,6 +64,8 @@ impl Rail {
     pub fn short(self) -> &'static str {
         match self {
             Rail::Discover => "Discover",
+            // The reference's tooltip and heading both say `Skin selector`.
+            Rail::Skins => "Skin selector",
             // The reference names its hosting product here instead of the page's heading, which
             // is `Servers`. Ours is Sift Hosting, as every other string in this build is.
             Rail::Servers => "Sift Hosting",
