@@ -1197,6 +1197,16 @@ Reserving the height was tried and backed out: it left empty scroll below the gr
 the drawing. The fix is to put the section inside the grid's own scrolling column, which is how the
 reference lays its page out.
 
+### The default skins scroll with the cards — 0.1.44
+
+The section moved into the grid's own scrolling column, so it has room: scrolling past the cards
+reaches `Default skins` and its four characters, with the brand check on the one in use. The
+reference lays its page out the same way — one column, saved skins then default skins.
+
+The earlier attempt reserved the height without moving the drawing, which would have left empty
+scroll below the grid; that was backed out before it shipped and is recorded in the 0.1.43 entry. A
+reservation and its drawing belong in one change.
+
 ### Open after this pass
 
 | # | Region | What differs |
