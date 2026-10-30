@@ -1141,6 +1141,30 @@ Screenshots instead, and the reference's rail y-positions are not where my readi
 put them. The next attempt should ask the reference for its rail rects the way this build's panel
 now prints its own, rather than measuring a screenshot.
 
+### Skins verified — 0.1.41
+
+Captured beside the reference at last. The two agree on the heading (`Skin selector`), the left
+preview with `Edit skin` under it, a `Saved skins` section holding an `Add skin / Drag and drop`
+card, and a `Default skins` section.
+
+What the comparison found, largest first:
+
+| | Reference | This build |
+| --- | --- | --- |
+| Skins are drawn as | rendered characters, 3D in the preview with `Drag to rotate` | **shirt glyphs** — no skin texture is decoded |
+| Header controls | the title alone | a search field, `Wide`/`Slim` chips and an `Add skin` button |
+| `Default skins` | four previews with a check on the selected | the line `Sign in to your Minecraft account to use its default skins.` |
+| Foot of the page | a demo-account bar with `Sign in to Microsoft` | nothing |
+| Rail tooltip | `Skin selector` | was `Skins`; fixed here |
+
+The first row is the real work: skins are PNG textures on a fixed atlas layout, and drawing them on
+a body needs that layout plus a mesh. That is a slice of its own rather than a tweak, and it is the
+same gap that makes the instance pages' skin-less look different from the reference's.
+
+Reaching this capture took three attempts. Hovering the reference's rail and reading its own
+tooltips gave the pitch -- `Screenshots` at y=250, not the ~314 my measurements suggested -- which is
+the same lesson as the Discover rows: ask the app, do not measure the picture.
+
 ### Open after this pass
 
 | # | Region | What differs |
