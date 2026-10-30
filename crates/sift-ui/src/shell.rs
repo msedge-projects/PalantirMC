@@ -103,6 +103,10 @@ pub struct Shell {
     search: crate::widgets::search::Search,
     /// The network search behind that field.
     results: crate::search::Search,
+    /// Which page of the results the reader is on, counted from zero.
+    page: u32,
+    /// The question the page belongs to, so a new one starts at the first page.
+    asked: String,
     /// Which of the tab strip's kinds the search is for: `modpack`, `mod`, `resourcepack`,
     /// `datapack`, `shader` or `plugin`.
     project_type: &'static str,
@@ -156,6 +160,8 @@ impl Default for Shell {
             project_state: crate::pages::project::State::default(),
             search: crate::widgets::search::Search::default(),
             results: crate::search::Search::default(),
+            page: 0,
+            asked: String::new(),
             project_type: "modpack",
             sort_index: "relevance",
             page_size: 20,
@@ -631,11 +637,22 @@ impl Shell {
                     // A search that matched nothing says so; there is no range to print.
                     return Some("No results".to_owned());
                 }
-                let first = 1_u64;
-                let last = hits.len() as u64;
-                Some(format!("{first}  -  {last}  of  {total}"))
+                let first = self.page as u64 * self.page_size as u64 + 1;
+                let last = first + hits.len() as u64 - 1;
+                Some(format!("{first} - {last} of {total}"))
             }
             _ => None,
+        }
+    }
+
+    /// How many pages the last answer needs, counted from one.
+    fn result_pages(&self) -> u64 {
+        match self.results.state() {
+            crate::search::State::Ready { total, .. } => {
+                let size = self.page_size.max(1) as u64;
+                ((total + size - 1) / size).max(1)
+            }
+            _ => 1,
         }
     }
 
@@ -1009,7 +1026,20 @@ impl Shell {
             let _ = &self.open_select;
         }
         if let Some(query) = self.search.query().map(str::to_owned) {
-            self.results.request(&query, self.project_type, self.sort_index, self.page_size);
+            // A different question starts at the first page: the offset is part of the request
+            // now, so paging and then typing would ask for page three of a search with one page.
+            let question = format!("{query}|{}|{}|{}", self.project_type, self.sort_index, self.page_size);
+            if self.asked != question {
+                self.asked = question;
+                self.page = 0;
+            }
+            self.results.request(
+                &query,
+                self.project_type,
+                self.sort_index,
+                self.page_size,
+                self.page.saturating_mul(self.page_size),
+            );
         }
         self.results.poll();
         // `search.ui` took `ui` mutably, which ended the painter borrow taken above; the
@@ -1085,14 +1115,71 @@ impl Shell {
         // box is empty there is no search, and the reference's number is what a first capture
         // happened to show rather than a fact about anything -- so an empty box says nothing
         // rather than a stale count.
+        // The page controls, where the reference puts its numbered strip. `// owed:` that strip
+        // -- the numbers with an ellipsis and the last page -- is not drawn; what is here pages,
+        // which is the part a reader needs. Laid out from the right edge so the parts cannot run
+        // into each other whatever the numbers say.
         if let Some(range) = self.result_range() {
-            painter.text(
-                egui::pos2(row.right() - 110.0, row.center().y),
-                Align2::LEFT_CENTER,
-                range,
-                crate::fonts::body(13.0),
+            let pages = self.result_pages();
+            let middle = row.center().y;
+            let right = row.right();
+            // An empty search says so where the count would be; there are no pages to turn.
+            if range == "No results" {
+                ui.painter().text(
+                    egui::pos2(right, middle),
+                    Align2::RIGHT_CENTER,
+                    range,
+                    crate::fonts::body(12.0),
+                    self.theme.SECONDARY,
+                );
+            } else {
+            let next = egui::Rect::from_center_size(
+                egui::pos2(right - 14.0, middle),
+                egui::Vec2::splat(22.0),
+            );
+            let pages_right = next.left() - 8.0;
+            let count = egui::text::LayoutJob::simple_singleline(
+                format!("{} / {}", self.page + 1, pages.max(1)),
+                crate::fonts::body(12.0).clone(),
                 self.theme.SECONDARY,
             );
+            let width = ui.painter().layout_job(count.clone()).size().x;
+            ui.painter().galley(
+                egui::pos2(pages_right - width, middle - 7.0),
+                ui.painter().layout_job(count),
+                self.theme.SECONDARY,
+            );
+            let prev = egui::Rect::from_center_size(
+                egui::pos2(pages_right - width - 26.0, middle),
+                egui::Vec2::splat(22.0),
+            );
+            for (rect, step, enabled) in [
+                (prev, -1_i64, self.page > 0),
+                (next, 1, (self.page as u64 + 1) < pages.max(1)),
+            ] {
+                let ink = if enabled {
+                    self.theme.BASE
+                } else {
+                    self.theme.SECONDARY
+                };
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    if step < 0 { "<" } else { ">" },
+                    crate::fonts::body(13.0),
+                    ink,
+                );
+                if enabled
+                    && ui
+                        .interact(rect, egui::Id::new(("page-step", step)), egui::Sense::click())
+                        .clicked()
+                {
+                    self.page = (self.page as i64 + step).max(0) as u32;
+                    self.results.forget();
+                    ui.ctx().request_repaint();
+                }
+            }
+            }
         }
 
         // The list, via fastframe's scrolling: 120 points per notch rather than egui's 40.
