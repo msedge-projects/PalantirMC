@@ -59,10 +59,15 @@ const RULE: f32 = crate::theme::STROKE_WIDTH;
 
 /// The Discover panel's own heading, where the other pages say `News`.
 const CATEGORY: &str = "Category";
+/// The link under the list, from `app.browse.see-more` and `app.browse.see-less`.
+const SEE_MORE: &str = "See more";
+/// The switch above the list, from `app.browse.hide-installed`.
+const HIDE_INSTALLED: &str = "Hide already installed";
+const SEE_LESS: &str = "See less";
 
 /// One category row's height, and how many the panel lists before a `See more` would go.
 const CATEGORY_ROW: f32 = 26.0;
-const CATEGORY_ROWS: usize = 6;
+const CATEGORY_ROWS: usize = 4;
 
 /// The API's category ids are lowercase; a reader sees them capitalised.
 fn capitalised(name: &str) -> String {
@@ -246,6 +251,10 @@ const CARD_RADIUS: u8 = crate::theme::RADIUS_MD;
 pub enum Step {
     /// A category the reader pressed, as the API spells it.
     Category(String),
+    /// The list's `See more` / `See less`.
+    MoreCategories,
+    /// The `Hide already installed` switch.
+    HideInstalled,
     /// `Create first instance`.
     CreateInstance,
     /// `Sign in to Minecraft`.
@@ -263,6 +272,8 @@ impl Step {
         match self {
             // A category press carries its own name and never asks for a step label.
             Step::Category(_) => "",
+            Step::MoreCategories => "",
+            Step::HideInstalled => "",
             Step::CreateInstance => STEPS[0],
             Step::Minecraft => STEPS[1],
             Step::Modrinth => STEPS[2],
@@ -328,6 +339,8 @@ pub fn draw(
     account: Option<&str>,
     categories: &[String],
     facet: Option<&str>,
+    expanded: bool,
+    hide_installed: bool,
 ) -> Option<Step> {
     let painter = ui.painter();
 
@@ -438,18 +451,73 @@ pub fn draw(
         // The reference's Discover panel: a `Category` heading and its rows, in the slot the
         // other pages give to `News`. A press reports the category, which the shell turns into
         // a facet; the chosen one is drawn in the brand colour.
-        painter.text(
+        // `Hide already installed`, above the heading, with the reference's switch on the right.
+        let switch_row = Rect::from_min_size(
             egui::pos2(column.left(), plan.news),
+            egui::vec2(column.width(), CATEGORY_ROW),
+        );
+        let over_switch = pointer.is_some_and(|pointer| switch_row.contains(pointer));
+        if over_switch && clicked {
+            pressed = Some(Step::HideInstalled);
+        }
+        painter.text(
+            egui::pos2(switch_row.left() + 4.0, switch_row.center().y),
+            Align2::LEFT_CENTER,
+            HIDE_INSTALLED,
+            fonts::body(13.0),
+            if over_switch {
+                theme.CONTRAST
+            } else {
+                theme.BASE
+            },
+        );
+        let track = Rect::from_center_size(
+            egui::pos2(switch_row.right() - 18.0, switch_row.center().y),
+            egui::vec2(34.0, 18.0),
+        );
+        painter.rect_filled(
+            track,
+            9,
+            if hide_installed {
+                theme.BRAND
+            } else {
+                theme.BUTTON_BG
+            },
+        );
+        painter.circle_filled(
+            egui::pos2(
+                if hide_installed {
+                    track.right() - 9.0
+                } else {
+                    track.left() + 9.0
+                },
+                track.center().y,
+            ),
+            6.5,
+            theme.ACCENT_CONTRAST,
+        );
+        painter.text(
+            egui::pos2(column.left(), plan.news + CATEGORY_ROW + 8.0),
             Align2::LEFT_TOP,
             CATEGORY,
             fonts::semibold(HEADING_SIZE),
             theme.CONTRAST,
         );
-        for (index, name) in categories.iter().take(CATEGORY_ROWS).enumerate() {
+        let shown = if expanded {
+            categories.len()
+        } else {
+            CATEGORY_ROWS.min(categories.len())
+        };
+        for (index, name) in categories.iter().take(shown).enumerate() {
             let row = Rect::from_min_size(
                 egui::pos2(
                     column.left(),
-                    plan.news + HEADING_LINE + HEADING_TO_BODY + index as f32 * CATEGORY_ROW,
+                    plan.news
+                        + CATEGORY_ROW
+                        + 8.0
+                        + HEADING_LINE
+                        + HEADING_TO_BODY
+                        + index as f32 * CATEGORY_ROW,
                 ),
                 egui::vec2(column.width(), CATEGORY_ROW),
             );
@@ -471,6 +539,32 @@ pub fn draw(
                 capitalised(name),
                 fonts::body(13.0),
                 ink,
+            );
+        }
+        // `See more` / `See less`, appending the rest of the API's categories.
+        if categories.len() > CATEGORY_ROWS {
+            let link = Rect::from_min_size(
+                egui::pos2(
+                    column.left(),
+                    plan.news
+                        + CATEGORY_ROW
+                        + 8.0
+                        + HEADING_LINE
+                        + HEADING_TO_BODY
+                        + shown as f32 * CATEGORY_ROW,
+                ),
+                egui::vec2(column.width(), CATEGORY_ROW),
+            );
+            let over = pointer.is_some_and(|pointer| link.contains(pointer));
+            if over && clicked {
+                pressed = Some(Step::MoreCategories);
+            }
+            painter.text(
+                egui::pos2(link.left() + 4.0, link.center().y),
+                Align2::LEFT_CENTER,
+                if expanded { SEE_LESS } else { SEE_MORE },
+                fonts::body(13.0),
+                if over { theme.CONTRAST } else { theme.BRAND },
             );
         }
     } else {

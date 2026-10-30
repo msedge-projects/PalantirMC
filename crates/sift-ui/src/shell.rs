@@ -124,6 +124,10 @@ pub struct Shell {
     categories: Vec<String>,
     /// Whether the category list has been asked for.
     categories_asked: bool,
+    /// Whether the category list shows all of them or just the first few.
+    categories_expanded: bool,
+    /// Whether results whose project is already installed are hidden.
+    hide_installed: bool,
     /// The worker's answer, until it is taken.
     categories_rx: Option<std::sync::mpsc::Receiver<Vec<String>>>,
     /// The chosen category as a facet group, e.g. `["categories:adventure"]`; `None` is no
@@ -187,6 +191,8 @@ impl Default for Shell {
             facet: None,
             categories: Vec::new(),
             categories_asked: false,
+            categories_expanded: false,
+            hide_installed: false,
             categories_rx: None,
             project_type: "modpack",
             sort_index: "relevance",
@@ -973,6 +979,8 @@ impl Shell {
             signed_in.as_deref(),
             &self.categories,
             self.facet.as_deref(),
+            self.categories_expanded,
+            self.hide_installed,
         );
         let pressed = step.is_some();
         if let Some(step) = step {
@@ -986,6 +994,12 @@ impl Shell {
         match step {
             // A category press is a filter, not a step: it replaces whatever was chosen, or
             // clears it when the same one is pressed again.
+            crate::panel::Step::HideInstalled => {
+                self.hide_installed = !self.hide_installed;
+            }
+            crate::panel::Step::MoreCategories => {
+                self.categories_expanded = !self.categories_expanded;
+            }
             crate::panel::Step::Category(facet) => {
                 self.facet = if self.facet.as_deref() == Some(facet.as_str()) {
                     None
@@ -1363,9 +1377,17 @@ impl Shell {
                 // enough to scroll: a capture compares anatomy, not the catalogue.
                 // Real results when the search has them; the reference's own six cards while
                 // the box is empty, so the page is never a blank rectangle.
+                // The projects this launcher installed, for the switch below. An instance
+                // installed before the id was recorded simply never matches.
+                let installed: Vec<&str> = self
+                    .instances
+                    .iter()
+                    .filter_map(|entry| entry.project.as_deref())
+                    .collect();
                 let live: Vec<Card> = match self.results.state() {
                     crate::search::State::Ready { hits, .. } => hits
                         .iter()
+                        .filter(|hit| !self.hide_installed || !installed.contains(&hit.id.as_str()))
                         .map(|hit| Card {
                             // The project's id, which is what the Install button is keyed by
                             // and what the version request needs; a card that dropped it

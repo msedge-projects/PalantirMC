@@ -257,8 +257,32 @@ fn install_pack(job: &Job, generation: u64, sender: &Sender<Reply>) -> Result<St
     // Pack tabs: this button installs packs into instances of their own.
     let installed =
         install::install_pack_archive(&wire, &paths, &archive, &job.title, &mut progress)?;
+    // Which project this instance came from, so the Discover list can tell what is installed.
+    record_project(&paths, &installed.id, &job.project);
     // The engine's sentence, because it is the one that names both the pack and the instance.
     Ok(installed.summary(&job.title))
+}
+
+/// Note the project an instance was installed from, in the instance's own settings file.
+///
+/// The key is this launcher's own: Prism ignores settings it does not know, so writing it beside
+/// its own is safe, and an instance installed before this existed simply has `None`.
+fn record_project(paths: &SiftPaths, instance: &str, project: &str) {
+    let cfg = paths
+        .instances_dir()
+        .join(instance)
+        .join(crate::data::INSTANCE_CFG);
+    let Ok(mut text) = std::fs::read_to_string(&cfg) else {
+        return;
+    };
+    if text.contains(crate::data::PROJECT_KEY) {
+        return;
+    }
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(&format!("{}={project}\n", crate::data::PROJECT_KEY));
+    let _ = std::fs::write(&cfg, text);
 }
 
 /// Send one word to the frame, ignoring a window that has gone.

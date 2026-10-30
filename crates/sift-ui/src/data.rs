@@ -17,6 +17,11 @@ use sift_core::instance::Instance;
 use sift_core::paths::{platform_data_root, System};
 
 /// One instance, as a card needs it.
+/// The instance settings file, and this launcher's key inside it for the project an instance
+/// was installed from.
+pub const INSTANCE_CFG: &str = "instance.cfg";
+pub const PROJECT_KEY: &str = "sift.project.id";
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     /// The folder's name, which is also the instance's stable key.
@@ -30,6 +35,8 @@ pub struct Entry {
     pub version: String,
     /// When it was last launched, in milliseconds since the epoch; `0` when never.
     pub last_played: i64,
+    /// The project this instance was installed from, when this launcher installed it.
+    pub project: Option<String>,
 }
 
 /// Where this launcher keeps its instances.
@@ -68,11 +75,20 @@ pub fn load() -> (Vec<Entry>, usize) {
             loader,
             version,
             last_played: instance.last_launch_millis(),
+            project: project_of(&instance),
         });
     }
     // The reference sorts by most recently played, with never-played last.
     entries.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.name.cmp(&b.name)));
     (entries, skipped)
+}
+
+/// The project id recorded in the instance's own settings, if this launcher installed it.
+fn project_of(instance: &Instance) -> Option<String> {
+    let text = std::fs::read_to_string(instance.root().join(INSTANCE_CFG)).ok()?;
+    text.lines()
+        .find_map(|line| line.strip_prefix(PROJECT_KEY)?.strip_prefix('=').map(str::to_owned))
+        .filter(|id| !id.is_empty())
 }
 
 /// The loader and Minecraft version, from the instance's pack profile.
