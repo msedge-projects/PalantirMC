@@ -1207,12 +1207,17 @@ impl Shell {
                             title: hit.title.clone(),
                             author: hit.author.clone(),
                             summary: hit.summary.clone(),
-                            // The loaders the hit carries, which is what the reference shows
-                            // on a card that came from a search rather than a project page.
+                            // The categories then the loaders, which is the order the
+                            // reference draws a search card's tags in.
                             tags: hit
-                                .loaders
+                                .categories
                                 .iter()
-                                .map(|loader| (loader.clone(), Glyph::Box))
+                                .map(|category| (category.clone(), category_glyph(category)))
+                                .chain(
+                                    hit.loaders
+                                        .iter()
+                                        .map(|loader| (loader.clone(), Glyph::Box)),
+                                )
                                 .collect(),
                             downloads: hit.downloads.clone(),
                             followers: hit.followers.clone(),
@@ -1529,6 +1534,19 @@ pub struct Card {
     pub updated: String,
     /// The project icon's URL.
     pub icon: String,
+}
+
+/// The icon the reference puts beside a category, by the category's own name; anything it does
+/// not name gets the plain tag.
+fn category_glyph(category: &str) -> Glyph {
+    match category {
+        "Client" => Glyph::Monitor,
+        "Lightweight" => Glyph::Sparkles,
+        "Multiplayer" => Glyph::Users,
+        "Optimization" => Glyph::Rocket,
+        "Adventure" | "Challenging" | "Combat" => Glyph::Compass,
+        _ => Glyph::Tag,
+    }
 }
 
 /// Six results with the reference's own content, so a capture shows the real anatomy rather

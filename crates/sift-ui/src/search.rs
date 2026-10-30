@@ -37,6 +37,9 @@ pub struct Hit {
     pub followers: String,
     /// The loader or loaders the project supports, as the API lists them.
     pub loaders: Vec<String>,
+    /// The project's display categories (`client`, `optimization`, ...), which the API sends in
+    /// the same array as the loaders and the reference draws ahead of them.
+    pub categories: Vec<String>,
 }
 
 /// The search's state.
@@ -191,6 +194,14 @@ fn run(
     Ok((page.hits.into_iter().map(hit).collect(), total))
 }
 
+/// Whether a name in the API's `categories` array is a loader rather than a display category.
+fn is_loader(category: &str) -> bool {
+    matches!(
+        category,
+        "fabric" | "forge" | "neoforge" | "quilt" | "liteloader" | "risugami"
+    )
+}
+
 /// One API hit, as a card needs it.
 fn hit(source: sift_net::modrinth::ModrinthSearchHit) -> Hit {
     Hit {
@@ -200,7 +211,22 @@ fn hit(source: sift_net::modrinth::ModrinthSearchHit) -> Hit {
         summary: source.description,
         icon: source.icon_url,
         downloads: abbreviate(source.downloads),
-        followers: abbreviate(source.follows),
+        followers: thousands(source.follows),
+        categories: source
+            .categories
+            .iter()
+            .filter(|category| !is_loader(category))
+            .map(|category| {
+                // The API's ids are lowercase and hyphenated; a card shows them capitalised.
+                let spaced = category.replace('-', " ");
+                let mut letters = spaced.chars();
+                match letters.next() {
+                    Some(first) => format!("{}{}", first.to_uppercase(), letters.as_str()),
+                    None => String::new(),
+                }
+            })
+            .filter(|category| !category.is_empty())
+            .collect(),
         loaders: source
             .categories
             .into_iter()
@@ -232,6 +258,22 @@ fn hit(source: sift_net::modrinth::ModrinthSearchHit) -> Hit {
 /// (`19.38M`, `15.36M`, `2.7K`). A number under a thousand is shown as itself. The project
 /// page prints downloads with one decimal, so a page that wants that formatting rounds this
 /// result rather than growing a second rule here.
+/// A follower count, printed in full with thin thousands separators -- the reference shows
+/// `5,023` beside a download count it writes as `19.62M`, and `662` and `2,744` on the cards
+/// below it.
+pub fn thousands(count: u64) -> String {
+    let digits = count.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// A download count, abbreviated where the reference abbreviates.
 pub fn abbreviate(count: u64) -> String {
     match count {
         0..=999 => count.to_string(),
@@ -262,9 +304,19 @@ mod tests {
         assert_eq!(abbreviate(1_000), "1.0K");
         assert_eq!(abbreviate(15_360_000), "15.36M");
         assert_eq!(abbreviate(19_380_000), "19.38M");
-        // The reference prints 2.7K for 2,732 followers, and the project page prints 19.4M
-        // by rounding this result.
+        // Downloads are a size rule: one decimal in thousands, two in millions.
         assert_eq!(abbreviate(2_732), "2.7K");
+    }
+
+    /// Followers are not abbreviated at all: the reference prints them in full with separators,
+    /// which is how a card can show `5,023` next to `19.62M`.
+    #[test]
+    fn follower_counts_keep_their_digits() {
+        assert_eq!(thousands(662), "662");
+        assert_eq!(thousands(2_744), "2,744");
+        assert_eq!(thousands(5_023), "5,023");
+        assert_eq!(thousands(1_234_567), "1,234,567");
+        assert_eq!(thousands(0), "0");
     }
 
     /// A query that is empty or unchanged is not asked again: the second request would be the
