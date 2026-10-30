@@ -1165,6 +1165,25 @@ Reaching this capture took three attempts. Hovering the reference's rail and rea
 tooltips gave the pitch -- `Screenshots` at y=250, not the ~314 my measurements suggested -- which is
 the same lesson as the Discover rows: ask the app, do not measure the picture.
 
+### Skins are characters now — 0.1.42
+
+The page's own largest gap is closed: a skin draws as a character, composed from its 64x64 atlas by
+`compose_front` -- six front faces into a 16x32 view -- and shown in the preview column and on its
+card.
+
+The skins are authored here, because the reference's are Mojang's defaults. Two are written as
+string art with a palette beside them; a skin without art keeps the glyph, which is why only the
+first card shows a character in the capture.
+
+That fallback came out of a panic: `SKINS` holds more entries than `ART`, so the first build indexed
+past the end on the second card and took the window down. The guard is one line and the reason is
+worth keeping -- a list and its parallel data drift.
+
+Still different from the reference on this page: the reference's preview is a 3D model with
+`Drag to rotate` and the whole body is modelled, not a still front view; its header has no search,
+chips or Add button; its `Default skins` shows four previews; and its foot carries the demo-account
+bar. All of those are listed, not approximated.
+
 ### Open after this pass
 
 | # | Region | What differs |
