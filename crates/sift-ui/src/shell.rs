@@ -60,6 +60,14 @@ impl Rail {
         }
     }
 
+    /// The name the rail's tooltip shows on hover, which is shorter than the page title.
+    pub fn short(self) -> &'static str {
+        match self {
+            Rail::Discover => "Discover",
+            other => other.title(),
+        }
+    }
+
     /// The glyph the reference draws for this destination.
     pub fn glyph(self) -> Glyph {
         match self {
@@ -362,6 +370,33 @@ impl Shell {
         }
         if was_about != self.about_open || was_settings != self.settings.open {
             ui.ctx().request_repaint();
+        }
+
+        // The reference labels the destination under the pointer with a small pill beside it.
+        // Here rather than with the rail for the toast's own reason: the rail is painted before
+        // the content column, so a tooltip drawn there is covered by the page.
+        if let Some(destination) = self.hovered {
+            let painter = ui.painter();
+            let index = Rail::ALL
+                .iter()
+                .position(|candidate| *candidate == destination)
+                .unwrap_or(0) as f32;
+            let y = g::TITLE_BAR + g::RAIL_FIRST + index * g::RAIL_PITCH;
+            let label = painter.layout_no_wrap(
+                destination.short().to_owned(),
+                crate::fonts::body(12.0),
+                self.theme.ACCENT_CONTRAST,
+            );
+            let pill = egui::Rect::from_min_size(
+                egui::pos2(g::RAIL + 6.0, y - label.size().y / 2.0 - 5.0),
+                egui::vec2(label.size().x + 16.0, label.size().y + 10.0),
+            );
+            painter.rect_filled(pill, 6, self.theme.CONTRAST);
+            painter.galley(
+                egui::pos2(pill.left() + 8.0, pill.top() + 5.0),
+                label,
+                self.theme.ACCENT_CONTRAST,
+            );
         }
 
         // Last, because the content column and every page paint their own background:
