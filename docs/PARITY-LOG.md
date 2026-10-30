@@ -1074,6 +1074,19 @@ Drawn at the end of the frame, not with the rail: the rail is painted before the
 the first attempt left the pill underneath the library cards — the same reason the toast is drawn
 last.
 
+### The tag overflow chip — 0.1.36
+
+A card now stops its tag row where the stats begin and says how many it could not show, which is the
+reference's `+1` chip. Before this the pills drew on under the download count.
+
+It is verified by a test rather than a capture: this VM's window is wide enough for four tags, so
+the chip's path cannot be reached with the real feed here. `tags_that_fit` is the decision, and its
+test covers the boundary, the exact fit, the too-narrow row and the empty row.
+
+The numbered page strip remains owed, and the reason is now measurable: the reference's content
+column ends near x=1250 while this build's ends at 1159, so the ~150 points a `1 2 … 953` strip
+needs do not exist on this row. That is a column-width difference, not a pager one.
+
 ### Open after this pass
 
 | # | Region | What differs |
