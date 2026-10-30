@@ -270,6 +270,10 @@ pub struct State {
     pub open_select: Option<&'static str>,
     /// Whether this frame's press was spent on an open list, so the rows ignore it.
     pub consumed: bool,
+    /// The theme the reader picked, for the shell to apply; taken when it has been read.
+    pub chosen_theme: Option<ThemeChoice>,
+    /// The theme the ring is on.
+    pub theme: ThemeChoice,
     /// Option rects painted this frame, and the ones painted last frame: a press is
     /// tested against the second before the body sees it, so an option beats the row.
     pub open_lists: Vec<(Rect, &'static [&'static str], &'static str)>,
@@ -456,6 +460,9 @@ const THEME_OLED_LABEL: &str = "OLED";
 const THEME_CARD_WIDTH: f32 = 96.0;
 const THEME_CARD_HEIGHT: f32 = 64.0;
 const THEME_CARD_GAP: f32 = 12.0;
+/// The footer strip inside a card: the radio and the label.
+const THEME_FOOTER: f32 = 26.0;
+#[allow(dead_code)]
 const THEME_CARD_LABEL_HEIGHT: f32 = 20.0;
 /// `rounded-xl` on the preview card.
 const THEME_CARD_RADIUS: u8 = 12;
@@ -914,11 +921,18 @@ pub enum ThemeChoice {
     Light,
     /// Pure black, for OLED panels.
     Oled,
+    /// Follow the operating system's own light or dark preference.
+    System,
 }
 
 impl ThemeChoice {
     /// The three, in the source's order.
-    pub const ALL: [ThemeChoice; 3] = [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::Oled];
+    pub const ALL: [ThemeChoice; 4] = [
+        ThemeChoice::Dark,
+        ThemeChoice::Light,
+        ThemeChoice::Oled,
+        ThemeChoice::System,
+    ];
 
     /// The catalogue's own word for it.
     pub fn label(self) -> &'static str {
@@ -926,6 +940,7 @@ impl ThemeChoice {
             ThemeChoice::Dark => THEME_DARK_LABEL,
             ThemeChoice::Light => THEME_LIGHT_LABEL,
             ThemeChoice::Oled => THEME_OLED_LABEL,
+            ThemeChoice::System => THEME_SYSTEM_LABEL,
         }
     }
 
@@ -938,6 +953,9 @@ impl ThemeChoice {
             ThemeChoice::Dark => theme.BG,
             ThemeChoice::Light => egui::Color32::from_rgb(0xf2, 0xf2, 0xf4),
             ThemeChoice::Oled => egui::Color32::BLACK,
+            // The card previews what the system would pick, which on this build is the light
+            // scheme it would fall back to.
+            ThemeChoice::System => theme.BG,
         }
     }
 
@@ -1036,13 +1054,6 @@ const APPEARANCE_BLOCKS: &[Block] = &[
     },
     Block::ThemeCards {
         selected: ThemeChoice::Dark,
-    },
-    Block::Row {
-        label: THEME_SYSTEM_LABEL,
-        // The source has no description line for this row (`layout.vue:54-58`).
-        description: None,
-        // Drawn off: `syncSystem` defaults to false in `use-theme.ts`.
-        control: Control::Switch { on: false },
     },
     Block::Row {
         label: THEME_SYNC_LABEL,
@@ -2009,7 +2020,7 @@ const TAB_COUNT: usize = Tab::ALL.len();
 /// rows and 4-point gaps, the headings its category line, and the gaps between categories its
 /// `mt-3`.
 fn rail_needed_height() -> f32 {
-    let mut height = 0.0;
+    let mut height: f32 = 0.0;
     let mut previous: Option<Tab> = None;
     for (index, tab) in Tab::ALL.into_iter().enumerate() {
         let starts_category = previous.map_or(true, |last| last.category() != tab.category());
@@ -2603,17 +2614,32 @@ fn draw_body(
                 }
                 control.height() + ROW_GAP
             }
-            Block::ThemeCards { selected } => {
-                let mut x = left;
-                for choice in ThemeChoice::ALL {
+            Block::ThemeCards { .. } => {
+                // Four cards, three to a row, the fourth (`Sync with system`) as wide as the row
+                // it starts: that is the reference's grid (`AppearanceCards.vue`), where each card
+                // is a preview with a radio and its label in a footer strip of its own.
+                const COLUMNS: usize = 3;
+                let mut height: f32 = 0.0;
+                for (index, choice) in ThemeChoice::ALL.into_iter().enumerate() {
+                    let column = index % COLUMNS;
+                    let row = index / COLUMNS;
+                    let wide = index == COLUMNS;
+                    let width = if wide {
+                        THEME_CARD_WIDTH * COLUMNS as f32 + THEME_CARD_GAP * (COLUMNS as f32 - 1.0)
+                    } else {
+                        THEME_CARD_WIDTH
+                    };
                     let card = Rect::from_min_size(
-                        pos2(x, y),
-                        vec2(THEME_CARD_WIDTH, THEME_CARD_HEIGHT),
+                        pos2(
+                            left + column as f32 * (THEME_CARD_WIDTH + THEME_CARD_GAP),
+                            y + row as f32 * (THEME_CARD_HEIGHT + THEME_FOOTER + THEME_CARD_GAP),
+                        ),
+                        vec2(width, THEME_CARD_HEIGHT + THEME_FOOTER),
                     );
-                    body.rect_filled(card, THEME_CARD_RADIUS, choice.plate(theme));
-                    // The ring is what marks the choice; the source draws it in the brand
-                    // colour, two points wide, on the card it belongs to.
-                    if choice == selected {
+                    height = height.max(card.bottom() - y);
+                    let chosen = choice == state.theme;
+                    body.rect_filled(card, THEME_CARD_RADIUS, theme.RAISED_BG);
+                    if chosen {
                         body.rect_stroke(
                             card,
                             THEME_CARD_RADIUS,
@@ -2621,39 +2647,57 @@ fn draw_body(
                             egui::StrokeKind::Inside,
                         );
                     }
-                    // Two bars standing in for the window's title and a content line, so the
-                    // card reads as a window at 96 points wide.
-                    let bar = theme.BASE.gamma_multiply(0.25);
+                    // The preview: a plate of the theme's own ground with two bars standing in
+                    // for a title and a line, inset above the footer.
+                    let preview = Rect::from_min_size(
+                        card.min + egui::vec2(1.0, 1.0),
+                        vec2(card.width() - 2.0, THEME_CARD_HEIGHT - 1.0),
+                    );
+                    body.rect_filled(preview, THEME_CARD_RADIUS, choice.plate(theme));
+                    let bar = choice.plate(theme).gamma_multiply(0.35);
                     body.rect_filled(
                         Rect::from_min_size(
-                            pos2(card.left() + 10.0, card.top() + 12.0),
-                            vec2(card.width() - 20.0, 6.0),
+                            pos2(preview.left() + 12.0, preview.top() + 16.0),
+                            vec2(preview.width() - 24.0, 6.0),
                         ),
                         3,
                         bar,
                     );
                     body.rect_filled(
                         Rect::from_min_size(
-                            pos2(card.left() + 10.0, card.top() + 26.0),
-                            vec2((card.width() - 20.0) * 0.6, 6.0),
+                            pos2(preview.left() + 12.0, preview.top() + 30.0),
+                            vec2((preview.width() - 24.0) * 0.6, 6.0),
                         ),
                         3,
                         bar,
                     );
+                    // The footer: a radio dot and the label, inside the card.
+                    let radio = Rect::from_center_size(
+                        pos2(card.left() + 14.0, card.bottom() - THEME_FOOTER / 2.0),
+                        vec2(10.0, 10.0),
+                    );
+                    body.circle_stroke(radio.center(), 5.0, Stroke::new(1.0, theme.DIVIDER));
+                    if chosen {
+                        body.circle_filled(radio.center(), 5.0, theme.BRAND);
+                    }
                     body.text(
-                        pos2(card.center().x, card.bottom() + 4.0),
-                        Align2::CENTER_TOP,
+                        pos2(card.left() + 26.0, card.bottom() - THEME_FOOTER / 2.0),
+                        Align2::LEFT_CENTER,
                         choice.label(),
                         fonts::body(THEME_CARD_LABEL_SIZE),
-                        if choice == selected {
-                            theme.CONTRAST
-                        } else {
-                            theme.SECONDARY
-                        },
+                        if chosen { theme.CONTRAST } else { theme.SECONDARY },
                     );
-                    x = card.right() + THEME_CARD_GAP;
+                    if !state.consumed
+                        && ui.input(|input| input.pointer.any_click())
+                        && pointer.is_some_and(|pointer| card.contains(pointer))
+                    {
+                        state.theme = choice;
+                        state.chosen_theme = Some(choice);
+                        state.dirty = true;
+                        state.consumed = true;
+                    }
                 }
-                THEME_CARD_HEIGHT + THEME_CARD_LABEL_HEIGHT + ROW_GAP
+                height + ROW_GAP
             }
             // Handled above.
             Block::Rule => 0.0,
@@ -3011,7 +3055,7 @@ mod tests {
         );
         assert_eq!(
             ThemeChoice::ALL.map(ThemeChoice::label),
-            ["Dark", "Light", "OLED"]
+            ["Dark", "Light", "OLED", "Sync with system"]
         );
         assert_eq!(
             ThemeChoice::default(),
@@ -3294,7 +3338,7 @@ mod tests {
     #[test]
     fn every_tab_carries_the_blocks_this_pass_ported() {
         let ported: [(Tab, usize); TAB_COUNT] = [
-            (Tab::Appearance, 7),
+            (Tab::Appearance, 6),
             (Tab::Features, 13),
             (Tab::Behavior, 14),
             (Tab::Language, 3),

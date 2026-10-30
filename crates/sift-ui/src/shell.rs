@@ -331,6 +331,21 @@ impl Shell {
         let was_settings = self.settings.open;
         crate::pages::about::draw(ui, Self::window_rect(), &self.theme, &mut self.about_open);
         crate::pages::settings::draw(ui, Self::window_rect(), &self.theme, &mut self.settings);
+        // The theme cards choose; the shell owns the theme, so it builds the one asked for.
+        if let Some(choice) = self.settings.chosen_theme.take() {
+            let chosen = match choice {
+                crate::pages::settings::ThemeChoice::Dark => crate::theme::dark(),
+                crate::pages::settings::ThemeChoice::Light => crate::theme::light(),
+                crate::pages::settings::ThemeChoice::Oled => crate::theme::oled(),
+                // `Sync with system` has no system to ask on this build, so it stays where it
+                // is; the choice is still remembered and shown.
+                crate::pages::settings::ThemeChoice::System => self.theme,
+            };
+            if chosen != self.theme {
+                self.theme = chosen;
+                ui.ctx().request_repaint();
+            }
+        }
         if was_about != self.about_open || was_settings != self.settings.open {
             ui.ctx().request_repaint();
         }

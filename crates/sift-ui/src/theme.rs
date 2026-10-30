@@ -603,6 +603,18 @@ pub const DARK: Theme = Theme {
     DARK_MODE: true,
 };
 
+/// The OLED scheme: the dark one with its grounds at true black, which is what an OLED panel
+/// saves on.
+pub fn oled() -> Theme {
+    Theme {
+        BG: egui::Color32::BLACK,
+        RAISED_BG: egui::Color32::from_rgb(0x08, 0x08, 0x08),
+        SURFACE_1: egui::Color32::from_rgb(0x0d, 0x0d, 0x0d),
+        SUPER_RAISED_BG: egui::Color32::from_rgb(0x12, 0x12, 0x12),
+        ..DARK
+    }
+}
+
 /// The light scheme.
 ///
 /// Read from `vendor/modrinth-app/assets/styles/variables.scss`. Each comment below is
