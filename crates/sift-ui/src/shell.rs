@@ -575,6 +575,36 @@ impl Shell {
                 ink,
             );
         }
+        // The reference's `+` sits under a hairline, past the last destination: it is not a
+        // page, it makes one. It goes through `act` so it is the same verb as Home's button.
+        let after = g::TITLE_BAR + g::RAIL_FIRST + Rail::ALL.len() as f32 * g::RAIL_PITCH;
+        painter.hline(
+            (rail.left() + 16.0)..=(rail.right() - 16.0),
+            after - g::RAIL_PITCH / 2.0,
+            Stroke::new(1.0, self.theme.DIVIDER),
+        );
+        let create = egui::Rect::from_center_size(
+            egui::pos2(g::RAIL / 2.0, after + 6.0),
+            Vec2::splat(40.0),
+        );
+        let create_response = ui.interact(create, egui::Id::new("rail-create"), Sense::click());
+        if create_response.hovered() {
+            painter.rect_filled(create, 12, self.theme.BUTTON_BG);
+        }
+        icons::draw(
+            painter,
+            Glyph::Plus,
+            egui::Rect::from_center_size(create.center(), Vec2::splat(20.0)),
+            if create_response.hovered() {
+                self.theme.CONTRAST
+            } else {
+                self.theme.SECONDARY
+            },
+        );
+        if create_response.clicked() {
+            self.act(crate::pages::home::Action::Create);
+        }
+
         // The utility group below a separator: settings, reload, account. The reference
         // pins them to the bottom of the rail, which is why they are positioned from the
         // rail's own bottom edge rather than continuing the pitch.
