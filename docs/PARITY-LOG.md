@@ -1358,6 +1358,29 @@ looked right on the page it was built for.
 Lightness was re-measured on the same release build in this round; see `LIGHTNESS.md` (startup
 133 ms, idle CPU 0, scroll p95 0.13 ms, RSS 125.3 MB with the driver split unchanged).
 
+### The sweep, page by page — 0.1.55
+
+Every page captured on the 0.1.55 release build, after the settings work of rounds 47-54. This table
+is the evidence for the parity claim: what each page shows, and what is still known to differ.
+
+| Page | Works | Still differs from the reference |
+| --- | --- | --- |
+| Home | library rows with Play/menu, `Jump in` list, rail tooltips, shared right panel | row hover/press styling is ours, not measured |
+| Discover | tab strip, search, sort and view selects, `< 1 2 … 9 >` pager, real results with categories and stats, `+N` tag chip, sidebar with `Hide already installed` / `Category` / `See more` | Fuse scoring is a substring; `Hide already installed` cannot hide pre-0.1.45 installs (no id recorded) |
+| Servers | `Sift Hosting` heading, search, `+ New server`, four servers with MOTD, player counts and pack lines | `New server` and the hosting flow are not wired to a service |
+| Skins | `Skin selector`, rendered characters in the preview and cards, `Default skins` row with a check, rail tooltip | the 3D rotatable model; header search/chips/Add the reference lacks; demo-account bar |
+| Screenshots | illustration, `No screenshots yet`, subtitle | none known |
+| Settings | 14 tabs, five control kinds, theme cards that choose, reset-to-default, language radio list, storage bar, profile fields, `Detect Java`, `Clear cache` in two presses, `Copy ad details` with `Copied` | Syncing's per-row edit buttons and their modals; ad-details tooltip; app-directory picker; cache limit as a number field; language flags and coverage |
+| Instance (Content, Files, Screenshots, Worlds, Logs) | five real tabs from disk | description/notes (the reference has none either) |
+| Project page | Description, Versions, Gallery from the live API | — |
+| About | logo, version, licences and the icon-set attribution | — |
+
+Two rows are honest "no further gap known" rather than "perfect": Screenshots and About match the
+reference in structure and content, and nothing in either has been found to differ.
+
+**What this table is not:** a pixel diff. It is a per-page side-by-side check, which is what caught
+the Discover sidebar leaking onto Skins -- the one regression of the sweep.
+
 ### Open after this pass
 
 | # | Region | What differs |
