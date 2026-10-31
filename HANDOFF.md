@@ -367,3 +367,55 @@ The migration is finished in the sense that matters: **there is one UI and it is
 Owed, in the order worth doing: launching from the Play button (the engine is wired and the
 button is not), the eleven remaining settings tabs, the reference's create-instance modal,
 per-row instance menus, real skins/screenshots/servers data, and the release tag.
+
+## 10. Where the launcher is now — 2026-10-31, 0.1.55
+
+Read section 9 for how the rewrite got here. This section is the state at the stop.
+
+**Shipped.** 0.1.0 through 0.1.55, every one with 11 assets including
+`SiftLauncher-<version>-x64-setup.exe`. One tag is red and stays red: **v0.1.53**, whose release run
+failed at `Test the egui workspace` with `unexpected closing delimiter` — a script removed a debug
+print and took a brace with it, and the commit went out unbuilt. It is fixed forward in 0.1.54; the
+runner's answer is the record, so the tag is not rewritten.
+
+**Tests.** 669 in the outer workspace (`sift-core`, `sift-net`, `sift-loader`, `sift-game`) and 163
+in `crates/sift-ui`, which is its own workspace: **832**, all green on the 0.1.55 tree.
+
+**The lightness gates, measured on the 0.1.55 release binary** (`docs/LIGHTNESS.md` has the tables):
+
+| Gate | Budget | Measured |
+| --- | --- | --- |
+| Startup, exec to window | <= 400 ms | 133 ms (cold, beside a compiler) |
+| Idle CPU, 5 s | 0 | 0 ticks |
+| Scroll, view time p95 | <= 20 ms | 0.13 ms |
+| Idle RSS | <= 120 MB | 125.3 MB total on this VM |
+
+The RSS figure is over on this machine and only on this machine: 60.9 MB of it is mesa's llvmpipe
+rasterizer (`libLLVM` + `libgallium`), which exists because the VM has no GPU. Without those two rows
+the launcher owns 64.4 MB. A machine with any GPU never maps them.
+
+**Page parity.** `docs/PARITY-LOG.md` ends with a page-by-page sweep table: what each page shows and
+what is still known to differ. Screenshots and About have no known gap; Discover, Skins, Settings and
+Servers each name theirs.
+
+**What is still owed, in the order I would take them:**
+
+1. **Syncing's per-row edit buttons and the four modals they open** -- the largest remaining piece of
+   the reference's settings, and the only one that needs a modal surface inside the settings dialog.
+2. **Skins' 3D model.** The page draws a composed front view from a 64x64 atlas; the reference draws
+   a rotatable model. That is a renderer, not a blit.
+3. **`Browse` buttons** (Java, app directory) -- they need a folder-picker surface this build has no
+   dialog for.
+4. Smaller: the cache limit as a number field, ad-details' tooltip, language flags and coverage
+   percentages, the profile's signed-out state, and the upload/remove image buttons doing anything.
+
+**Traps worth carrying forward**, all learned the hard way this session and all in `PARITY-LOG.md`:
+
+- `push_one.py` runs `cargo test`, which builds the test harness and **not** the runnable binary. Run
+  `cargo build` before any capture, or the window shows the previous build.
+- `request_repaint_after` does not wake this app. A "wait, then redraw" asks for its own frames.
+- Aim at controls by **printing their rectangles**, not by measuring a screenshot. Three separate
+  hours were spent on clicks that missed by one row.
+- A plate behind a `TextEdit` shows as a second rectangle: a field carries its own frame.
+- The VM's disk fills to 97% from `target/debug`; `rm -rf target/debug/incremental` takes it back to
+  70% in one command, and **never delete build inputs while a build is running**.
