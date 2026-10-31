@@ -1421,6 +1421,26 @@ named in `HANDOFF.md` §10 rather than hidden behind an empty dialog.
 The honest fix, if a sync service ever lands, is the modal surface plus that model; until then the
 row's switch is the whole of what this launcher can honestly offer.
 
+### The app directory can be chosen — 0.1.59
+
+The row promised a restart and had a dead button. Now the data root is printed on the tab, `Browse`
+opens a folder card (current folder, `..`, its subfolders, `Use this folder`, `Cancel`), and the
+choice goes through `sift_core::paths::record_data_root` — the writer the preferences never had, with
+a test that proves the pointer reads back and the file's other answers survive.
+
+Two faults surfaced while building it, and both are the kind a screenshot cannot show:
+
+- **A `Button` in a row's control slot was never pressable.** Only the standalone arm had a hit test.
+  Chasing it through the row's centred layout did not land a click, so `Browse` became a standalone
+  button — the shape whose presses are already verified — and the row's label and description became
+  a heading above it.
+- **The overlay let its click through.** It is painted after every row, so the press it handled had
+  already been acted on underneath: a `Cancel` landed on the instance row behind it and launched the
+  game. While the picker is open the frame's clicks are its own.
+
+Verified on the VM: the card opens at the data root; `..` moves to `/data/home/.local/share` and
+lists the real siblings; nothing behind it reacts.
+
 ### Open after this pass
 
 | # | Region | What differs |
