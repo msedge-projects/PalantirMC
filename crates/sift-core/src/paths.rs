@@ -474,6 +474,25 @@ pub fn recorded_data_root(home: &SiftPaths) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
+/// Record the data root this launcher should use the next time it starts.
+///
+/// The file is read first and only `app_directory` is replaced: it holds the other answers from the
+/// first run, and writing a fresh object would drop them. `root` is stored exactly as given --
+/// [`resolve_data_root`] is what decides whether it is usable.
+pub fn record_data_root(home: &SiftPaths, root: &Path) -> std::io::Result<()> {
+    let path = home.root.join(PREFS_FILE);
+    let mut value: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["app_directory"] = serde_json::json!(root.display().to_string());
+    std::fs::create_dir_all(&home.root)?;
+    std::fs::write(&path, serde_json::to_string_pretty(&value)?)
+}
+
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -629,6 +648,25 @@ mod tests {
         .unwrap();
         let found = legacy_install_at(tmp.path()).expect("the moved directory holds an instance");
         assert_eq!(found.instances, 1);
+    }
+
+    #[test]
+    fn a_recorded_root_reads_back_and_keeps_the_other_answers() {
+        let dir = std::env::temp_dir().join(format!("sift-paths-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let home = SiftPaths::at(&dir);
+        // Another answer, as the shell would have written it on the first run.
+        std::fs::write(dir.join(PREFS_FILE), r#"{"keep_existing":true}"#).expect("seed");
+        let chosen = dir.join("elsewhere");
+        record_data_root(&home, &chosen).expect("record");
+        let text = std::fs::read_to_string(dir.join(PREFS_FILE)).expect("read");
+        assert!(text.contains("keep_existing"), "the other answer went: {text}");
+        assert_eq!(
+            recorded_data_root(&home),
+            Some(chosen.display().to_string())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
