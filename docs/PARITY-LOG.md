@@ -1441,6 +1441,21 @@ Two faults surfaced while building it, and both are the kind a screenshot cannot
 Verified on the VM: the card opens at the data root; `..` moves to `/data/home/.local/share` and
 lists the real siblings; nothing behind it reacts.
 
+### Three red tags, one operation — 0.1.60
+
+`v0.1.53` and `v0.1.59` are red in this history with the same message -- `unexpected closing
+delimiter: }` -- and the same cause: a script that removed my own debug print took the closing brace
+of the block it sat in. The third occasion (an earlier one in this same session) was caught locally.
+
+What did not work: writing the rule down. It appears twice in these documents already, in the words
+"run `cargo build` after any scripted edit, before the commit", and both times the rule was read
+after the fact.
+
+What changes: the ship script now **parses the harness's output and refuses to commit unless it says
+`test result: ok`**. It is not a reminder; it is a gate. And the second failure had a second cause
+worth naming separately: the test output *was* in my terminal, and I read a filtered tail of it --
+so a failed run looked like a quiet one. A filter is not a verdict.
+
 ### Open after this pass
 
 | # | Region | What differs |
