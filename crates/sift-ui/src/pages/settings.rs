@@ -815,6 +815,8 @@ const STORE_REPAIR_LABEL: &str = "Verify and repair"; // app.settings.resource-m
 const STORE_CLEAR_LABEL: &str = "Clear unused"; // app.settings.resource-management.store.clear (:2843)
 const STORE_CACHE_LIMIT_LABEL: &str = "Keep unused downloads"; // app.settings.resource-management.store.cache-limit.label (:2834)
 const STORE_CACHE_LIMIT_DESCRIPTION: &str = "Keep up to this much unused content for future installs. Keeping more can save download time."; // app.settings.resource-management.store.cache-limit.description (:2831)
+/// The number the row starts at: `5` GiB (`:60`).
+const STORE_CACHE_LIMIT_DEFAULT: u32 = 5;
 const STORE_CACHE_LIMIT_UNIT: &str = "GiB"; // app.settings.resource-management.store.cache-limit.unit (:2837); the number before it defaults to 5 (`content-storage.vue:60`)
 const APP_DIRECTORY_LABEL: &str = "App directory"; // app.settings.resource-management.app-directory.title (:2804)
 const APP_DIRECTORY_DESCRIPTION: &str = "Where Sift Launcher stores instances and other files. Changes take effect after restarting the app."; // app.settings.resource-management.app-directory.description (:2798)
@@ -1063,6 +1065,14 @@ enum Control {
     Text {
         /// The placeholder, from the catalogue key the row's comment names.
         placeholder: &'static str,
+    },
+    /// A number on a plate with its unit after it, as the cache limit is drawn
+    /// (`:402-416`): digits only, the unit a label rather than a choice.
+    Number {
+        /// The number shown while the reader has typed nothing.
+        value: u32,
+        /// The unit, drawn inside the plate's right edge.
+        unit: &'static str,
     },
     /// A multiline field (`Textarea.vue`): prose on a plate, with the source's character counter
     /// under it.
@@ -1893,9 +1903,9 @@ const RESOURCES_BLOCKS: &[Block] = &[
     Block::Row {
         label: STORE_CACHE_LIMIT_LABEL,
         description: Some(STORE_CACHE_LIMIT_DESCRIPTION),
-        control: Control::Select {
-            value: STORE_CACHE_LIMIT_UNIT,
-            options: &["KiB", "MiB", "GiB"],
+        control: Control::Number {
+            value: STORE_CACHE_LIMIT_DEFAULT,
+            unit: STORE_CACHE_LIMIT_UNIT,
         },
     },
     Block::Rule,
@@ -2588,6 +2598,52 @@ fn rect_for_field(right: f32, y: f32) -> Rect {
 ///
 /// Keyed by `key`: a row passes its label, a standalone field its own placeholder, which is unique
 /// to it. The state is the store, and a change marks the page dirty so the save runs at close.
+/// Place a number field on a row, leaving the plate's right edge to the unit.
+fn place_number(
+    ui: &mut Ui,
+    state: &mut State,
+    key: &'static str,
+    rect: Rect,
+    unit: &str,
+    start: u32,
+) -> Option<u32> {
+    // Seeded from the block's own number: an empty field beside a plate that claims one value
+    // would read as two.
+    let mut text = state
+        .texts
+        .iter()
+        .find(|(known, _)| *known == key)
+        .map(|(_, typed)| typed.clone())
+        .unwrap_or_else(|| start.to_string());
+    // The unit is painted inside the plate, so the field stops short of it.
+    let room = ui
+        .painter()
+        .layout_no_wrap(unit.to_owned(), fonts::body(12.0), Color32::PLACEHOLDER)
+        .size()
+        .x;
+    let field = Rect::from_min_max(
+        rect.min,
+        egui::pos2(rect.right() - room - CONTROL_PADDING, rect.bottom()),
+    );
+    let output = ui.put(
+        field,
+        egui::TextEdit::singleline(&mut text).desired_width(field.width()),
+    );
+    // Digits only: the unit is the rest of the value, so a letter would be a second one.
+    if text.chars().any(|c| !c.is_ascii_digit()) {
+        text.retain(|c| c.is_ascii_digit());
+    }
+    let parsed = text.parse::<u32>().ok();
+    if output.changed() {
+        match state.texts.iter_mut().find(|(known, _)| *known == key) {
+            Some((_, typed)) => *typed = text,
+            None => state.texts.push((key, text)),
+        }
+        state.dirty = true;
+    }
+    parsed
+}
+
 /// Place a multiline field on a row, with its character counter under it.
 fn place_area(
     ui: &mut Ui,
@@ -2909,6 +2965,11 @@ fn draw_body(
                 );
                 if let Control::Text { placeholder } = control {
                     place_field(ui, state, label, placeholder, rect_for_field(right, y));
+                }
+                if let Control::Number { value, unit } = control {
+                    // The unit is what the plate prints; the number is the reader's, starting at
+                    // the block's own.
+                    place_number(ui, state, label, rect_for_field(right, y), unit, value);
                 }
                 if let Control::TextArea { placeholder, limit } = control {
                     // A textarea is the row's whole width, not a control's: it holds prose.
@@ -3330,7 +3391,7 @@ impl Control {
         match self {
             Control::Switch { .. } => SWITCH_WIDTH,
             Control::Text { .. } => FIELD_WIDTH,
-            Control::TextArea { .. } => FIELD_WIDTH,
+            Control::TextArea { .. } | Control::Number { .. } => FIELD_WIDTH,
             Control::Chips { options, .. } => options
                 .iter()
                 .map(|option| {
@@ -3382,6 +3443,7 @@ impl Control {
             Control::Slider { .. } => SLIDER_HEIGHT,
             Control::Text { .. } => FIELD_HEIGHT,
             Control::TextArea { .. } => AREA_HEIGHT + 18.0,
+            Control::Number { .. } => FIELD_HEIGHT,
             Control::Chips { .. } => CHIP_HEIGHT,
             Control::Select { .. } | Control::Button { .. } => CONTROL_HEIGHT,
         }
@@ -3429,6 +3491,21 @@ impl Control {
             // The `TextEdit` carries its own frame, so this arm paints nothing: a plate behind it
             // showed as a second rounded rectangle, offset from the field's own edge.
             Control::TextArea { .. } => {}
+            Control::Number { unit, .. } => {
+                // The plate, its digits in the `TextEdit`, and the unit printed after them.
+                let rect = Rect::from_min_size(
+                    pos2(right - FIELD_WIDTH, centre_y - FIELD_HEIGHT / 2.0),
+                    vec2(FIELD_WIDTH, FIELD_HEIGHT),
+                );
+                painter.rect_filled(rect, CONTROL_RADIUS, theme.BUTTON_BG);
+                painter.text(
+                    pos2(rect.right() - CONTROL_PADDING, centre_y),
+                    Align2::RIGHT_CENTER,
+                    unit.to_owned(),
+                    fonts::body(12.0),
+                    theme.SECONDARY,
+                );
+            }
             Control::Text { placeholder } => {
                 let rect = Rect::from_min_size(
                     pos2(right - FIELD_WIDTH, centre_y - FIELD_HEIGHT / 2.0),
@@ -4013,6 +4090,8 @@ mod tests {
             Control::Slider { .. } => None,
             Control::Text { placeholder } => Some(placeholder),
             Control::TextArea { placeholder, .. } => Some(placeholder),
+            // The unit is the word this control has; its number is not one.
+            Control::Number { unit, .. } => Some(unit),
             // A chip group's words are its options; the row's label names the group.
             Control::Chips { options, .. } => options.first().copied(),
             Control::Select { value, .. } => Some(value),
