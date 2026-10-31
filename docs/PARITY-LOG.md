@@ -1342,6 +1342,22 @@ reason the tree now has a red tag in its history.
 It is fixed forward (163 tests green) rather than by rewriting the tag, because the runner's answer
 is the record of what happened.
 
+### The verification sweep, round one — 0.1.55
+
+Fresh captures of Discover and Skins on the release build, after four rounds of settings work. Both
+pages are intact -- and the sweep immediately earned its keep:
+
+**A regression I introduced:** the Discover sidebar's category list is loaded once per tab kind and
+kept, so *every other page* drew `Hide already installed` and the categories in its `News` slot.
+Skins showed them above its own content. The list is handed to the panel only while the rail is on
+Discover, and the page is back to its own panel.
+
+That is exactly the failure a per-page check catches and a per-change check does not: the change
+looked right on the page it was built for.
+
+Lightness was re-measured on the same release build in this round; see `LIGHTNESS.md` (startup
+133 ms, idle CPU 0, scroll p95 0.13 ms, RSS 125.3 MB with the driver split unchanged).
+
 ### Open after this pass
 
 | # | Region | What differs |
