@@ -223,6 +223,42 @@ fn ad_details() -> String {
     )
 }
 
+/// The Java runtimes under the data root, as (major version, binary path).
+///
+/// Read from each runtime's own `release` file rather than by running the binary: a launcher that
+/// spawned four JVMs to answer a button press would stall the frame it was pressed in.
+fn detect_java() -> Vec<(u32, String)> {
+    let root = crate::data::instances_dir();
+    let Some(data_root) = root.parent() else {
+        return Vec::new();
+    };
+    let java_root = data_root.join("java");
+    let Ok(entries) = std::fs::read_dir(&java_root) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        let binary = path.join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
+        if !binary.exists() {
+            continue;
+        }
+        let Ok(release) = std::fs::read_to_string(path.join("release")) else {
+            continue;
+        };
+        let major = release
+            .lines()
+            .find_map(|line| line.strip_prefix("JAVA_VERSION=\""))
+            .and_then(|value| value.split('.').next())
+            .and_then(|major| major.parse::<u32>().ok());
+        if let Some(major) = major {
+            found.push((major, binary.display().to_string()));
+        }
+    }
+    found.sort_by_key(|(major, _)| std::cmp::Reverse(*major));
+    found
+}
+
 /// What a button's press does: `Clear cache` asks once, then clears.
 ///
 /// Separated from the frame so the rule can be tested without a window -- a button that cleared a
@@ -714,7 +750,10 @@ const DISCORD_LABEL: &str = "Discord Rich Presence"; // app.settings.privacy.dis
 const DISCORD_DESCRIPTION: &str = "Show Sift Launcher as your current activity on Discord. This does not affect Rich Presence added to instances by mods. Requires an app restart."; // app.settings.privacy.discord-rich-presence.description (:2759)
 
 // --- Java and memory (settings/instance-defaults/java-and-memory-settings/index.vue) ---
-const JAVA_INSTALLATIONS_HEADING: &str = "Java installations"; // app.settings.tabs.java-installations (:3137), the section's own `text-xl` heading (:69-71)
+const JAVA_INSTALLATIONS_HEADING: &str = "Java installations";
+/// The scan's own button. The reference puts `Detect` inside each row's selector
+/// (`JavaSelector.vue:75-87`); a row here holds one control, so it is one button for all four.
+const JAVA_DETECT_LABEL: &str = "Detect Java"; // app.settings.tabs.java-installations (:3137), the section's own `text-xl` heading (:69-71)
 // The per-version labels are one catalogue string with `{version}` filled in from the
 // `[25, 21, 17, 8]` list `java-installations.vue:34` iterates.
 const JAVA_LOCATION_25: &str = "Java 25 location"; // app.settings.java-installations.location.title (:2750)
@@ -1682,6 +1721,10 @@ const JAVA_AND_MEMORY_BLOCKS: &[Block] = &[
         },
     },
     Block::Rule,
+    Block::Standalone(Control::Button {
+        label: JAVA_DETECT_LABEL,
+        glyph: Some(Glyph::Search),
+    }),
     Block::Heading {
         text: MEMORY_TITLE,
         description: Some(MEMORY_DESCRIPTION),
@@ -2102,6 +2145,7 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
     state.rail_scroll = state.rail_scroll.min(rail_overflow);
 
     let rows = rail_rows(dialog, state.rail_scroll);
+    }
     for (index, entry) in rows.into_iter().enumerate() {
         if entry.row.center().y <= rail.top() || entry.row.center().y >= rail.bottom() {
             continue;
@@ -2126,7 +2170,32 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
     // which asks first and then deletes the launcher's own HTTP cache -- refetched on demand, so
     // nothing a reader made is lost.
     if let Some(label) = state.pressed_button.take() {
-        if label == REPORT_AD_COPY_LABEL {
+        if label == JAVA_DETECT_LABEL {
+            let found = detect_java();
+            let mut filled = 0_usize;
+            for (label, major) in [
+                (JAVA_LOCATION_25, 25_u32),
+                (JAVA_LOCATION_21, 21),
+                (JAVA_LOCATION_17, 17),
+                (JAVA_LOCATION_8, 8),
+            ] {
+                // A runtime whose major version matches the row fills it; a newer JVM runs older
+                // packs, so the highest one that covers the row is taken.
+                if let Some((_, path)) = found.iter().find(|(version, _)| *version == major) {
+                    state.texts.retain(|(known, _)| *known != label);
+                    state.texts.push((label, path.clone()));
+                    filled += 1;
+                }
+            }
+            state.notice = Some(match (found.len(), filled) {
+                (0, _) => "No Java runtimes found in the launcher's java folder.".to_owned(),
+                (count, 0) => format!(
+                    "Found {count} Java runtime(s), none matching a row's version."
+                ),
+                (count, filled) => format!("Found {count} Java runtime(s); filled {filled} row(s)."),
+            });
+            state.dirty = true;
+        } else if label == REPORT_AD_COPY_LABEL {
             // The clipboard is the frame's business, not the rule's.
             ui.ctx().copy_text(ad_details());
             state.copied_until = Some(ui.input(|input| input.time) + COPIED_SECONDS);
@@ -2927,7 +2996,7 @@ fn draw_body(
                     }
                     // What a two-step button owes the reader: why nothing happened yet, and what
                     // happened when it did.
-                    if label == CLEAR_CACHE_LABEL {
+                    if label == CLEAR_CACHE_LABEL || label == JAVA_DETECT_LABEL {
                         let line = state.notice.clone().or_else(|| {
                             state
                                 .confirming
@@ -3843,7 +3912,7 @@ mod tests {
             (Tab::Profile, 5),
             (Tab::Social, 4),
             (Tab::Privacy, 4),
-            (Tab::JavaAndMemory, 12),
+            (Tab::JavaAndMemory, 13),
             (Tab::Window, 3),
             (Tab::LaunchHooks, 7),
             (Tab::Syncing, 6),
