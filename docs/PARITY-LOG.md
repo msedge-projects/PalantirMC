@@ -1490,3 +1490,22 @@ web page never had -- would make the table look complete and the product worse.
 Two rows say it: Screenshots and About. It means what it says -- every element of those pages was
 compared against the reference and none was found to differ. It does not mean a pixel diff passed;
 none was run, and none is claimed.
+
+### Final smoke, on the shipped build — 0.1.58, 2026-10-31
+
+The release binary, built from the tagged tree on the VM, launched and driven page by page with a
+capture of each. All five rail destinations intact:
+
+- **Home** — three instances with Play and the row menu, `Jump in` with Harbour Build, shared panel.
+- **Discover** — live Modrinth results (Fabulously Optimized, Zombie Invasion 100 Days, Cobblemon
+  Official Modpack, COBBLEVERSE), tab strip, sort and view, sidebar with the four categories and
+  `Hide already installed`.
+- **Skins** — rendered characters in the preview and the cards, `Saved skins`, `Add skin`, the
+  `Default skins` row with its check.
+- **Screenshots** — the empty state and the shared `News` panel, which is the regression the earlier
+  sweep caught and this run proves fixed.
+- **Servers** — `Sift Hosting`, the seven servers, search and `+ New server`.
+
+Nothing regressed in the four rounds since the sweep (multiline fields, the number field, the
+tooltip). This is the last evidence gathered in this stretch, and it is of the artifact rather than
+of a working tree: the binary is the one the 0.1.58 release ships.
