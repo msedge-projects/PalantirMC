@@ -372,7 +372,7 @@ per-row instance menus, real skins/screenshots/servers data, and the release tag
 
 Read section 9 for how the rewrite got here. This section is the state at the stop.
 
-**Shipped.** 0.1.0 through 0.1.55, every one with 11 assets including
+**Shipped.** 0.1.0 through 0.1.58, every one with 11 assets including
 `SiftLauncher-<version>-x64-setup.exe`. One tag is red and stays red: **v0.1.53**, whose release run
 failed at `Test the egui workspace` with `unexpected closing delimiter` — a script removed a debug
 print and took a brace with it, and the commit went out unbuilt. It is fixed forward in 0.1.54; the
