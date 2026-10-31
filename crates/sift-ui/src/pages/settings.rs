@@ -2145,7 +2145,6 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
     state.rail_scroll = state.rail_scroll.min(rail_overflow);
 
     let rows = rail_rows(dialog, state.rail_scroll);
-    }
     for (index, entry) in rows.into_iter().enumerate() {
         if entry.row.center().y <= rail.top() || entry.row.center().y >= rail.bottom() {
             continue;
