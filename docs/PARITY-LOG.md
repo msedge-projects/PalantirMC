@@ -1466,6 +1466,19 @@ That closes the `Browse` gap for both places the reference has one -- the app di
 selector. The picker is one surface with a purpose, so a third caller would be a third variant rather
 than a second implementation.
 
+### Coverage figures, and a turntable that was reverted — 0.1.62
+
+Each language row now carries the share of its strings this build carries: English 100%, the others
+0%, greyed. That is the reference's own meaning for the number, and it is the honest answer for a
+build with one locale.
+
+**The Skins turntable was attempted and reverted.** The composition per quarter turn was written --
+front, right, back and left face tables straight out of the 64x64 atlas -- and it compiled, but wiring
+it into the preview made the character disappear from the column. With the attempt unverified and a
+working preview in hand, the file went back to its committed state rather than shipping a blank
+column. The face tables are described here and in `HANDOFF.md` §10 so the next attempt starts from the
+layout rather than from the idea.
+
 ### Open after this pass
 
 | # | Region | What differs |
