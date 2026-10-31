@@ -431,6 +431,8 @@ pub struct State {
     /// The button waiting for its second press, and the line to say under it.
     pub confirming: Option<&'static str>,
     pub notice: Option<String>,
+    /// The folder the picker is showing, while it is open.
+    pub picking: Option<std::path::PathBuf>,
     /// The tooltip to draw after the body: the button's rect and its words.
     pub hover_tip: Option<(Rect, &'static str)>,
     /// The storage bar's parts, measured once per open.
@@ -1226,6 +1228,9 @@ enum Block {
         /// The control on the right.
         control: Control,
     },
+    /// The data root's path, printed rather than edited: the folder itself is chosen through the
+    /// picker the row below opens (`index.vue:86-103`).
+    PathText,
     /// The store's usage bar: one rounded bar split by folder, with its legend under it.
     ///
     /// The reference splits its content cache into `Unique` / `Shared` / `Orphaned`
@@ -1919,14 +1924,19 @@ const RESOURCES_BLOCKS: &[Block] = &[
         },
     },
     Block::Rule,
-    Block::Row {
-        label: APP_DIRECTORY_LABEL,
+    Block::PathText,
+    Block::Heading {
+        text: APP_DIRECTORY_LABEL,
         description: Some(APP_DIRECTORY_DESCRIPTION),
-        control: Control::Button {
-            label: APP_DIRECTORY_BROWSE,
-            glyph: Some(Glyph::FolderSearch),
-        },
+        big: false,
+        control: None,
     },
+    // A standalone button rather than the row's control slot: a row's control is painted by a
+    // helper with no `ui`, so its presses were never heard, and this shape's are verified.
+    Block::Standalone(Control::Button {
+        label: APP_DIRECTORY_BROWSE,
+        glyph: Some(Glyph::FolderSearch),
+    }),
     Block::Heading {
         text: MAX_DOWNLOADS_LABEL,
         description: Some(MAX_DOWNLOADS_DESCRIPTION),
@@ -2038,6 +2048,11 @@ fn blocks(tab: Tab) -> &'static [Block] {
 pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, state: &mut State) -> bool {
     // Rebuilt every frame: a tooltip belongs to the pointer's position now, not to the last one.
     state.hover_tip = None;
+    // An open picker owns the click. Its overlay is painted after every row, so without this the
+    // press it handled has already been acted on by whatever sits underneath it.
+    if state.picking.is_some() && ui.input(|input| input.pointer.any_click()) {
+        state.consumed = true;
+    }
     if !state.loaded {
         state.loaded = true;
         load_into(state);
@@ -2145,6 +2160,120 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
         );
     }
 
+    // The folder picker, on top of everything: a scrim, the folder being shown, its subfolders,
+    // and the two choices. Drawn here so no row can cover it.
+    if let Some(dir) = state.picking.clone() {
+        painter.rect_filled(screen, 0.0, egui::Color32::from_black_alpha(120));
+        let card = Rect::from_center_size(screen.center(), egui::vec2(460.0, 420.0));
+        painter.rect_filled(card, 12, theme.BG);
+        painter.text(
+            egui::pos2(card.left() + 20.0, card.top() + 22.0),
+            Align2::LEFT_TOP,
+            "Choose an app directory",
+            fonts::semibold(15.0),
+            theme.CONTRAST,
+        );
+        painter.text(
+            egui::pos2(card.left() + 20.0, card.top() + 46.0),
+            Align2::LEFT_TOP,
+            dir.display().to_string(),
+            fonts::body(12.0),
+            theme.SECONDARY,
+        );
+        // The folders, each a row that opens it; `..` walks up.
+        let mut entry_y = card.top() + 74.0;
+        let mut rows: Vec<Rect> = Vec::new();
+        let mut targets: Vec<std::path::PathBuf> = Vec::new();
+        if let Some(parent) = dir.parent() {
+            rows.push(Rect::from_min_size(egui::pos2(card.left() + 16.0, entry_y), egui::vec2(card.width() - 32.0, 26.0)));
+            targets.push(parent.to_path_buf());
+            entry_y += 26.0;
+        }
+        let mut folders: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|path| path.is_dir())
+                    .collect()
+            })
+            .unwrap_or_default();
+        folders.sort();
+        for folder in folders.into_iter().take(9) {
+            rows.push(Rect::from_min_size(egui::pos2(card.left() + 16.0, entry_y), egui::vec2(card.width() - 32.0, 26.0)));
+            targets.push(folder);
+            entry_y += 26.0;
+        }
+        for (index, row) in rows.iter().enumerate() {
+            let label = if index == 0 && targets[index] == dir.parent().unwrap_or(&dir) {
+                "..".to_owned()
+            } else {
+                targets[index]
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "..".to_owned())
+            };
+            painter.text(
+                egui::pos2(row.left() + 6.0, row.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                fonts::body(12.5),
+                theme.CONTRAST,
+            );
+        }
+        let use_button = Rect::from_min_size(
+            egui::pos2(card.right() - 220.0, card.bottom() - 46.0),
+            egui::vec2(100.0, 32.0),
+        );
+        let cancel = Rect::from_min_size(
+            egui::pos2(card.right() - 110.0, card.bottom() - 46.0),
+            egui::vec2(90.0, 32.0),
+        );
+        painter.rect_filled(use_button, 8, theme.BRAND);
+        painter.text(
+            use_button.center(),
+            Align2::CENTER_CENTER,
+            "Use this folder",
+            fonts::semibold(12.5),
+            theme.ACCENT_CONTRAST,
+        );
+        painter.rect_filled(cancel, 8, theme.BUTTON_BG);
+        painter.text(
+            cancel.center(),
+            Align2::CENTER_CENTER,
+            "Cancel",
+            fonts::semibold(12.5),
+            theme.CONTRAST,
+        );
+
+        if let (Some(pointer), true) = (pointer, ui.input(|input| input.pointer.any_click())) {
+            for (index, row) in rows.iter().enumerate() {
+                if row.contains(pointer) {
+                    state.picking = Some(targets[index].clone());
+                    ui.ctx().request_repaint();
+                }
+            }
+            if use_button.contains(pointer) {
+                let home = sift_core::paths::SiftPaths::home();
+                match sift_core::paths::record_data_root(&home, &dir) {
+                    Ok(()) => {
+                        state.notice = Some(format!(
+                            "App directory set to {}. It takes effect the next time Sift Launcher starts.",
+                            dir.display()
+                        ));
+                    }
+                    Err(error) => {
+                        state.notice = Some(format!("Could not record the app directory: {error}"));
+                    }
+                }
+                state.picking = None;
+            }
+            if cancel.contains(pointer) {
+                state.picking = None;
+            }
+        }
+    }
+
     state.last_lists = std::mem::take(&mut state.open_lists);
     for (list, options, _) in state.last_lists.clone() {
         painter.rect_filled(list, 8, theme.RAISED_BG);
@@ -2210,7 +2339,17 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
     // which asks first and then deletes the launcher's own HTTP cache -- refetched on demand, so
     // nothing a reader made is lost.
     if let Some(label) = state.pressed_button.take() {
-        if label == JAVA_DETECT_LABEL {
+        if label == APP_DIRECTORY_BROWSE {
+            // The overlay is drawn earlier in this frame than the press is read, so the frame that
+            // shows it has to be asked for -- the app is otherwise idle and renders none.
+            ui.ctx().request_repaint();
+            state.picking = Some(
+                crate::data::instances_dir()
+                    .parent()
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_else(|| std::path::PathBuf::from("/")),
+            );
+        } else if label == JAVA_DETECT_LABEL {
             let found = detect_java();
             let mut filled = 0_usize;
             for (label, major) in [
@@ -3071,6 +3210,7 @@ fn draw_body(
                     other => other,
                 };
                 plate.draw(&body, theme, left + width, y + control.height() / 2.0);
+                }
                 if let (Some(tip), Some(pointer)) = (
                     match control {
                         Control::Button { label, .. } => button_tooltip(label),
@@ -3131,6 +3271,25 @@ fn draw_body(
                     place_field(ui, state, placeholder, placeholder, rect);
                 }
                 control.height() + ROW_GAP
+            }
+            Block::PathText => {
+                let path = crate::data::instances_dir()
+                    .parent()
+                    .map(|root| root.display().to_string())
+                    .unwrap_or_default();
+                let plate = Rect::from_min_size(
+                    egui::pos2(left, y),
+                    egui::vec2(right - left, FIELD_HEIGHT),
+                );
+                body.rect_filled(plate, CONTROL_RADIUS, theme.BUTTON_BG);
+                body.text(
+                    egui::pos2(plate.left() + CONTROL_PADDING, plate.center().y),
+                    Align2::LEFT_CENTER,
+                    path,
+                    fonts::body(12.5),
+                    theme.CONTRAST,
+                );
+                plate.height() + ROW_GAP
             }
             Block::StorageBar => {
                 // Measured once per open: walking the instances folder is tens of thousands of
@@ -4038,7 +4197,7 @@ mod tests {
             (Tab::Window, 3),
             (Tab::LaunchHooks, 7),
             (Tab::Syncing, 6),
-            (Tab::Resources, 11),
+            (Tab::Resources, 13),
             (Tab::Troubleshooting, 9),
         ];
 
@@ -4079,6 +4238,8 @@ mod tests {
                     }
                     // The bar draws measurements, not words: nothing to spell.
                     Block::StorageBar => {}
+                    // The path row prints where the data lives, which is not a ported string.
+                    Block::PathText => {}
                     Block::RadioList {
                         key,
                         options,
