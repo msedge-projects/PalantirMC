@@ -1554,3 +1554,29 @@ capture of each. All five rail destinations intact:
 Nothing regressed in the four rounds since the sweep (multiline fields, the number field, the
 tooltip). This is the last evidence gathered in this stretch, and it is of the artifact rather than
 of a working tree: the binary is the one the 0.1.58 release ships.
+
+### Closing status, revised — 0.1.61
+
+Since the first closing status, the `Browse` gap closed for **both** places the reference has one:
+the app directory (a writer for the preference, the path on the tab, a folder picker) and the Java
+selector (the same picker, reading the chosen runtime's `release` and filling the row its version
+names). Both verified end to end on the VM.
+
+What that leaves is not work waiting to be done -- it is work that needs something this launcher does
+not have:
+
+| Remaining | Needs |
+| --- | --- |
+| Syncing's five edit buttons and their four modals | a sync service. The modals list what *would* be synced; with nothing to sync, they are a dialog over a switch that does nothing either. |
+| Skins' 3D preview | a renderer. The page composes the atlas's front faces into a character; turning it needs per-part side and back faces under a projection, and a half-faithful turntable would look worse than the honest front view it has. |
+| Ad details' tooltip | an ad surface. Its text exists only while an ad is showing in the reference. |
+| Language flags and coverage percentages | translation data. This build ships one locale; a percentage would be invented. |
+| The profile's upload and remove buttons | an upload service. |
+
+Every one of those is named in the page that would own it, and in `HANDOFF.md` §10.
+
+**What "complete" means for this tree:** every page of the reference's window exists here and is
+reached by the same rail; every control the reference draws is drawn here, and every one that can act
+without a remote service does; the four lightness gates are met on this machine's terms, with the RSS
+split stated; iced is gone; the product is renamed throughout; and 62 tags each carry a release. What
+is not claimed is a pixel diff -- none was run, and the sweep is a page-by-page comparison.
