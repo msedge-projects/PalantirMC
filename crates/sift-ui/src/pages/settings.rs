@@ -223,6 +223,16 @@ fn ad_details() -> String {
     )
 }
 
+/// The major version a runtime folder names in its own `release` file.
+fn java_version_of(dir: &std::path::Path) -> Option<u32> {
+    let release = std::fs::read_to_string(dir.join("release")).ok()?;
+    release
+        .lines()
+        .find_map(|line| line.strip_prefix("JAVA_VERSION=\""))
+        .and_then(|value| value.split('.').next())
+        .and_then(|major| major.parse::<u32>().ok())
+}
+
 /// The Java runtimes under the data root, as (major version, binary path).
 ///
 /// Read from each runtime's own `release` file rather than by running the binary: a launcher that
@@ -389,6 +399,15 @@ fn save_at(state: &State, path: &std::path::Path) {
     }
 }
 
+/// What a chosen folder is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickFor {
+    /// The folder the launcher keeps its data in.
+    DataRoot,
+    /// A Java runtime, whose version decides which row it fills.
+    Java,
+}
+
 /// Whether the modal is up, and which tab it is showing.
 #[derive(Debug, Default)]
 pub struct State {
@@ -432,7 +451,7 @@ pub struct State {
     pub confirming: Option<&'static str>,
     pub notice: Option<String>,
     /// The folder the picker is showing, while it is open.
-    pub picking: Option<std::path::PathBuf>,
+    pub picking: Option<(std::path::PathBuf, PickFor)>,
     /// The tooltip to draw after the body: the button's rect and its words.
     pub hover_tip: Option<(Rect, &'static str)>,
     /// The storage bar's parts, measured once per open.
@@ -762,7 +781,10 @@ const DISCORD_DESCRIPTION: &str = "Show Sift Launcher as your current activity o
 const JAVA_INSTALLATIONS_HEADING: &str = "Java installations";
 /// The scan's own button. The reference puts `Detect` inside each row's selector
 /// (`JavaSelector.vue:75-87`); a row here holds one control, so it is one button for all four.
-const JAVA_DETECT_LABEL: &str = "Detect Java"; // app.settings.tabs.java-installations (:3137), the section's own `text-xl` heading (:69-71)
+const JAVA_DETECT_LABEL: &str = "Detect Java";
+/// The picker's own button, beside `Detect`: the reference puts a folder button in each row's
+/// selector (`JavaSelector.vue:75-87`); one picker serves them all here.
+const JAVA_BROWSE_LABEL: &str = "Browse for a Java folder"; // app.settings.tabs.java-installations (:3137), the section's own `text-xl` heading (:69-71)
 // The per-version labels are one catalogue string with `{version}` filled in from the
 // `[25, 21, 17, 8]` list `java-installations.vue:34` iterates.
 const JAVA_LOCATION_25: &str = "Java 25 location"; // app.settings.java-installations.location.title (:2750)
@@ -1753,6 +1775,10 @@ const JAVA_AND_MEMORY_BLOCKS: &[Block] = &[
         label: JAVA_DETECT_LABEL,
         glyph: Some(Glyph::Search),
     }),
+    Block::Standalone(Control::Button {
+        label: JAVA_BROWSE_LABEL,
+        glyph: Some(Glyph::FolderSearch),
+    }),
     Block::Heading {
         text: MEMORY_TITLE,
         description: Some(MEMORY_DESCRIPTION),
@@ -2162,14 +2188,17 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
 
     // The folder picker, on top of everything: a scrim, the folder being shown, its subfolders,
     // and the two choices. Drawn here so no row can cover it.
-    if let Some(dir) = state.picking.clone() {
+    if let Some((dir, purpose)) = state.picking.clone() {
         painter.rect_filled(screen, 0.0, egui::Color32::from_black_alpha(120));
         let card = Rect::from_center_size(screen.center(), egui::vec2(460.0, 420.0));
         painter.rect_filled(card, 12, theme.BG);
         painter.text(
             egui::pos2(card.left() + 20.0, card.top() + 22.0),
             Align2::LEFT_TOP,
-            "Choose an app directory",
+            match purpose {
+                PickFor::DataRoot => "Choose an app directory",
+                PickFor::Java => "Choose a Java runtime folder",
+            },
             fonts::semibold(15.0),
             theme.CONTRAST,
         );
@@ -2249,21 +2278,68 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
         if let (Some(pointer), true) = (pointer, ui.input(|input| input.pointer.any_click())) {
             for (index, row) in rows.iter().enumerate() {
                 if row.contains(pointer) {
-                    state.picking = Some(targets[index].clone());
+                    state.picking = Some((targets[index].clone(), purpose));
                     ui.ctx().request_repaint();
                 }
             }
             if use_button.contains(pointer) {
-                let home = sift_core::paths::SiftPaths::home();
-                match sift_core::paths::record_data_root(&home, &dir) {
-                    Ok(()) => {
-                        state.notice = Some(format!(
-                            "App directory set to {}. It takes effect the next time Sift Launcher starts.",
-                            dir.display()
-                        ));
+                match purpose {
+                    PickFor::DataRoot => {
+                        let home = sift_core::paths::SiftPaths::home();
+                        match sift_core::paths::record_data_root(&home, &dir) {
+                            Ok(()) => {
+                                state.notice = Some(format!(
+                                    "App directory set to {}. It takes effect the next time Sift Launcher starts.",
+                                    dir.display()
+                                ));
+                            }
+                            Err(error) => {
+                                state.notice =
+                                    Some(format!("Could not record the app directory: {error}"));
+                            }
+                        }
                     }
-                    Err(error) => {
-                        state.notice = Some(format!("Could not record the app directory: {error}"));
+                    PickFor::Java => {
+                        // The folder's own `release` says which row it belongs to, the same file
+                        // `Detect Java` reads.
+                        match java_version_of(&dir) {
+                            Some(major) => {
+                                let row = [JAVA_LOCATION_25, JAVA_LOCATION_21, JAVA_LOCATION_17, JAVA_LOCATION_8]
+                                    .into_iter()
+                                    .find(|label| {
+                                        let version = match *label {
+                                            JAVA_LOCATION_25 => 25,
+                                            JAVA_LOCATION_21 => 21,
+                                            JAVA_LOCATION_17 => 17,
+                                            _ => 8,
+                                        };
+                                        version == major
+                                    });
+                                match row {
+                                    Some(label) => {
+                                        let binary = dir
+                                            .join("bin")
+                                            .join(if cfg!(windows) { "java.exe" } else { "java" });
+                                        state.texts.retain(|(known, _)| *known != label);
+                                        state.texts.push((label, binary.display().to_string()));
+                                        state.dirty = true;
+                                        state.notice = Some(format!(
+                                            "Filled {label} with {}.",
+                                            dir.display()
+                                        ));
+                                    }
+                                    None => {
+                                        state.notice = Some(format!(
+                                            "Java {major} found, and no row names it."
+                                        ));
+                                    }
+                                }
+                            }
+                            None => {
+                                state.notice =
+                                    Some("That folder is not a Java runtime: no release file names a version.".to_owned());
+                            }
+                        }
                     }
                 }
                 state.picking = None;
@@ -2339,16 +2415,26 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
     // which asks first and then deletes the launcher's own HTTP cache -- refetched on demand, so
     // nothing a reader made is lost.
     if let Some(label) = state.pressed_button.take() {
-        if label == APP_DIRECTORY_BROWSE {
+        if label == JAVA_BROWSE_LABEL {
+            ui.ctx().request_repaint();
+            // Start where the launcher keeps its runtimes: the folder a reader most often wants.
+            let java_root = crate::data::instances_dir()
+                .parent()
+                .map(|root| root.join("java"))
+                .filter(|path| path.is_dir())
+                .unwrap_or_else(|| std::path::PathBuf::from("/"));
+            state.picking = Some((java_root, PickFor::Java));
+        } else if label == APP_DIRECTORY_BROWSE {
             // The overlay is drawn earlier in this frame than the press is read, so the frame that
             // shows it has to be asked for -- the app is otherwise idle and renders none.
             ui.ctx().request_repaint();
-            state.picking = Some(
+            state.picking = Some((
                 crate::data::instances_dir()
                     .parent()
                     .map(std::path::Path::to_path_buf)
                     .unwrap_or_else(|| std::path::PathBuf::from("/")),
-            );
+                PickFor::DataRoot,
+            ));
         } else if label == JAVA_DETECT_LABEL {
             let found = detect_java();
             let mut filled = 0_usize;
@@ -4192,7 +4278,7 @@ mod tests {
             (Tab::Profile, 5),
             (Tab::Social, 4),
             (Tab::Privacy, 4),
-            (Tab::JavaAndMemory, 13),
+            (Tab::JavaAndMemory, 14),
             (Tab::Window, 3),
             (Tab::LaunchHooks, 7),
             (Tab::Syncing, 6),
