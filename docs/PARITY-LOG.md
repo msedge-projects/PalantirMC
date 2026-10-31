@@ -1270,6 +1270,25 @@ search field filtering the list (it is drawn, not searched).
 had grown to 15 GB from debug builds. `rm -rf target/debug/incremental` took it back to 70% in one
 command; the release tree alone is small.
 
+### The feature flags filter — 0.1.50
+
+The search field now filters: a case-insensitive substring, with the reference's
+`No flags found matching` when nothing survives. Verified on the VM both ways -- `column` leaves one
+row, `zzz` leaves the line.
+
+Two placement faults fell out of it, both worth keeping:
+
+- **A text field drew its hint twice.** `place_field` puts a real `TextEdit` with `hint_text` on the
+  control's plate, and the plate painted the same words underneath. The plate is drawn with an empty
+  label now.
+- **A skipped row swallowed the block above it.** `gap` carries the previous block's height until the
+  next block claims it; the skip arm zeroed it, so the field's own height vanished and the first
+  surviving row was drawn on top of the field.
+
+**And a workflow trap:** `push_one.py` runs `cargo test`, which builds the test harness rather than
+the runnable binary. A capture from `target/debug/SiftUi` can therefore be one build behind the
+source -- which is exactly what made the empty-state line look broken when it was not.
+
 ### Open after this pass
 
 | # | Region | What differs |
