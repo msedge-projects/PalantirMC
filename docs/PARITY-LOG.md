@@ -1406,6 +1406,21 @@ beside a plate that claims a value. Letters are rejected as they are typed; veri
 
 Still owed on Resources: the two tooltips, and the app directory's own field and picker.
 
+### `Clear unused`'s tooltip, and why Syncing's modals are not built — 0.1.58
+
+The tooltip is real: `Delete unused downloaded content`, in the rail's pill style, painted after the
+body so no row covers it. Verified by hovering it on the VM.
+
+**The Syncing edit buttons stay owed, and this is the reason.** The reference's five edit
+`IconButton`s open four modals whose content is a list of the *synced* game settings, servers and
+packs. That list comes from the sync service; this launcher has no sync service, no synced-options
+model and no per-row editor to prefill. A button that opened a modal with nothing in it would be a
+worse answer than a button that is not there -- the note in `SYNCING_BLOCKS` says so, and the gap is
+named in `HANDOFF.md` §10 rather than hidden behind an empty dialog.
+
+The honest fix, if a sync service ever lands, is the modal surface plus that model; until then the
+row's switch is the whole of what this launcher can honestly offer.
+
 ### Open after this pass
 
 | # | Region | What differs |
