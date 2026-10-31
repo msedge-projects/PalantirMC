@@ -713,12 +713,25 @@ const LANGUAGE_WARNING: &str = "Changing the app language may cause some content
 const LANGUAGE_DESCRIPTION: &str = "Choose your preferred language for the app. Translations are contributed by volunteers <crowdin-link>on Crowdin</crowdin-link>."; // settings.language.description (ui :6338); the `<crowdin-link>` span is a link to translate.modrinth.com (`index.vue:16-20`)
 const LANGUAGE_CATEGORY: &str = "Standard languages"; // settings.language.categories.default (ui :6323)
 /// The locales the reference lists, in its order (`language-settings-selector.vue:24-31`).
-const LANGUAGE_OPTIONS: &[&str] = &[
+/// The locale names alone, for the list block's options.
+const LANGUAGE_NAMES: &[&str] = &[
     "English (United States)",
     "Deutsch",
     "Español",
     "Français",
     "Português (Brasil)",
+];
+
+/// The locales the reference lists, each with the share of its strings this build actually carries.
+///
+/// One locale ships here, so every other figure is 0 -- and it is printed, because the reference's
+/// percentage exists to stop a language row promising a translation that is not there.
+const LANGUAGE_OPTIONS: &[(&str, u8)] = &[
+    ("English (United States)", 100),
+    ("Deutsch", 0),
+    ("Español", 0),
+    ("Français", 0),
+    ("Português (Brasil)", 0),
 ];
 #[allow(dead_code)]
 const LANGUAGE_CURRENT: &str = "English (United States)"; // locale.en-US (ui :2826), the name the list checks; the en-US locale's own name is the same string in `packages/ui/src/locales/en-US/meta.json:4`
@@ -1527,7 +1540,7 @@ const LANGUAGE_BLOCKS: &[Block] = &[
     Block::Standalone(Control::Text { placeholder: LANGUAGE_SEARCH_PLACEHOLDER }),
     Block::RadioList {
         key: LANGUAGE_CATEGORY,
-        options: LANGUAGE_OPTIONS,
+        options: LANGUAGE_NAMES,
         selected: LANGUAGE_CURRENT,
     },
 ];
@@ -3467,6 +3480,11 @@ fn draw_body(
                     if lit {
                         body.circle_filled(egui::pos2(row.left() + 8.0, row.center().y), 6.0, theme.BRAND);
                     }
+                    let coverage = LANGUAGE_OPTIONS
+                        .iter()
+                        .find(|(name, _)| name == option)
+                        .map(|(_, share)| *share)
+                        .unwrap_or(0);
                     body.text(
                         egui::pos2(row.left() + 24.0, row.center().y),
                         Align2::LEFT_CENTER,
@@ -3478,6 +3496,17 @@ fn draw_body(
                             theme.CONTRAST
                         } else {
                             theme.BASE
+                        },
+                    );
+                    body.text(
+                        egui::pos2(row.right() - 4.0, row.center().y),
+                        Align2::RIGHT_CENTER,
+                        format!("{coverage}%"),
+                        fonts::body(11.5),
+                        if coverage == 100 {
+                            theme.SECONDARY
+                        } else {
+                            theme.BUTTON_BG
                         },
                     );
                     if !state.consumed
