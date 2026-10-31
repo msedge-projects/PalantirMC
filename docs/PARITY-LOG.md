@@ -1456,6 +1456,16 @@ What changes: the ship script now **parses the harness's output and refuses to c
 worth naming separately: the test output *was* in my terminal, and I read a filtered tail of it --
 so a failed run looked like a quiet one. A filter is not a verdict.
 
+### Java's `Browse`, on the same picker — 0.1.61
+
+`Choose a Java runtime folder` opens the picker at `<data>/java`; `Use this folder` reads the chosen
+folder's `release`, fills the row that names its version and reports which. Verified end to end on the
+VM: `java-runtime-delta` selected, Java 21 filled, notice `Filled Java 21 location with ...`.
+
+That closes the `Browse` gap for both places the reference has one -- the app directory and the Java
+selector. The picker is one surface with a purpose, so a third caller would be a third variant rather
+than a second implementation.
+
 ### Open after this pass
 
 | # | Region | What differs |
