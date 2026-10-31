@@ -3210,7 +3210,6 @@ fn draw_body(
                     other => other,
                 };
                 plate.draw(&body, theme, left + width, y + control.height() / 2.0);
-                }
                 if let (Some(tip), Some(pointer)) = (
                     match control {
                         Control::Button { label, .. } => button_tooltip(label),
