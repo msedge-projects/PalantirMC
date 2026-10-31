@@ -1319,6 +1319,15 @@ Still owed on Profile: the signed-out empty state that replaces the body, the le
 links (drawn as literal markup), and the upload/remove image buttons doing anything -- they press,
 and nothing listens yet.
 
+### Java `Detect` — 0.1.53
+
+One button under the four location rows scans `<data>/java` for runtimes, reads each one's `release`
+file for its version -- not a spawned JVM, which would stall the frame it was pressed in -- and fills
+the row that names it. Verified on the VM: the Java 21 row took the real path and immediately offered
+`Reset to default`; the report read `Found 1 Java runtime(s); filled 1 row(s).`
+
+`Browse` is still owed: it needs a folder picker, and this build has no dialog surface yet.
+
 ### Open after this pass
 
 | # | Region | What differs |
