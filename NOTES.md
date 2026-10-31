@@ -4665,3 +4665,58 @@ LWJGL 3.3.3 and fourteen texture atlases: the game reached its title screen, sta
 launcher out of its own bundled runtime. The only error in that log is the VM's missing audio
 device. So a press on Play is verified as far as the game's own main menu, not just as far as a
 `java` command line.
+
+## State at 0.1.57 — 2026-10-31
+
+The egui rewrite is shipped and the tree is quiet: 57 releases, the last 20 of them closing gaps that
+had been written down as owed rather than discovered late. The numbers live in `GATES.md` and
+`LIGHTNESS.md`; the page-by-page position is the sweep table at the end of `PARITY-LOG.md`; the
+handoff is section 10 of `HANDOFF.md`. This section is the part those four do not carry: what the
+last stretch cost, and the rules it produced.
+
+### The rules this stretch produced
+
+Each of these was learned by losing time to it, and each is now somewhere it will be read:
+
+- **An owed note is a claim, not evidence.** The Profile tab's note said the reference replaces the
+  body with a signed-out `EmptyState` and named two catalogue keys. Neither key exists; 0.22 uses a
+  required-account modal instead. One grep would have settled it before any code. A note that names
+  a key should be checked against the key's own file.
+- **`cargo test` is not `cargo build`.** `push_one.py` runs the test harness, which does not refresh
+  the runnable binary — so a capture can be a build behind the source, and a feature can look broken
+  when only its binary is old.
+- **Ask the code for the rectangle.** Three separate attempts at clicking a settings row missed by
+  one row, because the position was read off a screenshot instead of printed from `rail_rows`. The
+  print took one command and was right the first time.
+- **A widget carries its own frame.** A plate behind a `TextEdit` shows as a second rounded
+  rectangle; the same is true of a hint painted under a hint. Every field here draws its plate and
+  lets the `TextEdit` carry the text.
+- **`request_repaint_after` does not wake this app.** Anything that waits and then redraws has to ask
+  for its own frames while it waits.
+- **State belongs to the page that owns it.** Discover's category list was loaded once and kept, and
+  every other page drew it in its News slot until it was handed over only on Discover.
+- **Freeing disk and building are sequential.** A release build started and the cargo registry
+  deleted in the same minute dies with `No such file or directory`.
+- **A scripted removal of debug code takes adjacent braces with it.** Twice. The second time went to
+  the runner unbuilt and produced the one red tag in the history (`v0.1.53`, fixed forward in
+  `0.1.54`).
+
+### What is real now that was a plate a month ago
+
+Every control kind in the settings dialog: switches that toggle, selects that open and choose, chips,
+sliders, one-line fields, a multiline field with its counter, a radio list, a number with its unit,
+and a theme picker whose cards change the window and persist. Buttons carry a press, and three of
+them do work a reader can see: `Clear cache` asks then clears and says how much, `Copy ad details`
+copies and says `Copied`, and `Detect Java` fills the row it finds a runtime for.
+
+Discover searches, filters by category, pages and hides what is installed. Servers lists seven with
+their own MOTDs and counts. Skins draws characters from atlases. Resources measures the data root and
+draws it as a bar.
+
+### What is still not there
+
+The four named in `HANDOFF.md` §10 and nowhere hidden: Syncing's per-row edit modals, the Skins 3D
+model, the `Browse` pickers, and a short tail of small ones — the two Resources tooltips, ad-details'
+tooltip, language flags and coverage, and the profile's upload/remove doing anything.
+
+None of them is a surprise found at the end; each is written where the next session will pick it up.
