@@ -1561,11 +1561,14 @@ const FEATURE_FLAG_BLOCKS: &[Block] = &[
 /// `// owed:` both fields are an `Input` and a `Textarea` holding the account's own username
 /// and bio, with a `39`- and a `160`-character counter (`:93-106`, `:116-119`); there is no
 /// text field here, so each is drawn as a select plate carrying the field's own name where
-/// the value would be. Three states are owed with them: the `Reset` button, which appears
-/// only while a change is pending (`button.reset`, ui :287, `:75-83`); the signed-out
-/// `EmptyState` that replaces the whole body (`settings.profile.sign-in-required.title` and
-/// `.description`, ui :6395, :6392); and the lead paragraph's two links, drawn as their
-/// literal markup.
+/// the value would be. Two states are owed with them: the `Reset` button, which appears
+/// only while a change is pending (`button.reset`, ui :287, `:75-83`) -- drawn, and it works --
+/// and the lead paragraph's two links, drawn as their literal markup.
+///
+/// **Corrected in round 57:** this note used to say the reference replaces the body with a
+/// signed-out `EmptyState`. It does not. `ModrinthAccountRequiredModal.vue` is how 0.22 asks a
+/// reader to sign in, so a signed-out body would be a state the reference does not have; the
+/// modal belongs with the settings dialog's own modal work.
 const PROFILE_BLOCKS: &[Block] = &[
     Block::Heading {
         text: PROFILE_PICTURE_LABEL,
