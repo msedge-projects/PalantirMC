@@ -1396,9 +1396,14 @@ const LANGUAGE_BLOCKS: &[Block] = &[
 /// order. Each switch is the flag's own default, so only `Pride Fundraiser` starts on.
 ///
 /// Every row the reader has changed carries the reference's quiet `Reset to default`
-/// (`:63-69`). `// owed:` the list is filtered with Fuse (`:20-32`) with
-/// `No flags found matching` for an empty result (`:77-79`, a template literal) -- the search
-/// plate is drawn rather than searched.
+/// (`:63-69`), and the search field filters the list by substring -- not Fuse's scoring, which
+/// this build has no reason to add -- with `No flags found matching` for a query that matches none
+/// (`:77-79`).
+/// `No flags found matching` -- the reference's line for a query that matched nothing (`:77-79`),
+/// a template literal there and a plain one here.
+const FLAGS_NO_MATCH: &str = "No flags found matching";
+const FLAGS_NO_MATCH_HEIGHT: f32 = 32.0;
+
 const FEATURE_FLAG_BLOCKS: &[Block] = &[
     Block::Standalone(Control::Text { placeholder: FLAGS_SEARCH_PLACEHOLDER }),
     Block::Row {
@@ -2524,6 +2529,21 @@ fn draw_body(
         return y + scroll - content.top();
     }
 
+    // The feature flags filter by their own search field; every other tab ignores it. The
+    // reference uses Fuse with a `No flags found matching` state; a substring is what a reader
+    // typing three letters expects, and it cannot score a row *in* that the reader did not type.
+    let flag_query = if tab == Tab::FeatureFlags {
+        state
+            .texts
+            .iter()
+            .find(|(known, _)| *known == FLAGS_SEARCH_PLACEHOLDER)
+            .map(|(_, typed)| typed.to_lowercase())
+            .filter(|typed| !typed.trim().is_empty())
+    } else {
+        None
+    };
+    let mut flags_shown = 0_usize;
+
     // The gap owed by the block above; a rule brings its own margins.
     let mut gap = 0.0;
     for block in blocks {
@@ -2537,6 +2557,17 @@ fn draw_body(
             y += CONTENT_SECTION_PADDING;
             gap = 0.0;
             continue;
+        }
+
+        if let (Some(query), Block::Row { label, .. }) = (flag_query.as_deref(), block) {
+            if !label.to_lowercase().contains(query) {
+                // The gap belongs to the block above, not to this one: settle it before the
+                // skip, or a skipped row swallows the search field's own height.
+                y += gap;
+                gap = 0.0;
+                continue;
+            }
+            flags_shown += 1;
         }
 
         y += gap;
@@ -2756,7 +2787,14 @@ fn draw_body(
                 };
                 // Left-aligned: the control's right edge is its own width past the inset.
                 let width = control.width(&body);
-                control.draw(&body, theme, left + width, y + control.height() / 2.0);
+                // A text field's words come from the `TextEdit`'s own hint, so the plate below it
+                // is drawn without any: with both, a typed-in field shows the hint through its
+                // text.
+                let plate = match control {
+                    Control::Text { .. } => Control::Text { placeholder: "" },
+                    other => other,
+                };
+                plate.draw(&body, theme, left + width, y + control.height() / 2.0);
                 // A standalone button has no row label and no widget behind it, so its own
                 // rectangle is the target: the same left edge the drawing used and its width.
                 if let Control::Button { label, .. } = control {
@@ -2946,6 +2984,18 @@ fn draw_body(
             // Handled above.
             Block::Rule => 0.0,
         };
+    }
+
+    // The reference's own words for a query that matched nothing (`:77-79`).
+    if flag_query.is_some() && flags_shown == 0 {
+        body.text(
+            egui::pos2(left, y + ROW_GAP),
+            Align2::LEFT_TOP,
+            FLAGS_NO_MATCH,
+            fonts::body(13.0),
+            theme.SECONDARY,
+        );
+        y += FLAGS_NO_MATCH_HEIGHT;
     }
 
     // The height the caller needs: how far below the pane's top the last row fell, with the
