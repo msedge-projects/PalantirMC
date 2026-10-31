@@ -1289,6 +1289,21 @@ Two placement faults fell out of it, both worth keeping:
 the runnable binary. A capture from `target/debug/SiftUi` can therefore be one build behind the
 source -- which is exactly what made the empty-state line look broken when it was not.
 
+### The store's usage bar — 0.1.51
+
+Measured from the launcher's own folders and drawn as the reference's bar: one rounded bar split by
+folder, a total, and a legend of tinted dots with each part's size. Verified on the VM at
+**1234.7 MB in use** -- Instances 419.6, Libraries 208.4, Java 103.9, Assets 502.7.
+
+The split is this build's own and the legend says so. The reference divides a *content cache* into
+`Unique` / `Shared` / `Orphaned`; this launcher unpacks packs into instances and keeps no content
+cache, so those three figures could only be invented. Same bar, honest legend.
+
+Measured once per open: walking the instances folder is tens of thousands of files.
+
+Still owed on Resources: the cache limit as a number field with its unit, the two tooltips, and the
+app directory's own field and picker (the button is drawn).
+
 ### Open after this pass
 
 | # | Region | What differs |
