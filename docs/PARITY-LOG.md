@@ -1304,6 +1304,21 @@ Measured once per open: walking the instances folder is tens of thousands of fil
 Still owed on Resources: the cache limit as a number field with its unit, the two tooltips, and the
 app directory's own field and picker (the button is drawn).
 
+### The profile's fields — 0.1.52
+
+The username and bio are fields now. The bio is this build's first multiline control,
+`Control::TextArea`: a multiline `TextEdit`, the source's `160`-character limit, and its counter
+under the field. Verified on the VM -- typing gives `15 / 160`, the field takes the brand focus ring,
+and the row offers `Reset to default`.
+
+The textarea takes the row's whole width and the row grows to carry the counter. Its drawing arm
+paints nothing at all: a plate behind a `TextEdit` shows as a second rounded rectangle offset from
+the field's own edge, which is what the first attempt looked like.
+
+Still owed on Profile: the signed-out empty state that replaces the body, the lead paragraph's two
+links (drawn as literal markup), and the upload/remove image buttons doing anything -- they press,
+and nothing listens yet.
+
 ### Open after this pass
 
 | # | Region | What differs |
