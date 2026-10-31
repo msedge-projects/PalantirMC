@@ -1381,6 +1381,22 @@ reference in structure and content, and nothing in either has been found to diff
 **What this table is not:** a pixel diff. It is a per-page side-by-side check, which is what caught
 the Discover sidebar leaking onto Skins -- the one regression of the sweep.
 
+### A note corrected before it became a feature — 0.1.56
+
+The Profile tab carried an owed note saying the reference replaces its body with a signed-out
+`EmptyState`, citing `settings.profile.sign-in-required.title` and `.description`. **Neither key
+exists** in 0.22's `en-US` catalogue, and the source shows what happens instead:
+`ModrinthAccountRequiredModal.vue` asks the reader to sign in. 0.22 has no signed-out profile body.
+
+I had begun building one -- the account name was already threaded through `settings::draw` -- and
+stopped when the source disagreed. The signature change is reverted; the note says what the reference
+does.
+
+The lesson is the one this session keeps relearning in different clothes: **an owed note is a claim,
+not evidence.** It was written from a reading of the source months of commits ago, and one grep would
+have settled it then. A note that names a catalogue key should be checked against the catalogue
+before anyone builds from it -- the keys are right there.
+
 ### Open after this pass
 
 | # | Region | What differs |
