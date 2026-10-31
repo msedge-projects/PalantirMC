@@ -9334,3 +9334,45 @@ method, `docs/PARITY-LOG.md` the per-feature evidence, and this is the summary o
 6. **Quick-play** — a world's name shows and its Play launches nothing.
 7. **Installer** — `installer/sift.nsi` compiles under POSIX `makensis` and aborts on the
    runner's NSIS 3.13 at its animated welcome banner (E-45).
+
+---
+
+## Ledger — 2026-10-31, 0.1.55
+
+This entry supersedes the numbers above it for the current tree. The older tables are kept because
+they are the record of what was measured then, with the methods they used; the figures differ because
+the builds do, and because a warm page cache on an idle VM is not the same measurement as a cold run
+beside a compiler.
+
+| Gate | Budget | 0.1.55 |
+| --- | --- | --- |
+| Startup, exec to window | <= 400 ms | **133 ms** |
+| Idle CPU | 0 ticks | **0 ticks in 5 s** |
+| Idle RSS | <= 120 MB | **125.3 MB** total; 64.4 MB is the launcher's own (60.9 MB is the VM's software rasterizer -- see `docs/LIGHTNESS.md`) |
+| Exe | <= 28.65 MB | 14.0 MB GNU release; the shipped installer is 4.65 MB |
+| Scroll p95 | <= 20 ms | **0.13 ms** view time |
+
+**Shipped and verified by driving the window** (`docs/PARITY-LOG.md` holds the page-by-page sweep):
+
+- 55 releases, every one with 11 assets; one red tag (`v0.1.53`) kept as the record of a broken
+  commit and fixed forward.
+- 832 tests across the two workspaces (669 + 163), green on this tree.
+- The settings dialog's five control kinds are real -- switches, selects, chips, sliders, fields --
+  plus multiline fields, a radio list, a storage bar measured from disk, and a theme picker that
+  changes the window.
+- Detect Java, `Clear cache` in two presses, `Copy ad details` with `Copied`, reset-to-default,
+  the Discover pager, category filter, `Hide already installed` and `See more` all work on the VM.
+- Skins draw characters composed from 64x64 atlases.
+
+**Closed since the older ledger's owed list:** settings sliders/fields/chips (all real), quick-play
+worlds (they launch), the project page (gallery, links, tags, creators), account persistence, the
+installer (compiles and ships).
+
+**Owed now, in the order a next session should take them:**
+
+1. **Syncing's per-row edit buttons and their four modals** -- needs a modal surface inside the
+   settings dialog, which is the largest remaining piece of the reference's settings.
+2. **Skins' 3D model** -- a renderer, not a blit; the page draws a composed front view today.
+3. **`Browse` buttons** (Java, app directory) -- need a folder-picker surface.
+4. Smaller: the cache limit as a number field, ad-details' tooltip, language flags and coverage,
+   the profile's signed-out state, and upload/remove image doing anything.
