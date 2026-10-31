@@ -319,3 +319,37 @@ Discover or the library renders. It is a real saving once they are, not a fix fo
 
 The trimmed `[heap]` figure is what a reader should watch: 26.1 MB is the launcher's own, and it is
 the only part of this table a change in this tree can move.
+
+## Re-measured at 0.1.54 — 2026-10-31
+
+Taken on the release binary the tag builds, on the same VM, after the settings work of the last four
+rounds (a textarea, a storage walk, a Java scan, a multiline counter).
+
+| Gate | Budget | Measured | |
+| --- | --- | --- | --- |
+| Startup, exec to window | <= 400 ms | **133 ms** | pass |
+| Idle CPU, 5 s window | 0 | **0 ticks** | pass |
+| Scroll, view time p95 | <= 20 ms | **0.13 ms** | pass |
+| Idle RSS | <= 120 MB | **125.3 MB** total | over on this VM -- see the split |
+
+```
+VmRSS:        125300 kB
+anon RSS:       7.1 MB
+file RSS:     115.3 MB
+  50.8 MB  libLLVM.so.19.1     <- mesa's llvmpipe rasterizer
+  26.3 MB  [heap]              <- the app's own heap
+  10.5 MB  SiftUi
+  10.1 MB  libgallium          <- the same driver
+   5.1 MB  SYSV00000000        <- the X framebuffer
+```
+
+The split is unchanged from 0.1.32: **60.9 MB is the GPU-less VM's software rasterizer**, which a
+machine with any GPU never maps. Without those two rows the launcher owns **64.4 MB** -- up 0.9 MB
+from 0.1.32, which is the storage walk's cached numbers, the Java scan's paths and the profile's text.
+
+Startup is 133 ms rather than 30: that earlier figure was a warm page cache on an idle VM. 133 ms is
+a cold run beside a compiler, and it is the number to trust.
+
+**A note on how this was measured, because it went wrong first:** the release build was started and
+then `~/.cargo/registry/src` was deleted in the same minute, which killed the build with
+`No such file or directory`. Freeing disk and building are sequential steps, not parallel ones.
