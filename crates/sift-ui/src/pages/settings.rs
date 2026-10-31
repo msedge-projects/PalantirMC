@@ -683,6 +683,11 @@ const PROFILE_PICTURE_LABEL: &str = "Profile picture"; // settings.profile.profi
 const PROFILE_DESCRIPTION: &str = "Your profile information is publicly <profile-link>viewable on Sift</profile-link> and through the <docs-link>Modrinth API</docs-link>."; // settings.profile.public-information.description (ui :6383); both spans are links (AccountProfileSettings.vue:27-40)
 const PROFILE_UPLOAD_LABEL: &str = "Upload image"; // button.upload-image (ui :338), the avatar `FileButton`'s prompt (AccountProfileSettings.vue:59)
 const PROFILE_REMOVE_LABEL: &str = "Remove image"; // button.remove-image (ui :272), drawn while an avatar is set (AccountProfileSettings.vue:66-74)
+/// The username field's own placeholder (`Input`'s `placeholder` there).
+const PROFILE_USERNAME_PLACEHOLDER: &str = "Username";
+/// The bio field's placeholder and its `160`-character limit (`:116-119`).
+const PROFILE_BIO_PLACEHOLDER: &str = "Tell us about yourself...";
+const PROFILE_BIO_LIMIT: usize = 160;
 const PROFILE_USERNAME_LABEL: &str = "Username"; // label.username (ui :2789), the field's heading (AccountProfileSettings.vue:89-91)
 const PROFILE_USERNAME_DESCRIPTION: &str = "A unique case-insensitive name to identify your profile."; // settings.profile.username.description (ui :6398)
 const PROFILE_BIO_LABEL: &str = "Bio"; // settings.profile.bio.title (ui :6374)
@@ -1020,6 +1025,14 @@ enum Control {
         /// The placeholder, from the catalogue key the row's comment names.
         placeholder: &'static str,
     },
+    /// A multiline field (`Textarea.vue`): prose on a plate, with the source's character counter
+    /// under it.
+    TextArea {
+        /// The placeholder, from the catalogue key the row's comment names.
+        placeholder: &'static str,
+        /// The counter's ceiling, in characters.
+        limit: usize,
+    },
     /// A slider (`Slider.vue`): a 4-point track with the filled part and the knob on it, and
     /// the value it is at printed to the left.
     Slider {
@@ -1117,6 +1130,8 @@ const CHIP_PAD: f32 = 12.0;
 /// path.
 const FIELD_WIDTH: f32 = 200.0;
 const FIELD_HEIGHT: f32 = 28.0;
+/// A multiline field's height: three lines and the counter under them.
+const AREA_HEIGHT: f32 = 88.0;
 
 /// A slider's track and knob, from `Slider.vue`: a 4-point track in a 20-point row.
 const SLIDER_WIDTH: f32 = 160.0;
@@ -1530,15 +1545,17 @@ const PROFILE_BLOCKS: &[Block] = &[
     Block::Row {
         label: PROFILE_USERNAME_LABEL,
         description: Some(PROFILE_USERNAME_DESCRIPTION),
-        control: Control::Select {
-            value: PROFILE_USERNAME_LABEL,
-            options: &[],
+        control: Control::Text {
+            placeholder: PROFILE_USERNAME_PLACEHOLDER,
         },
     },
     Block::Row {
         label: PROFILE_BIO_LABEL,
         description: Some(PROFILE_BIO_DESCRIPTION),
-        control: Control::Select { value: PROFILE_BIO_LABEL, options: &[] },
+        control: Control::TextArea {
+            placeholder: PROFILE_BIO_PLACEHOLDER,
+            limit: PROFILE_BIO_LIMIT,
+        },
     },
 ];
 
@@ -2500,6 +2517,56 @@ fn rect_for_field(right: f32, y: f32) -> Rect {
 ///
 /// Keyed by `key`: a row passes its label, a standalone field its own placeholder, which is unique
 /// to it. The state is the store, and a change marks the page dirty so the save runs at close.
+/// Place a multiline field on a row, with its character counter under it.
+fn place_area(
+    ui: &mut Ui,
+    state: &mut State,
+    key: &'static str,
+    placeholder: &str,
+    limit: usize,
+    rect: Rect,
+) {
+    let mut text = state
+        .texts
+        .iter()
+        .find(|(known, _)| *known == key)
+        .map(|(_, typed)| typed.clone())
+        .unwrap_or_default();
+    let footer = Rect::from_min_size(
+        egui::pos2(rect.left(), rect.bottom() + 2.0),
+        egui::vec2(rect.width(), 16.0),
+    );
+    let field = Rect::from_min_size(rect.min, egui::vec2(rect.width(), rect.height() - 18.0));
+    let output = ui.put(
+        field,
+        egui::TextEdit::multiline(&mut text)
+            .hint_text(placeholder)
+            .desired_width(field.width())
+            .char_limit(limit),
+    );
+    if output.changed() {
+        match state.texts.iter_mut().find(|(known, _)| *known == key) {
+            Some((_, typed)) => *typed = text,
+            None => state.texts.push((key, text.clone())),
+        }
+        state.dirty = true;
+    }
+    // The counter the source draws under the field (`:116-119`).
+    let count = state
+        .texts
+        .iter()
+        .find(|(known, _)| *known == key)
+        .map(|(_, typed)| typed.chars().count())
+        .unwrap_or(0);
+    ui.painter().text(
+        egui::pos2(footer.right(), footer.top()),
+        Align2::RIGHT_TOP,
+        format!("{count} / {limit}"),
+        fonts::body(11.0),
+        crate::theme::DARK.SECONDARY,
+    );
+}
+
 fn place_field(
     ui: &mut Ui,
     state: &mut State,
@@ -2771,6 +2838,14 @@ fn draw_body(
                 );
                 if let Control::Text { placeholder } = control {
                     place_field(ui, state, label, placeholder, rect_for_field(right, y));
+                }
+                if let Control::TextArea { placeholder, limit } = control {
+                    // A textarea is the row's whole width, not a control's: it holds prose.
+                    let rect = Rect::from_min_size(
+                        egui::pos2(left, y),
+                        egui::vec2(right - left, AREA_HEIGHT),
+                    );
+                    place_area(ui, state, label, placeholder, limit, rect);
                 }
                 // A row that differs from its declared default offers the way back, just left of
                 // the control it belongs to.
@@ -3184,6 +3259,7 @@ impl Control {
         match self {
             Control::Switch { .. } => SWITCH_WIDTH,
             Control::Text { .. } => FIELD_WIDTH,
+            Control::TextArea { .. } => FIELD_WIDTH,
             Control::Chips { options, .. } => options
                 .iter()
                 .map(|option| {
@@ -3234,6 +3310,7 @@ impl Control {
             Control::Switch { .. } => SWITCH_HEIGHT,
             Control::Slider { .. } => SLIDER_HEIGHT,
             Control::Text { .. } => FIELD_HEIGHT,
+            Control::TextArea { .. } => AREA_HEIGHT + 18.0,
             Control::Chips { .. } => CHIP_HEIGHT,
             Control::Select { .. } | Control::Button { .. } => CONTROL_HEIGHT,
         }
@@ -3278,6 +3355,9 @@ impl Control {
                     x = pill.right() + CHIP_GAP;
                 }
             }
+            // The `TextEdit` carries its own frame, so this arm paints nothing: a plate behind it
+            // showed as a second rounded rectangle, offset from the field's own edge.
+            Control::TextArea { .. } => {}
             Control::Text { placeholder } => {
                 let rect = Rect::from_min_size(
                     pos2(right - FIELD_WIDTH, centre_y - FIELD_HEIGHT / 2.0),
@@ -3861,6 +3941,7 @@ mod tests {
             // A slider's value is a number, not words: nothing to spell, nothing to misspell.
             Control::Slider { .. } => None,
             Control::Text { placeholder } => Some(placeholder),
+            Control::TextArea { placeholder, .. } => Some(placeholder),
             // A chip group's words are its options; the row's label names the group.
             Control::Chips { options, .. } => options.first().copied(),
             Control::Select { value, .. } => Some(value),
