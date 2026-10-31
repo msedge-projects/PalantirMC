@@ -1446,3 +1446,47 @@ the reference's *filled* elements faithfully:
 
 Both are generator work, not app work, and both are visible at 32 px and above — which is
 the size the rail and cards use.
+
+## Closing status — 0.1.58, 2026-10-31
+
+Each clause of the objective, against the thing that backs it.
+
+| Clause | Backed by | State |
+| --- | --- | --- |
+| The egui rewrite covers every page | the sweep table above; every page captured on the 0.1.55+ release build | **done** |
+| 1:1 parity against 0.22.0, per page | the sweep table's right-hand column | **not literal**: four gaps, named below |
+| Rename to Sift Launcher | crates `sift-core/game/loader/net/ui`; zero `Palantir` in the app's sources; `DATA_DIR_NAME = "SiftLauncher"` | **done** |
+| The logo in assets, installer, About | committed assets, `installer/sift.ico`, the About page's mark | **done** |
+| exe <= iced baseline | 14.0 MB GNU release; 4.65 MB installer | **done** |
+| Idle CPU 0 | 0 ticks over 5 s | **done** |
+| Startup <= 400 ms | 133 ms, cold, beside a compiler | **done** |
+| Scroll p95 <= 20 ms | 0.13 ms view time | **done** |
+| Idle RSS <= 120 MB | 125.3 MB total on this VM, of which 60.9 MB is its software rasterizer; 64.4 MB is the launcher | **met in substance, over as measured here** |
+| iced deleted | zero `iced` in every manifest | **done** |
+| A release shipped | 59 tags, each with a release; asset counts grew from 8 to 11; the newest run is green | **done** |
+| CI green, one slice at a time | every push but one; `v0.1.53` is red and fixed forward in `v0.1.54` | **done, with one red tag kept as the record** |
+| Measured in NOTES, GATES, PARITY-LOG, HANDOFF | `NOTES.md` "State at 0.1.57"; `GATES.md` ledger; this file; `HANDOFF.md` §10 | **done** |
+
+### The four gaps, and why they are not closed
+
+1. **Syncing's five edit buttons and their four modals.** Their content is the list of *synced* game
+   settings, servers and packs, which comes from a sync service this launcher does not have. A button
+   opening an empty dialog would be a worse answer than a button that is not drawn.
+2. **Skins' 3D model.** The page composes a front view from a 64x64 atlas; the reference rotates a
+   rendered model. That is a renderer, not a layout change.
+3. **The `Browse` pickers** (Java, app directory). They need a folder-picker surface this build has
+   no dialog for, and adding one is a dependency decision rather than a page fix.
+4. **The small tail**: the ad-details tooltip (its text exists only while an ad is showing in the
+   reference), language flags and coverage percentages (this build has no translation data, so the
+   numbers would be invented), and the profile's upload/remove buttons doing anything (no upload
+   service).
+
+Each is a service or a renderer, not a layout. Naming them is the honest end of this stretch; the
+alternative -- drawing a dialog with nothing in it, a percentage nobody measured, or a toolbar the
+web page never had -- would make the table look complete and the product worse.
+
+### What the sweep table's "no known gap" means
+
+Two rows say it: Screenshots and About. It means what it says -- every element of those pages was
+compared against the reference and none was found to differ. It does not mean a pixel diff passed;
+none was run, and none is claimed.
