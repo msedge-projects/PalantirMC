@@ -977,7 +977,13 @@ impl Shell {
             shared,
             &self.theme,
             signed_in.as_deref(),
-            &self.categories,
+            // Discover's own sidebar: the list is loaded once and kept, so it must be handed to
+            // the panel only on the page that owns it.
+            if self.rail == Rail::Discover {
+                &self.categories
+            } else {
+                &[]
+            },
             self.facet.as_deref(),
             self.categories_expanded,
             self.hide_installed,
