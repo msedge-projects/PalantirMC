@@ -259,6 +259,11 @@ fn detect_java() -> Vec<(u32, String)> {
     found
 }
 
+/// The tooltip a button carries, if the reference gives it one.
+fn button_tooltip(label: &str) -> Option<&'static str> {
+    (label == STORE_CLEAR_LABEL).then_some(STORE_CLEAR_TOOLTIP)
+}
+
 /// What a button's press does: `Clear cache` asks once, then clears.
 ///
 /// Separated from the frame so the rule can be tested without a window -- a button that cleared a
@@ -426,6 +431,8 @@ pub struct State {
     /// The button waiting for its second press, and the line to say under it.
     pub confirming: Option<&'static str>,
     pub notice: Option<String>,
+    /// The tooltip to draw after the body: the button's rect and its words.
+    pub hover_tip: Option<(Rect, &'static str)>,
     /// The storage bar's parts, measured once per open.
     pub storage: Option<Vec<(&'static str, u64)>>,
     /// The frame-time `Copied` stops showing, in seconds since the process started.
@@ -812,6 +819,9 @@ const SYNC_HOTBARS_DESCRIPTION: &str = "Use the same saved creative hotbars acro
 const STORE_TITLE: &str = "Content storage"; // app.settings.resource-management.store.title (:2879)
 const STORE_DESCRIPTION: &str = "Save space by reusing game installs, mods and packs across your instances."; // app.settings.resource-management.store.description (:2855)
 const STORE_REPAIR_LABEL: &str = "Verify and repair"; // app.settings.resource-management.store.repair (:2864)
+/// `app.settings.resource-management.store.clear.description`: the tooltip the reference puts
+/// on `Clear unused`.
+const STORE_CLEAR_TOOLTIP: &str = "Delete unused downloaded content";
 const STORE_CLEAR_LABEL: &str = "Clear unused"; // app.settings.resource-management.store.clear (:2843)
 const STORE_CACHE_LIMIT_LABEL: &str = "Keep unused downloads"; // app.settings.resource-management.store.cache-limit.label (:2834)
 const STORE_CACHE_LIMIT_DESCRIPTION: &str = "Keep up to this much unused content for future installs. Keeping more can save download time."; // app.settings.resource-management.store.cache-limit.description (:2831)
@@ -2026,6 +2036,8 @@ fn blocks(tab: Tab) -> &'static [Block] {
 /// Returns `state.open`: the shell keeps drawing while it is `true`, and stops when a click
 /// on the close button or a press of Escape has set it false.
 pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, state: &mut State) -> bool {
+    // Rebuilt every frame: a tooltip belongs to the pointer's position now, not to the last one.
+    state.hover_tip = None;
     if !state.loaded {
         state.loaded = true;
         load_into(state);
@@ -2117,6 +2129,22 @@ pub fn draw(ui: &mut egui::Ui, screen: egui::Rect, theme: &crate::theme::Theme, 
 
     // The open list goes on top of the rows, which is why it is painted here and not in the
     // body: the body has already drawn every row it will draw this frame.
+    // A button's tooltip, after the body for the open list's reason: a tooltip drawn with its
+    // button is covered by every row below it.
+    if let Some((rect, text)) = state.hover_tip {
+        let label = painter.layout_no_wrap(text.to_owned(), fonts::body(12.0), theme.ACCENT_CONTRAST);
+        let pill = Rect::from_min_size(
+            egui::pos2(rect.left(), rect.bottom() + 6.0),
+            egui::vec2(label.size().x + 16.0, label.size().y + 10.0),
+        );
+        painter.rect_filled(pill, 6, theme.CONTRAST);
+        painter.galley(
+            egui::pos2(pill.left() + 8.0, pill.top() + 5.0),
+            label,
+            theme.ACCENT_CONTRAST,
+        );
+    }
+
     state.last_lists = std::mem::take(&mut state.open_lists);
     for (list, options, _) in state.last_lists.clone() {
         painter.rect_filled(list, 8, theme.RAISED_BG);
@@ -3043,6 +3071,21 @@ fn draw_body(
                     other => other,
                 };
                 plate.draw(&body, theme, left + width, y + control.height() / 2.0);
+                if let (Some(tip), Some(pointer)) = (
+                    match control {
+                        Control::Button { label, .. } => button_tooltip(label),
+                        _ => None,
+                    },
+                    pointer,
+                ) {
+                    let rect = Rect::from_min_size(
+                        egui::pos2(left, y),
+                        egui::vec2(width, control.height()),
+                    );
+                    if rect.contains(pointer) {
+                        state.hover_tip = Some((rect, tip));
+                    }
+                }
                 // A standalone button has no row label and no widget behind it, so its own
                 // rectangle is the target: the same left edge the drawing used and its width.
                 if let Control::Button { label, .. } = control {
