@@ -240,6 +240,38 @@ fn button_pressed(state: &mut State, label: &'static str) {
     }
 }
 
+/// The bar's height and its corner radius.
+const STORAGE_BAR_HEIGHT: f32 = 10.0;
+const STORAGE_BAR_RADIUS: u8 = 5;
+
+/// A byte count as megabytes, to one decimal.
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+}
+
+/// The data root's folders, measured. A folder that is absent is absent from the list.
+fn measure_storage() -> Vec<(&'static str, u64)> {
+    let root = crate::data::instances_dir();
+    let Some(data_root) = root.parent() else {
+        return Vec::new();
+    };
+    [
+        ("Instances", "instances"),
+        ("Libraries", "libraries"),
+        ("Java", "java"),
+        ("Cache", "cache"),
+        ("Assets", "assets"),
+        ("Other", "meta"),
+    ]
+    .into_iter()
+    .filter_map(|(label, folder)| {
+        let path = data_root.join(folder);
+        let bytes = directory_size(&path);
+        (bytes > 0).then_some((label, bytes))
+    })
+    .collect()
+}
+
 /// Delete the launcher's HTTP cache and say how much went.
 ///
 /// The cache is refetched on demand, so this costs a reader time and nothing else. A directory that
@@ -358,6 +390,8 @@ pub struct State {
     /// The button waiting for its second press, and the line to say under it.
     pub confirming: Option<&'static str>,
     pub notice: Option<String>,
+    /// The storage bar's parts, measured once per open.
+    pub storage: Option<Vec<(&'static str, u64)>>,
     /// The frame-time `Copied` stops showing, in seconds since the process started.
     pub copied_until: Option<f64>,
     /// Option rects painted this frame, and the ones painted last frame: a press is
@@ -1118,6 +1152,12 @@ enum Block {
         /// The control on the right.
         control: Control,
     },
+    /// The store's usage bar: one rounded bar split by folder, with its legend under it.
+    ///
+    /// The reference splits its content cache into `Unique` / `Shared` / `Orphaned`
+    /// (`:283-321`); this build has no content cache to split, so the split is by folder and the
+    /// legend names each one.
+    StorageBar,
     /// A radio list: one row per option, the chosen one ringed in the brand colour
     /// (`language-settings-selector.vue:221-297`). The store is the select store, keyed by the
     /// heading's own key, so the select above the list and the list itself are one setting.
@@ -1786,6 +1826,7 @@ const RESOURCES_BLOCKS: &[Block] = &[
         label: STORE_CLEAR_LABEL,
         glyph: Some(Glyph::Trash),
     }),
+    Block::StorageBar,
     Block::Row {
         label: STORE_CACHE_LIMIT_LABEL,
         description: Some(STORE_CACHE_LIMIT_DESCRIPTION),
@@ -2841,6 +2882,67 @@ fn draw_body(
                 }
                 control.height() + ROW_GAP
             }
+            Block::StorageBar => {
+                // Measured once per open: walking the instances folder is tens of thousands of
+                // files, and a number that moves while a reader watches is worse than a number
+                // that is a minute old.
+                if state.storage.is_none() {
+                    state.storage = Some(measure_storage());
+                }
+                let parts = state.storage.clone().unwrap_or_default();
+                let total: u64 = parts.iter().map(|(_, bytes)| *bytes).sum();
+                let bar = Rect::from_min_size(
+                    egui::pos2(left, y),
+                    egui::vec2(right - left, STORAGE_BAR_HEIGHT),
+                );
+                body.rect_filled(bar, STORAGE_BAR_RADIUS, theme.BUTTON_BG);
+                let mut x = bar.left();
+                for (index, (_, bytes)) in parts.iter().enumerate() {
+                    if total == 0 {
+                        break;
+                    }
+                    let width = (bar.width() * (*bytes as f32 / total as f32)).max(0.0);
+                    let segment = Rect::from_min_size(
+                        egui::pos2(x, bar.top()),
+                        egui::vec2(width, bar.height()),
+                    );
+                    let tint = match index {
+                        0 => theme.BRAND,
+                        1 => theme.BRAND.gamma_multiply(0.72),
+                        2 => theme.BRAND.gamma_multiply(0.5),
+                        3 => theme.BRAND.gamma_multiply(0.34),
+                        _ => theme.SECONDARY,
+                    };
+                    body.rect_filled(segment, STORAGE_BAR_RADIUS, tint);
+                    x += width;
+                }
+                // The legend, under the bar: the total first, then each part.
+                body.text(
+                    egui::pos2(left, bar.bottom() + 10.0),
+                    Align2::LEFT_TOP,
+                    format!("{} in use", megabytes(total)),
+                    fonts::body(12.5),
+                    theme.CONTRAST,
+                );
+                let mut legend_x = left;
+                let legend_y = bar.bottom() + 30.0;
+                for (index, (label, bytes)) in parts.iter().enumerate() {
+                    let tint = match index {
+                        0 => theme.BRAND,
+                        1 => theme.BRAND.gamma_multiply(0.72),
+                        2 => theme.BRAND.gamma_multiply(0.5),
+                        3 => theme.BRAND.gamma_multiply(0.34),
+                        _ => theme.SECONDARY,
+                    };
+                    body.circle_filled(egui::pos2(legend_x + 4.0, legend_y + 6.0), 4.0, tint);
+                    let text = format!("{label} {}", megabytes(*bytes));
+                    let galley =
+                        body.layout_no_wrap(text, fonts::body(12.0), theme.SECONDARY);
+                    body.galley(egui::pos2(legend_x + 14.0, legend_y), galley.clone(), theme.SECONDARY);
+                    legend_x += galley.size().x + 32.0;
+                }
+                bar.height() + 44.0 + ROW_GAP
+            }
             Block::RadioList {
                 key,
                 options,
@@ -3665,7 +3767,7 @@ mod tests {
             (Tab::Window, 3),
             (Tab::LaunchHooks, 7),
             (Tab::Syncing, 6),
-            (Tab::Resources, 10),
+            (Tab::Resources, 11),
             (Tab::Troubleshooting, 9),
         ];
 
@@ -3704,6 +3806,8 @@ mod tests {
                             assert_control_is_lettered(tab, control);
                         }
                     }
+                    // The bar draws measurements, not words: nothing to spell.
+                    Block::StorageBar => {}
                     Block::RadioList {
                         key,
                         options,
