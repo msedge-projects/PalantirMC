@@ -1328,6 +1328,20 @@ the row that names it. Verified on the VM: the Java 21 row took the real path an
 
 `Browse` is still owed: it needs a folder picker, and this build has no dialog surface yet.
 
+### A red release, and what it was — 0.1.54
+
+`v0.1.53`'s release run is **red**: both Windows builds failed at `Test the egui workspace` with
+`unexpected closing delimiter: }`, and the publish job was skipped, so that tag has no release.
+
+The cause was mine: a script removed the rail's debug print and took one brace with it, and the
+commit went out without a compile. This is the second time in this session that a scripted removal of
+debug code did that. The rule that would have caught it -- run `cargo build` after any scripted edit,
+before the commit -- was written down after the first time and did not become a habit; it is the
+reason the tree now has a red tag in its history.
+
+It is fixed forward (163 tests green) rather than by rewriting the tag, because the runner's answer
+is the record of what happened.
+
 ### Open after this pass
 
 | # | Region | What differs |
