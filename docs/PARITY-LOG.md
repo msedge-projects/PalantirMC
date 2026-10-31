@@ -1397,6 +1397,15 @@ not evidence.** It was written from a reading of the source months of commits ag
 have settled it then. A note that names a catalogue key should be checked against the catalogue
 before anyone builds from it -- the keys are right there.
 
+### The cache limit as a number — 0.1.57
+
+A field that takes digits, with `GiB` printed inside the plate's right edge -- the reference's `Input`
+with a trailing unit (`:402-416`). Seeded from the block's declared 5, so an empty field cannot sit
+beside a plate that claims a value. Letters are rejected as they are typed; verified on the VM with
+`12` typed and an `x` refused.
+
+Still owed on Resources: the two tooltips, and the app directory's own field and picker.
+
 ### Open after this pass
 
 | # | Region | What differs |
